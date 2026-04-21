@@ -29,7 +29,7 @@
 #include "WGException.h"
 #include "crypto.h"
 #include "sodium.h"
-#include "blake2s/blake2.h"
+#include "blake2.h"
 #include "tools/tools.h"
 
 

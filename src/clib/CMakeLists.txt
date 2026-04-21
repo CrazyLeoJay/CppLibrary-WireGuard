@@ -8,13 +8,5 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -ffunction-sections -fdata-sections") # ä¼˜å
 add_subdirectory(blake2s)
 add_subdirectory(sodium)
 
-add_library(${PROJECT_NAME} STATIC
-        $<TARGET_OBJECTS:blake2s>
-        $<TARGET_OBJECTS:sodium>
-)
-
-target_include_directories(${PROJECT_NAME} PUBLIC
-        .
-        sodium/include/
-        blake2s
-)
+add_library(${PROJECT_NAME} INTERFACE)
+target_link_libraries(${PROJECT_NAME} INTERFACE blake2s sodium)

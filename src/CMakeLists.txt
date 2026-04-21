@@ -17,17 +17,8 @@ include_directories(.)
 add_library(${PROJECT_NAME}_interface INTERFACE)
 target_link_libraries(${PROJECT_NAME}_interface INTERFACE wg_clib wg logs)
 
-add_library(${PROJECT_NAME} SHARED
-        $<TARGET_OBJECTS:logs>
-        $<TARGET_OBJECTS:wg_clib>
-        $<TARGET_OBJECTS:wg>
-)
-#target_link_libraries(wg_mobile PUBLIC wg_clib wg)
-target_include_directories(${PROJECT_NAME} PUBLIC
-        .
-        wg
-        clib
-        clib/blake2s
-        clib/sodium
-        clib/sodium/include/
+add_library(${PROJECT_NAME} SHARED main.cpp)
+target_link_libraries(${PROJECT_NAME}
+        PUBLIC wg
+        PRIVATE wg_clib logs
 )

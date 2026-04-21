@@ -26,5 +26,5 @@ add_library(${PROJECT_NAME} STATIC
         tools/pipwait.h tools/pipwait.cpp
 )
 
-target_link_libraries(${PROJECT_NAME} PUBLIC sodium wg_clib logs)
+target_link_libraries(${PROJECT_NAME} PRIVATE sodium wg_clib logs)
 target_include_directories(${PROJECT_NAME} PUBLIC .)

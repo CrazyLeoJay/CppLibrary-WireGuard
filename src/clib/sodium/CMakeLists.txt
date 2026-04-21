@@ -16,3 +16,4 @@ include_directories(
 add_library(sodium STATIC ${SODIUM_SOURCES})
 # 忽略所有警告信息
 target_compile_options(sodium PRIVATE -w)
+target_include_directories(sodium PUBLIC include)

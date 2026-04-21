@@ -23,3 +23,4 @@ add_library(${PROJECT_NAME} STATIC
         genkat-c.c
         genkat-json.c
 )
+target_include_directories(${PROJECT_NAME} PUBLIC .)
