@@ -8,7 +8,6 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # === 第二步：添加被测库 ===
 add_subdirectory(clib)
-add_subdirectory(logs)
 add_subdirectory(wg)
 
 include_directories(.)
