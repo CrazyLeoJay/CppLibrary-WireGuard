@@ -23,7 +23,7 @@
 
 #include "keypair.h"
 #include "WGException.h"
-#include "crypto/nonce2.h"
+#include "crypto/nonce.h"
 #include <chrono>
 #include <cstdint>
 #include <cstring>

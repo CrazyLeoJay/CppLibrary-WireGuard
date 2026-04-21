@@ -30,7 +30,8 @@
 #define LOG_DOMAIN 0x0001  // 自定义业务域（0x0000~0xFFFF）
 #define LOG_TAG "wireguard_c14"
 
-#include "logs/logs.h"
+// #include "logs/logs.h"
+#include "logs.h"
 
 
 /**

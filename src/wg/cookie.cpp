@@ -30,9 +30,6 @@
 #include "messages.h"
 #include "sodium/crypto_verify_16.h"
 
-#include <cstddef>
-#include <cstdint>
-
 namespace WireGuard {
     // ========== Cookie 类实现 ==========
 

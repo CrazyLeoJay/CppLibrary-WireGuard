@@ -26,7 +26,7 @@
 
 #include "WGException.h"
 #include "cookie.h"
-#include "crypto/nonce2.h"
+#include "crypto/nonce.h"
 #include "keypair.h"
 #include "entity.h"
 #include <queue>
@@ -61,8 +61,8 @@ namespace WireGuard {
 
         // ========== 握手和密钥管理 ==========
         // T noise;        // 当前握手状态机
-        crypto2::NOISESend noiseSend{}; // 发送端 noise协议
-        crypto2::NOISEReceive noiseReceive{}; // 接收端 Noise
+        crypto::NOISESend noiseSend{}; // 发送端 noise协议
+        crypto::NOISEReceive noiseReceive{}; // 接收端 Noise
 
         KeyPairs keyPairs_; // 密钥对管理器（当前、下一个、历史密钥对）
 

@@ -24,7 +24,7 @@
 
 
 #include "crypto.h"
-#include "crypto/nonce2.h"
+#include "crypto/nonce.h"
 #include "gtest/gtest.h"
 
 const WireGuard::PrivateKey client_private{

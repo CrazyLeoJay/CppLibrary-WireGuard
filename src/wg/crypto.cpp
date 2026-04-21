@@ -24,9 +24,7 @@
 #include "crypto.h"
 #include "WGException.h"
 #include "encoding.hpp"
-#include "crypto/nonce2.h"
-#include <cstddef>
-#include <cstdint>
+#include "crypto/nonce.h"
 #include <sodium.h>
 #include <stdexcept>
 
@@ -454,7 +452,7 @@ namespace WireGuard {
             }
 
             PublicKey getPublicKey(const MessageInitiation &msg, const PrivateKey &local_private_key) {
-                crypto2::NOISEReceive receive{};
+                crypto::NOISEReceive receive{};
                 receive.init(local_private_key);
                 receive.decodeCheckHandshakeInitiation(msg);
                 return receive.remote_public;

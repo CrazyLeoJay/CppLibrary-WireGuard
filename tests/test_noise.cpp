@@ -24,7 +24,7 @@
 
 
 #include "test_params.h"
-#include "crypto/nonce2.h"
+#include "crypto/nonce.h"
 #include "gtest/gtest.h"
 
 namespace WireGuard {

@@ -20,11 +20,11 @@
 //
 
 #include "cookie.h"
-#include "crypto/nonce2.h"
+#include "crypto/nonce.h"
 #include "test_params.h"
 #include "tools/tools.h"
 #include "udp_socket.h"
-#include "crypto/nonce2.h"
+#include "crypto/nonce.h"
 #include "gtest/gtest.h"
 /*
  * 记录测试
@@ -47,7 +47,7 @@ namespace WireGuard {
      * 创建握手
      */
     TEST(Noise_Handshake, clientCreateInitiationMessage) {
-        WireGuard::crypto2::NOISESend noise{};
+        WireGuard::crypto::NOISESend noise{};
         // noise.init(client_private, server_public);
         // WireGuard::CookieManager cm{};
         // auto msg = noise.createInitiation(client_public, server_public, &cm);
@@ -75,7 +75,7 @@ namespace WireGuard {
                Crypto::bin2Hex(msg.mac1, 16).c_str()
         );
 
-        crypto2::NOISEReceive noise;
+        crypto::NOISEReceive noise;
         noise.init(server_private);
         noise.decodeCheckHandshakeInitiation(msg);
 
@@ -91,7 +91,7 @@ namespace WireGuard {
     TEST(Noise_Handshake, clientAndServerInitiationMessageCheck) {
         LOG_DEBUG("=============== 发送端：加密！ =================\n");
         MessageInitiation msg;
-        crypto2::NOISESend send{};
+        crypto::NOISESend send{};
         send.init(client_private, server_public);
         send.ephemeral_private_key = ephemeral_private;
         try {
@@ -104,7 +104,7 @@ namespace WireGuard {
         }
 
         LOG_DEBUG("=============== 接收端：解密！ =================\n");
-        crypto2::NOISEReceive receive;
+        crypto::NOISEReceive receive;
         receive.init(server_private);
         try {
             receive.decodeCheckHandshakeInitiation(msg);
@@ -174,7 +174,7 @@ namespace WireGuard {
     TEST(Noise_Handshake, clientSendInitiationMessage) {
         MessageInitiation msg;
         try {
-            crypto2::NOISESend send{};
+            crypto::NOISESend send{};
             send.init(client_private, server_public);
             send.ephemeral_private_key = ephemeral_private;
             // auto index = crypto_static::createIndex();
