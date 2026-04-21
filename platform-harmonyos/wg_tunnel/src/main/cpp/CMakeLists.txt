@@ -13,16 +13,10 @@ include(FetchContent)
 include_directories(${NATIVERENDER_ROOT_PATH}
     ${NATIVERENDER_ROOT_PATH}/include)
 
-# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/wg)
-# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/libsodium)
-# add_subdirectory(${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src/tools)
 FetchContent_Declare(wg_mobile SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src)
 
 # 自动下载、配置、构建 googletest
 FetchContent_MakeAvailable(wg_mobile)
-#include_directories(
-#    ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src
-#)
 
 add_library(${PROJECT_NAME} SHARED
     napi_init.cpp
