@@ -49,20 +49,29 @@ namespace WireGuard {
 
 // 编译期关闭 DEBUG 日志（Release 模式）
 
+#ifndef LOG_PRINT
 #define LOG_PRINT(level, fmt,...) ::WireGuard::Logs::log_println(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#endif
 
+#ifndef LOG_DEBUG
 #ifdef NDEBUG
 #define LOG_DEBUG(...)
 #else
 #define LOG_DEBUG(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
 #endif
+#endif
 
+#ifndef LOG_INFO
 #define LOG_INFO(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::INFO, fmt, ##__VA_ARGS__)
+#endif
 
-
+#ifndef LOG_WARN
 #define LOG_WARN(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::WARN, fmt, ##__VA_ARGS__)
+#endif
 
+#ifndef LOG_ERROR
 #define LOG_ERROR(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::ERROR, fmt, ##__VA_ARGS__)
+#endif
 
 // ((void)OH_LOG_Print((type), LOG_DEBUG, LOG_DOMAIN, LOG_TAG, __VA_ARGS__))
 
