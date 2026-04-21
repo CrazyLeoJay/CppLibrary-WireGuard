@@ -24,25 +24,11 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(googletest)
 
 # === 第二步：添加被测库 ===
-add_subdirectory(src/clib)
-add_subdirectory(src/logs)
-add_subdirectory(src/wg)
-
+add_subdirectory(src)
 include_directories(src)
 
 add_executable(${PROJECT_NAME} src/main.cpp)
-target_link_libraries(${PROJECT_NAME} PUBLIC wg_clib logs wg)
-
-# 移动手机端引入，需要手机端实现各自系统的logs
-add_library(wg_mobile_interface INTERFACE)
-target_link_libraries(wg_mobile_interface INTERFACE wg_clib wg)
-
-add_library(wg_mobile SHARED
-        $<TARGET_OBJECTS:wg_clib>
-        $<TARGET_OBJECTS:wg>
-)
-#target_link_libraries(wg_mobile PUBLIC wg_clib wg)
-#target_include_directories()
+target_link_libraries(${PROJECT_NAME} PUBLIC wg_mobile logs)
 
 # === 第三步：添加测试子目录 ===
 add_subdirectory(tests)
