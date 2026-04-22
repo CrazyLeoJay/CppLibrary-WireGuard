@@ -78,13 +78,13 @@ namespace WireGuard {
 
             std::size_t i = 0;
             for (i = 0; i < WG_KEY_LEN / 3; ++i) {
-                std::array < char, 4 > encoded;
+                std::array < char, 4 > encoded{};
                 encode_base64(encoded, {key[i * 3 + 0], key[i * 3 + 1], key[i * 3 + 2]});
                 result.append(encoded.begin(), encoded.end());
             }
 
             // 处理剩余的字节（填充）
-            std::array < char, 4 > encoded;
+            std::array < char, 4 > encoded{};
             encode_base64(encoded, {key[i * 3 + 0], key[i * 3 + 1], 0});
             result.push_back(encoded[0]);
             result.push_back(encoded[1]);
@@ -107,7 +107,7 @@ namespace WireGuard {
             unsigned int i = 0;
 
             for (i = 0; i < WG_KEY_LEN / 3; ++i) {
-                std::array < char, 4 > src;
+                std::array < char, 4 > src{};
                 for (int j = 0; j < 4; ++j) {
                     src[j] = base64[i * 4 + j];
                 }
