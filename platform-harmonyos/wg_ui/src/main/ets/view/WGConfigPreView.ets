@@ -14,11 +14,12 @@
  * limitations under the License.
  *
  */
-import ConnectState from '../model/entity/ConnectState';
-import { DeviceConfig, PeerConfig } from '../model/entity/WGClientConfig';
-import { WireGuard } from '../model/WGHelper';
-import { LLog } from '../tools/LLog';
-import WGConfigPreViewModel, { WGConfigPreViewParams } from '../view_model/WGConfigPreViewModel';
+import ConnectState from 'wg_tunnel/src/main/ets/model/entity/ConnectState';
+import { DeviceConfig, PeerConfig } from 'wg_tunnel/src/main/ets/model/entity/WGClientConfig';
+import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
+import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
+import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
+import WGConfigPreViewModel from '../view_model/WGConfigPreViewModel';
 
 const TAG = "配置预览"
 

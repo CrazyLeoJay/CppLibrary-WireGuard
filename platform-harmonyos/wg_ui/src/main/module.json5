@@ -1,0 +1,11 @@
+{
+  "module": {
+    "name": "wg_ui",
+    "type": "har",
+    "routerMap": '$profile:router_map',
+    "deviceTypes": [
+      "default",
+      "tablet"
+    ]
+  }
+}

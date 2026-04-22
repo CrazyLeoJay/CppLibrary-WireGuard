@@ -16,8 +16,9 @@
  */
 import WGMainViewModel, { MainItemData } from '../view_model/WGMainViewModel';
 import { ComposeTitleBar, SymbolGlyphModifier } from '@kit.ArkUI';
-import { WireGuard } from '../model/WGHelper';
-import { LLog } from '../tools/LLog';
+import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
+import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
+import { WireGuardNav } from '../model/WireGuardNav';
 
 const TAG = "WG主页";
 
@@ -65,7 +66,7 @@ export struct WGMainViewNavDest {
         value: "设置",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.dot_grid_1x2')),
         action: () => {
-          WireGuard.navDescToWGSettingPreView(this.nav)
+          WireGuardNav.navDescToWGSettingPreView(this.nav)
         }
       }
     ])
@@ -99,7 +100,7 @@ export struct WGMainView {
     {
       value: "手动添加",
       action: () => {
-        WireGuard.navDescToNewWGConfigView(this.vm.nav, () => {
+        WireGuardNav.navDescToNewWGConfigView(this.vm.nav, () => {
           this.vm.loadConfigs();
         });
       }
@@ -119,7 +120,7 @@ export struct WGMainView {
             ListItem() {
               MainItemView({ data: it.item, index: it.index })
                 .onClick(() => {
-                  WireGuard.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
+                  WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
                 })
             }
             .swipeAction({

@@ -14,14 +14,14 @@
  * limitations under the License.
  *
  */
-import { WireGuard } from '../model/WGHelper';
-import { LLog } from '../tools/LLog';
+import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
+import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { pasteboard } from '@kit.BasicServicesKit';
-import PeerEditConfig from '../model/entity/PeerEditConfig';
-import ClientEditConfig from '../model/entity/ClientEditConfig';
-import { IPAddress, PeerConfig, WGDeviceConfig } from '../model/entity/WGClientConfig';
-import Tools from '../tools/tools';
-import WGAppException from '../error/WGAppException';
+import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
+import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
+import { IPAddress, PeerConfig, WGDeviceConfig } from 'wg_tunnel/src/main/ets/model/entity/WGClientConfig';
+import Tools from 'wg_tunnel/src/main/ets/tools/tools';
+import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 

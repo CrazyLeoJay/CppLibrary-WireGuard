@@ -55,6 +55,10 @@
     {
       "name": "wg_tunnel",
       "srcPath": "./wg_tunnel",
+    },
+    {
+      "name": "wg_ui",
+      "srcPath": "./wg_ui",
     }
   ]
 }

@@ -15,10 +15,4 @@
  */
 export { WireGuard } from './src/main/ets/model/WGHelper';
 
-export { WGMainView, WGMainViewNavDest, NavWGMainPage } from './src/main/ets/view/WGMainView';
-
-export { default as WGMainViewModel } from './src/main/ets/view_model/WGMainViewModel';
-
-export { WGNewConfigView, WGNewConfigViewNavDest, WGNewConfigViewBuilder } from './src/main/ets/view/WGNewConfigView';
-
 export { LLog } from './src/main/ets/tools/LLog';

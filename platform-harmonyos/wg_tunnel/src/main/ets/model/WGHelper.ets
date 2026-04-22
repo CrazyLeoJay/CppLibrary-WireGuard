@@ -18,7 +18,6 @@ import native, { KeyPair } from 'libwg_tunnel.so';
 import { DatabaseHelper } from './db/wgdb';
 import { Context } from '@ohos.abilityAccessCtrl';
 import WGDao from './db/WGDao';
-import { WGConfigPreViewParams } from '../view_model/WGConfigPreViewModel';
 import { WGDeviceConfig } from './entity/WGClientConfig';
 import { vpnExtension } from '@kit.NetworkKit';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
@@ -164,61 +163,6 @@ export namespace WireGuard {
   /*
    * 其他功能
    */
-
-  /**
-   * 跳转到 Wireguard 主页
-   */
-  export function navDescToWGMainPage(nav: NavPathStack) {
-    nav.pushPath({
-      name: "WGMainViewNavDest",
-    })
-  }
-
-  /**
-   * 跳转到添加配置页面
-   * @param nav
-   * @param onPop
-   */
-  export function navDescToNewWGConfigView(nav: NavPathStack, onPop: () => void) {
-    nav.pushPath({
-      name: "WGNewConfigView",
-      onPop: () => {
-        onPop();
-      }
-    })
-  }
-
-  /**
-   * 添加到预览界面
-   * @param nav
-   * @param params
-   * @param onPop
-   */
-  export function navDescToWGConfigPreView(nav: NavPathStack, params: WGConfigPreViewParams, onPop?: () => void) {
-    nav.pushPath({
-      name: "WGConfigPreView",
-      param: params,
-      onPop: () => {
-        onPop?.();
-      }
-    })
-  }
-
-  /**
-   * 关于我的界面
-   *
-   * @param nav
-   * @param params
-   * @param onPop
-   */
-  export function navDescToWGSettingPreView(nav: NavPathStack, onPop?: () => void) {
-    nav.pushPath({
-      name: "WGSettingView",
-      onPop: () => {
-        onPop?.();
-      }
-    })
-  }
 
 
   /**

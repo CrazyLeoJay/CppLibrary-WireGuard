@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -13,23 +13,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { WGMainViewNavDest } from 'wg_ui';
 
-@Entry
-@Component
-struct Index {
-  @State message: string = 'Hello World';
-  nav: NavPathStack = new NavPathStack();
+/**
+ *
+ *
+ * Created on 2026/4/22.
+ * @author leojay`fu
+ */
 
-  build() {
-    Navigation(this.nav) {
-      WGMainViewNavDest({ nav: this.nav })
-        .width('100%')
-        .height('100%')
-    }
-    .hideTitleBar(true)
-    // .hideNavBar(true)
-
-  }
+export default interface WGConfigPreViewParams {
+  id: number;
 }
-

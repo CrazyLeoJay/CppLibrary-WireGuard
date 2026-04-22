@@ -6,7 +6,8 @@
   "author": "",
   "license": "",
   "dependencies": {
-    "wg_tunnel": "@module:wg_tunnel"
+    "wg_ui": "@module:wg_ui",
+    "wg_tunnel": "@module:wg_tunnel",
   }
 }
 

@@ -14,9 +14,9 @@
  * limitations under the License.
  *
  */
-import WgConfigTable from '../model/db/table/WgConfigTable';
-import { WireGuard } from '../model/WGHelper';
-import { LLog } from '../tools/LLog';
+import WgConfigTable from 'wg_tunnel/src/main/ets/model/db/table/WgConfigTable';
+import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
+import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';

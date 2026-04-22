@@ -17,7 +17,7 @@
 import WGNewConfigViewModel from '../view_model/WGNewConfigViewModel';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
-import PeerEditConfig from '../model/entity/PeerEditConfig';
+import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 
 @Builder
 export function WGNewConfigViewBuilder() {

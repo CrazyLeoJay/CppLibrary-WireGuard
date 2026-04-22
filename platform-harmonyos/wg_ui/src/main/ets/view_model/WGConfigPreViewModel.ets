@@ -14,18 +14,15 @@
  * limitations under the License.
  *
  */
-import { DeviceConfig, PeerConfig, WGDeviceConfig } from '../model/entity/WGClientConfig';
-import { VpnConnHelper, WireGuard } from '../model/WGHelper';
-import Tools from '../tools/tools';
+import { DeviceConfig, PeerConfig, WGDeviceConfig } from 'wg_tunnel/src/main/ets/model/entity/WGClientConfig';
+import { VpnConnHelper, WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
+import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { LLog } from '../tools/LLog';
+import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
+import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
-
-export interface WGConfigPreViewParams {
-  id: number;
-}
 
 @ObservedV2
 export default class WGConfigPreViewModel {
