@@ -14,7 +14,6 @@
  * limitations under the License.
  */
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
-import { ComposeTitleBar } from '@kit.ArkUI';
 
 /**
  *
@@ -31,7 +30,7 @@ function WGSettingViewNavDestPage() {
 @Preview
 @ComponentV2
 struct WGSettingViewNavDest {
-  @Param nav:NavPathStack = new NavPathStack();
+  @Param nav: NavPathStack = new NavPathStack();
   @Local vm: WGSettingViewModel = new WGSettingViewModel(this.nav);
 
   build() {
@@ -45,14 +44,106 @@ struct WGSettingViewNavDest {
     })
     .title("设置")
   }
-
 }
 
 @ComponentV2
 struct WGSettingView {
   @Param @Require vm: WGSettingViewModel;
 
-  build() {
+  aboutToAppear(): void {
+    this.vm.loadData(this.getUIContext())
+  }
 
+  @Styles
+  itemRowStyle(){
+    .width('100%')
+    .padding({
+      top: '8vp',
+      bottom: '8vp',
+      left: '16vp',
+      right: '16vp'
+    })
+  }
+
+  build() {
+    List({ space: '16vp' }) {
+      ListItem() {
+        Row({ space: '16vp' }) {
+          Image(this.vm.icon)
+            .aspectRatio(1)
+            .width('55vp')
+          Column({ space: '8vp' }) {
+            Text(`WireGuard for HarmonyOs ${this.vm.appVersion}`)
+              .fontSize('18fp')
+              .width('100%')
+            Text('Author: GitHub/CrazyLeojay ')
+              .fontSize('12fp')
+          }
+          .alignItems(HorizontalAlign.Start)
+        }
+        .alignItems(VerticalAlign.Top)
+        .onClick(() => {
+          this.vm.clickToMyGitHubProjectWebSite(this.getUIContext());
+        })
+        .width('100%')
+        .padding({
+          top: '16vp',
+          left: '16vp',
+          right: '16vp'
+        })
+      }
+
+      ListItem() {
+        Row() {
+          Text('WireGuard 官网')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .itemRowStyle()
+        .onClick(() => {
+          this.vm.clickToWireGuardWebSite(this.getUIContext());
+        })
+      }
+      ListItem() {
+        Row() {
+          Text('WireGuard 白皮书')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .itemRowStyle()
+        .onClick(() => {
+          this.vm.clickToPapersWebSite(this.getUIContext());
+        })
+      }
+
+      ListItem() {
+        Row() {
+          Text('关于作者')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .itemRowStyle()
+        .onClick(() => {
+          this.vm.clickToMyGitHubWebSite(this.getUIContext());
+        })
+      }
+
+      ListItem() {
+        Column() {
+          Text(`联系邮箱：${this.vm.email}`)
+          Text(`可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
+        }
+        .alignItems(HorizontalAlign.Start)
+        .itemRowStyle()
+        .onClick(() => {
+          this.vm.copyEmail(this.getUIContext());
+        })
+      }
+    }
+    .width('100%')
+    .height('100%')
+    .divider({
+      strokeWidth: '2vp'
+    })
   }
 }
