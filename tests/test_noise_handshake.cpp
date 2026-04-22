@@ -22,7 +22,7 @@
 #include "cookie.h"
 #include "crypto/nonce.h"
 #include "test_params.h"
-#include "tools/tools.h"
+#include "../src/wg/tools.h"
 #include "udp_socket.h"
 #include "crypto/nonce.h"
 #include "gtest/gtest.h"

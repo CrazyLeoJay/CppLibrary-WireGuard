@@ -22,8 +22,12 @@ add_library(${PROJECT_NAME} STATIC
         encoding.hpp encoding.cpp
         crypto/nonce.cpp
         crypto/nonce.h
-        tools/tools.h tools/tools.cpp
-        tools/pipwait.h tools/pipwait.cpp
+        tools.h tools.cpp
+        pipwait.h pipwait.cpp
+        tools/wg_dns.h
+        tools/wg_dns.cpp
+        tools/conf_file.h
+        tools/conf_file.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE sodium wg_clib logs)

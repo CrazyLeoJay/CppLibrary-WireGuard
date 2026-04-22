@@ -28,7 +28,7 @@
 
 #include "allowedips.h"
 #include "WGException.h"
-#include "tools/tools.h"
+#include "tools.h"
 #include <cstdint>
 #include <cstring>
 #include <memory>

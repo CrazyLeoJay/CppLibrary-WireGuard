@@ -30,7 +30,7 @@
 #include "crypto.h"
 #include "sodium.h"
 #include "blake2.h"
-#include "tools/tools.h"
+#include "../tools.h"
 
 
 namespace WireGuard {

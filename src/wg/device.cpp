@@ -23,8 +23,8 @@
 
 #include "device.h"
 #include "WGException.h"
-#include "tools/pipwait.h"
-#include "tools/tools.h"
+#include "pipwait.h"
+#include "tools.h"
 #include <cerrno>
 #include <cstddef>
 #include <unistd.h>

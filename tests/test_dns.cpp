@@ -1,5 +1,5 @@
 /*
-* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+ * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,14 +12,22 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 
-//
-// Created on 2026/4/7.
-// @author leojay`fu
-//
-// Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
-// please include "napi/native_api.h".
+/**
+ * Created by Leojay on 2026/4/22.
+ *
+ * @author leojay`fu
+ * @email crazyleojay@163.com
+ * @url https://github.com/CrazyLeoJay
+ */
 
-#include "pipwait.h"
+
+#include "gtest/gtest.h"
+#include "tools/wg_dns.h"
+TEST(DNS, testDomainToIp) {
+    auto result = WireGuardTools::DNS::readDomainToIp("www.baidu.com");
+    LOG_INFO("IP：%s", result.toIpStr().c_str());
+    result = WireGuardTools::DNS::readDomainToIp("www.google.com");
+    LOG_INFO("IP：%s", result.toIpStr().c_str());
+}

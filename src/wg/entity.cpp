@@ -23,7 +23,7 @@
 
 #include "entity.h"
 #include "crypto.h"
-#include "tools/tools.h"
+#include "tools.h"
 #include <arpa/inet.h>
 
 namespace WireGuard {

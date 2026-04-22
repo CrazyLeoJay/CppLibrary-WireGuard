@@ -11,6 +11,7 @@ add_executable(test_main test_main.cpp
         test_tools.cpp
         test_noise.cpp
         test_params.h
+        test_dns.cpp
 )
 
 # 链接被测库 + GTest 主函数
