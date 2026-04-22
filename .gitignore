@@ -1,4 +1,5 @@
 .lingma
-/.idea
+/.idea/*
+!/.idea/fileTemplates
 temp
 cmake-build-debug
