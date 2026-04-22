@@ -47,7 +47,7 @@ namespace WireGuard {
      * 创建握手
      */
     TEST(Noise_Handshake, clientCreateInitiationMessage) {
-        WireGuard::crypto::NOISESend noise{};
+        WireGuard::Noise::NOISESend noise{};
         // noise.init(client_private, server_public);
         // WireGuard::CookieManager cm{};
         // auto msg = noise.createInitiation(client_public, server_public, &cm);
@@ -68,19 +68,19 @@ namespace WireGuard {
         // std::memcpy(&msg, bytes.data(), bytes.size());
         auto msg = *reinterpret_cast<const MessageInitiation *>(bytes.data());
         printf("sender:%s\nephemeral:%s\nencrypted:%s\nTimestamp:%s\nmac1:%s\n",
-               Crypto::bin2Hex(msg.senderIndex).c_str(),
-               Crypto::bin32Array2Base64(reinterpret_cast<const std::array<uint8_t, 32> &>(msg.ephemeral)).c_str(),
-               Crypto::bin2Hex(msg.encryptedStatic, 48).c_str(),
-               Crypto::bin2Hex(msg.encryptedTimestamp, 12 + 16).c_str(),
-               Crypto::bin2Hex(msg.mac1, 16).c_str()
+               crypto::bin2Hex(msg.senderIndex).c_str(),
+               crypto::bin32Array2Base64(reinterpret_cast<const std::array<uint8_t, 32> &>(msg.ephemeral)).c_str(),
+               crypto::bin2Hex(msg.encryptedStatic, 48).c_str(),
+               crypto::bin2Hex(msg.encryptedTimestamp, 12 + 16).c_str(),
+               crypto::bin2Hex(msg.mac1, 16).c_str()
         );
 
-        crypto::NOISEReceive noise;
+        Noise::NOISEReceive noise;
         noise.init(server_private);
         noise.decodeCheckHandshakeInitiation(msg);
 
         auto pub = noise.remote_public;
-        auto str = Crypto::bin32Array2Base64(pub);
+        auto str = crypto::bin32Array2Base64(pub);
         printf("remote public_key :%s", str.c_str());
         EXPECT_EQ(pub, client_public);
     }
@@ -91,11 +91,11 @@ namespace WireGuard {
     TEST(Noise_Handshake, clientAndServerInitiationMessageCheck) {
         LOG_DEBUG("=============== 发送端：加密！ =================\n");
         MessageInitiation msg;
-        crypto::NOISESend send{};
+        Noise::NOISESend send{};
         send.init(client_private, server_public);
         send.ephemeral_private_key = ephemeral_private;
         try {
-            // auto index = crypto_static::createIndex();
+            // auto index = crypto::createIndex();
             auto index = 0;
             msg = send.encodeHandshakeInitiation(index);
         } catch (const std::exception &e) {
@@ -104,7 +104,7 @@ namespace WireGuard {
         }
 
         LOG_DEBUG("=============== 接收端：解密！ =================\n");
-        crypto::NOISEReceive receive;
+        Noise::NOISEReceive receive;
         receive.init(server_private);
         try {
             receive.decodeCheckHandshakeInitiation(msg);
@@ -113,13 +113,13 @@ namespace WireGuard {
             throw e;
         }
         auto pub = receive.remote_public;
-        auto str = Crypto::bin32Array2Base64(pub);
+        auto str = crypto::bin32Array2Base64(pub);
         printf("client public_key :%s\n", str.c_str());
         EXPECT_EQ(pub, client_public);
 
 
         LOG_DEBUG("=============== 接收端：响应结果 =================\n");
-        auto receiveIndex = crypto_static::createIndex();
+        auto receiveIndex = crypto::createIndex();
         MessageResponse respMsg;
         try {
             respMsg = receive.createHandshakeResponse(receiveIndex);
@@ -143,26 +143,26 @@ namespace WireGuard {
         LOG_DEBUG("=============== 发送端：发送 NULL 消息验证 =================\n");
         auto nullSendStr = sendKp->encrypt(nullptr, 0, *nonce);
         LOG_DEBUG("加密数据(len:%d): %s", nullSendStr.size(),
-                  Crypto::bin2B64(nullSendStr.data(), nullSendStr.size()).c_str());
+                  crypto::bin2B64(nullSendStr.data(), nullSendStr.size()).c_str());
         auto nullDecryptMsg = receiveKp->decrypt(nullSendStr.data(), nullSendStr.size(), *nonce);
         LOG_DEBUG("解密数据(len:%d): %s", nullDecryptMsg.size(),
-                  Crypto::bin2B64(nullDecryptMsg.data(), nullDecryptMsg.size()).c_str());
+                  crypto::bin2B64(nullDecryptMsg.data(), nullDecryptMsg.size()).c_str());
         EXPECT_EQ(nullDecryptMsg.size(), 0);
 
         LOG_DEBUG("=============== 发送端：发送消息验证 =================\n");
         nonce = sendKp->allocateNonce();
         auto sendMessage = "test debug message sssssss";
         LOG_DEBUG("sendMessage(len:%d) hex: %s", std::strlen(sendMessage),
-                  Crypto::bin2B64(reinterpret_cast<const uint8_t *>(sendMessage), std::strlen(sendMessage)).c_str());
+                  crypto::bin2B64(reinterpret_cast<const uint8_t *>(sendMessage), std::strlen(sendMessage)).c_str());
 
         LOG_DEBUG("加密");
         auto encryptMsg = sendKp->encrypt(reinterpret_cast<const uint8_t *>(sendMessage), std::strlen(sendMessage),
                                           *nonce);
-        LOG_DEBUG("加密数据(len:%d): %s", encryptMsg.size(), Crypto::bin2B64(encryptMsg.data(), encryptMsg.size()).c_str());
+        LOG_DEBUG("加密数据(len:%d): %s", encryptMsg.size(), crypto::bin2B64(encryptMsg.data(), encryptMsg.size()).c_str());
 
         LOG_DEBUG("解密");
         auto decryptMsg = receiveKp->decrypt(encryptMsg.data(), encryptMsg.size(), *nonce);
-        LOG_DEBUG("解密数据(len:%d): %s", decryptMsg.size(), Crypto::bin2B64(decryptMsg.data(), decryptMsg.size()).c_str());
+        LOG_DEBUG("解密数据(len:%d): %s", decryptMsg.size(), crypto::bin2B64(decryptMsg.data(), decryptMsg.size()).c_str());
         LOG_DEBUG("对比");
         auto decryptMessage = std::string(reinterpret_cast<const char *>(decryptMsg.data()), decryptMsg.size());
         EXPECT_EQ(sendMessage, decryptMessage);
@@ -174,10 +174,10 @@ namespace WireGuard {
     TEST(Noise_Handshake, clientSendInitiationMessage) {
         MessageInitiation msg;
         try {
-            crypto::NOISESend send{};
+            Noise::NOISESend send{};
             send.init(client_private, server_public);
             send.ephemeral_private_key = ephemeral_private;
-            // auto index = crypto_static::createIndex();
+            // auto index = crypto::createIndex();
             auto index = 0;
             msg = send.encodeHandshakeInitiation(index);
         } catch (const std::exception &e) {

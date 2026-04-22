@@ -18,16 +18,16 @@
 // Created by Leojay on 2026/4/4.
 //
 
-#include "crypto.h"
+#include "crypto/crypto.h"
 #include "gtest/gtest.h"
 
 TEST(KeyPairTest, genPairKey) {
     WireGuard::PrivateKey privateKey;
     WireGuard::PublicKey public_key;
-    WireGuard::Crypto::generatePrivateKey(privateKey);
-    WireGuard::Crypto::generatePublicKey(public_key, privateKey);
-    auto outPrivateKey = WireGuard::Crypto::bin32Array2Base64(privateKey);
-    auto outPublicKey = WireGuard::Crypto::bin32Array2Base64(public_key);
+    WireGuard::crypto::generatePrivateKey(privateKey);
+    WireGuard::crypto::generatePublicKey(public_key, privateKey);
+    auto outPrivateKey = WireGuard::crypto::bin32Array2Base64(privateKey);
+    auto outPublicKey = WireGuard::crypto::bin32Array2Base64(public_key);
     EXPECT_EQ(outPrivateKey.size(), 44);
     EXPECT_EQ(outPublicKey.size(), 44);
     printf("genKeyPair\nPrivateKey:%s\nPublicKey :%s", outPrivateKey.data(), outPublicKey.data());

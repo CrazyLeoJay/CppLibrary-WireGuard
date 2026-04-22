@@ -118,8 +118,8 @@ namespace WireGuard {
 
         // ChaCha20-Poly1305 加密
         // AAD=nullptr（不需要额外的认证数据）
-        //        return Crypto::encrypt(ciphertext, padded.data(), paddedLen, nullptr, 0, nonce, sending.key);
-        crypto_static::encodeAEAD(ciphertext, sending.key, nonce, padded.data(), paddedLen, nullptr);
+        //        return crypto::encrypt(ciphertext, padded.data(), paddedLen, nullptr, 0, nonce, sending.key);
+        crypto::encodeAEAD(ciphertext, sending.key, nonce, padded.data(), paddedLen, nullptr);
         return true;
     }
 
@@ -172,8 +172,8 @@ namespace WireGuard {
 
         // ChaCha20-Poly1305 解密
         // AAD=nullptr（不需要额外的认证数据）
-        // return Crypto::decrypt(plaintext, ciphertext, cipherLen, nullptr, 0, nonce, receiving.key);
-        crypto_static::decodeAEAD(plaintext, receiving.key, nonce, ciphertext, cipherLen, nullptr);
+        // return crypto::decrypt(plaintext, ciphertext, cipherLen, nullptr, 0, nonce, receiving.key);
+        crypto::decodeAEAD(plaintext, receiving.key, nonce, ciphertext, cipherLen, nullptr);
         // 加密时填充了0 解密时进行移除
 
         auto plainTextLen = plaintext.size();

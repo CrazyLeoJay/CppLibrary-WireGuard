@@ -21,7 +21,7 @@
 #include <cstdint>
 #include <string>
 #include "linux/wireguard.h"
-#include "version.h"
+#include "../version.h"
 
 namespace WireGuard {
     namespace Base64 {

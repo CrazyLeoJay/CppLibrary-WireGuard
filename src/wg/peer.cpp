@@ -173,13 +173,13 @@ namespace WireGuard {
         })) {
             throw WGException(
                 "无效的本地私钥：不能为全零: key=%s",
-                Crypto::bin32Array2Base64(clientConfig.private_key).c_str()
+                crypto::bin32Array2Base64(clientConfig.private_key).c_str()
             );
         }
         if (std::all_of(config.public_key.begin(), config.public_key.end(), [](uint8_t it) { return it == 0; })) {
             throw WGException(
                 "无效的Peer公钥：不能为全零: key=%s",
-                Crypto::bin32Array2Base64(config.public_key).c_str()
+                crypto::bin32Array2Base64(config.public_key).c_str()
             );
         }
 

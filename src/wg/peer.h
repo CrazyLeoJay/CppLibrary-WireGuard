@@ -61,8 +61,8 @@ namespace WireGuard {
 
         // ========== 握手和密钥管理 ==========
         // T noise;        // 当前握手状态机
-        crypto::NOISESend noiseSend{}; // 发送端 noise协议
-        crypto::NOISEReceive noiseReceive{}; // 接收端 Noise
+        Noise::NOISESend noiseSend{}; // 发送端 noise协议
+        Noise::NOISEReceive noiseReceive{}; // 接收端 Noise
 
         KeyPairs keyPairs_; // 密钥对管理器（当前、下一个、历史密钥对）
 

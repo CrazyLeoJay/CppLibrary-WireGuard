@@ -1,7 +1,7 @@
-#cmake_minimum_required(VERSION 3.22.1)
-#project(wg_main)
-#
-#set(CMAKE_CXX_STANDARD 14)
+cmake_minimum_required(VERSION 3.22.1)
+project(test_main)
+
+set(CMAKE_CXX_STANDARD 14)
 
 
 # 创建测试可执行文件
@@ -15,13 +15,16 @@ add_executable(test_main test_main.cpp
 )
 
 # 链接被测库 + GTest 主函数
-target_link_libraries(test_main
+target_link_libraries(${PROJECT_NAME} PRIVATE
+        GTest::gtest_main   # 自动提供 main() 函数
         wg
         logs
         sodium
-        GTest::gtest_main   # 自动提供 main() 函数
 )
+# 或者定义宏传递路径
+target_compile_definitions(${PROJECT_NAME} PRIVATE TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/resources")
 
 # === 关键：自动发现并注册所有 TEST() ===
 include(GoogleTest)
 gtest_discover_tests(test_main)
+

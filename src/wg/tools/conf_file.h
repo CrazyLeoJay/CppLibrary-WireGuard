@@ -24,6 +24,7 @@
 #ifndef WG_MAIN_CONFFILE_H
 #define WG_MAIN_CONFFILE_H
 #include <array>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -51,7 +52,7 @@ namespace WireGuardTools {
      * 需要注意可以是域名
      */
     struct Endpoint {
-        std::string ipStrOrDomain;// ip地址或者域名
+        std::string ipStrOrDomain; // ip地址或者域名
         uint32_t port; // 远程端口，没有默认80
     };
 
@@ -97,6 +98,7 @@ namespace WireGuardTools {
      */
     WGConf readConfFileToEntity(const std::string &content);
 
+
     /**
      * 将配置文件解析成json
      * 由于字段比较多，为了减少跨语言之间的配置读写，使用json序列化
@@ -105,6 +107,8 @@ namespace WireGuardTools {
      * @return 解析的json
      */
     std::string readConfFileToJson(const std::string &content);
+
+    std::string wgConfToJson(const WGConf &config);
 } // WireGuardTools
 
 #endif //WG_MAIN_CONFFILE_H

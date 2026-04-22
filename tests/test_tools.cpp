@@ -23,28 +23,52 @@
  */
 
 
-#include "crypto.h"
+#include "crypto/crypto.h"
 #include "crypto/nonce.h"
 #include "gtest/gtest.h"
+#include "tools/conf_file.h"
 
 const WireGuard::PrivateKey client_private{
-    WireGuard::Crypto::base642Bin32Array("CKvZGm8S0HoQUwvUIsZ8wd39Bqt/5Z5vaJNuKX4LHGI=")
+    WireGuard::crypto::base642Bin32Array("CKvZGm8S0HoQUwvUIsZ8wd39Bqt/5Z5vaJNuKX4LHGI=")
 };
 const WireGuard::PublicKey client_public{
-    WireGuard::Crypto::base642Bin32Array("gN9lnPxypH67F7KystwjDdpwNsT007AV8s/MOOc0QGM=")
+    WireGuard::crypto::base642Bin32Array("gN9lnPxypH67F7KystwjDdpwNsT007AV8s/MOOc0QGM=")
 };
 const WireGuard::PublicKey server_private{
-    WireGuard::Crypto::base642Bin32Array("6CPPJCvfaej0+lwY5amd5pKJ0WLT0JuSv0VyPnMimVE=")
+    WireGuard::crypto::base642Bin32Array("6CPPJCvfaej0+lwY5amd5pKJ0WLT0JuSv0VyPnMimVE=")
 };
 const WireGuard::PublicKey server_public{
-    WireGuard::Crypto::base642Bin32Array("sMDHZrFHvyZKaYe1NYCy9+r2iR2DSQlcIFVFpeAh32A=")
+    WireGuard::crypto::base642Bin32Array("sMDHZrFHvyZKaYe1NYCy9+r2iR2DSQlcIFVFpeAh32A=")
 };
 
 namespace WireGuard {
     TEST(TOOLS, b64_2_hex) {
         std::string b64Str = "MDswPQmFaailKxTHciByyx5Sira4ryctoqjNrRKu828=";
-        auto bin = Crypto::base642Bin32Array(b64Str);
-        auto hex = Crypto::bin2Hex(bin.data(), bin.size());
+        auto bin = crypto::base642Bin32Array(b64Str);
+        auto hex = crypto::bin2Hex(bin.data(), bin.size());
         printf("%s", hex.c_str());
     }
+}
+
+std::string test_wg_conf = R"(
+[Interface]
+PrivateKey = CKvZGm8S0HoQUwvUIsZ8wd39Bqt/5Z5vaJNuKX4LHGI=
+Address = 10.0.0.2/24
+DNS = 8.8.8.8, 1.1.1.1
+[Peer]
+PublicKey = sMDHZrFHvyZKaYe1NYCy9+r2iR2DSQlcIFVFpeAh32A=
+Endpoint = your.server.com:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+)";
+
+TEST(tools_conf, readWireGuardConfFileToJson) {
+
+    LOG_INFO("read file: \n%s" , test_wg_conf.c_str());
+
+
+    auto json = WireGuardTools::readConfFileToJson(test_wg_conf);
+    LOG_INFO("read file to Json: \n%s" , json.c_str());
+
+
 }

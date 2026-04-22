@@ -28,12 +28,12 @@
 #include <cstdint>
 #include <stdexcept>
 
-#include "crypto.h"
+#include "../src/wg/crypto/crypto.h"
 
 
 namespace WireGuard {
     inline std::array<std::uint8_t, 32> b642bin(const std::string &src) {
-        return WireGuard::Crypto::base642Bin32Array(src);
+        return WireGuard::crypto::base642Bin32Array(src);
     };
 
     // 假设输入是 "0x" 开头的十六进制字符串，且长度（不含 0x）是偶数

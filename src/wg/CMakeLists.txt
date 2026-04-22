@@ -8,7 +8,7 @@ add_library(${PROJECT_NAME} STATIC
         entity.h entity.cpp
         version.h
         messages.h
-        crypto.h crypto.cpp
+        crypto/crypto.h crypto/crypto.cpp
         allowedips.h allowedips.cpp
         peer.h peer.cpp
         queueing.h queueing.cpp
@@ -19,7 +19,7 @@ add_library(${PROJECT_NAME} STATIC
         keypair.h keypair.cpp
         cookie.h cookie.cpp
         device.h device.cpp
-        encoding.hpp encoding.cpp
+        crypto/encoding.hpp crypto/encoding.cpp
         crypto/nonce.cpp
         crypto/nonce.h
         tools.h tools.cpp
