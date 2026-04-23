@@ -94,7 +94,7 @@ namespace WireGuard {
             return result;
         }
 
-        std::array<uint8_t, WG_KEY_LEN> key_from_base64(std::string base64) {
+        std::array<uint8_t, WG_KEY_LEN> key_from_base64(const std::string &base64) {
             std::array<uint8_t, WG_KEY_LEN> key{};
             key.fill(0);
 

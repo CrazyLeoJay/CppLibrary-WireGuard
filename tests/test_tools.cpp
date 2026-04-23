@@ -60,6 +60,7 @@ PublicKey = sMDHZrFHvyZKaYe1NYCy9+r2iR2DSQlcIFVFpeAh32A=
 Endpoint = your.server.com:51820
 AllowedIPs = 0.0.0.0/0
 PersistentKeepalive = 25
+PreSharedKey = sMDHZrFHvyZKaYe1NYCy9+r2iR2DSQlcIFVFpeAh32A=
 )";
 
 TEST(tools_conf, readWireGuardConfFileToJson) {

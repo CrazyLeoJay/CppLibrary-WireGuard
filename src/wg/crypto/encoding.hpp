@@ -41,7 +41,7 @@ namespace WireGuard {
          * @param base64 base64 编码字符串
          * @return 解码后的密钥，如果失败则返回空数组
          */
-        std::array<uint8_t, WG_KEY_LEN> key_from_base64(std::string base64);
+        std::array<uint8_t, WG_KEY_LEN> key_from_base64(const std::string &base64);
 
         /**
          * @brief 将密钥转换为十六进制字符串

@@ -49,11 +49,11 @@ namespace WireGuard {
 
         std::vector<uint8_t> b642bin(const std::string &b64Str);
 
-        std::vector<uint8_t> hex2Bin(std::string hexStr);
+        std::vector<uint8_t> hex2Bin(const std::string &hexStr);
 
-        const std::array<uint8_t, 32> base642Bin32Array(const std::string &hexStr);
+        std::array<uint8_t, 32> base642Bin32Array(const std::string &hexStr);
 
-        const std::string bin32Array2Base64(const std::array<uint8_t, 32> &bytes);
+        std::string bin32Array2Base64(const std::array<uint8_t, 32> &bytes);
 
         /**
          * @brief Curve25519 私钥生成
