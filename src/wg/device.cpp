@@ -522,18 +522,18 @@ namespace WireGuard {
             throw WGException("未找到远端KeyPair index=0x%s", crypto::bin2Hex(msg->keyIndex).c_str());
         }
         //        // 获取到当前 peer
-        auto currentPeer = _receiverIndexPeers[msg->keyIndex];
+        const auto currentPeer = _receiverIndexPeers[msg->keyIndex];
         //        // 解密数据流
         //        auto result = currentPeer->decryptPacket(msg, len);
         //        // 获取密钥对
-        auto kp = _keypairIndexPeers[msg->keyIndex];
+        const auto kp = _keypairIndexPeers[msg->keyIndex];
         if (kp.expired()) {
             sendInitiation(currentPeer); // 如果当前是接收端，这里便会转变角色变成发送端
             throw WGException("keyPair 不存在，需要重新握手");
         }
         // 解密数据
-        std::vector<uint8_t> result = kp.lock()->decrypt(msg, len);
-        if (result.size() == 0) {
+        const std::vector<uint8_t> result = kp.lock()->decrypt(msg, len);
+        if (result.empty()) {
             LOG_DEBUG("接收到心跳包");
             return;
         }
@@ -549,15 +549,18 @@ namespace WireGuard {
         iAmInitiator = true;
 
         // 配置 peer 索引
-        auto index = createNewIndex(peer);
-        auto msg = peer->createHandshakeInitiation(index);
-        auto endpoint = peer->getEndpoint();
+        const auto index = createNewIndex(peer);
+        const auto msg = peer->createHandshakeInitiation(index);
+        const auto endpoint = peer->getEndpoint();
 
         LOG_INFO(
             "发送握手请求到：%{public}s:%{public}d  %{public}s", endpoint.address.toIpStr().c_str(), endpoint.port,
             endpoint.address.toIpHex().c_str()
         );
-        socket.write(&msg, sizeof(msg), endpoint);
+        const auto result = socket.write(&msg, sizeof(msg), endpoint);
+        if (result < 0) {
+            throw WGException("握手信息，发送失败！");
+        }
     }
 
     void Device::sendCookieReply(std::shared_ptr<Peer> &peer) {

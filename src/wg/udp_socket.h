@@ -101,12 +101,12 @@ namespace WireGuard {
          * @param len 缓冲区长度
          * @param endpoint 写入的节点
          */
-        ssize_t write(const void *buf, const size_t len, const Endpoint &endpoint);
+        ssize_t write(const void *buf, const size_t len, const Endpoint &endpoint) const;
 
         /**
          * @return socket 是否在运行
          */
-        bool isRunning();
+        bool isRunning() const;
 
         void close();
 
@@ -118,7 +118,7 @@ namespace WireGuard {
          * @param endpoint
          * @return
          */
-        ssize_t read_select(char *buf, size_t len, Endpoint &endpoint);
+        ssize_t read_select(char *buf, size_t len, Endpoint &endpoint) const;
 
         /**
          * epoll多路复用方式(Linux 支持，更加高效！)
@@ -133,7 +133,7 @@ namespace WireGuard {
         /**
          * 唤醒操作退出操作
          */
-        void pip_read_wake();
+        void pip_read_wake() const;
 
         /**
          * 从管道里读取数据
@@ -142,7 +142,7 @@ namespace WireGuard {
          * @param endpoint
          * @return
          */
-        ssize_t pip_read_socket(char *buf, size_t len, Endpoint &endpoint);
+        ssize_t pip_read_socket(char *buf, size_t len, Endpoint &endpoint) const;
     };
 }; // namespace WireGuard
 

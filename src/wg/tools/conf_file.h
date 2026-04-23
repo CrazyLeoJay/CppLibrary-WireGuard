@@ -28,87 +28,77 @@
 #include <string>
 #include <vector>
 
-namespace WireGuardTools {
-    constexpr size_t WG_KEY_LEN = 32;
-    using WGKey = std::array<uint8_t, WG_KEY_LEN>;
+#include "entity.h"
 
-    enum IpFamily { IPV4, IPV6 };
+namespace WireGuard {
+    namespace Tools {
+        constexpr size_t WG_KEY_LEN = 32;
+        using WGKey = std::array<uint8_t, WG_KEY_LEN>;
 
-    struct WGIPAddress {
-        IpFamily family;
+        /**
+         * 网络站点地址，需要ip或者域名和端口
+         * 主要表达可以访问的地址
+         * 需要注意可以是 域名
+         */
+        struct WebSitePoint {
+            std::string ipStrOrDomain; // ip地址或者域名
+            uint32_t port; // 远程端口，没有默认80
+        };
 
-        union {
-            uint32_t ipv4;
-            uint8_t ipv6[16];
-        } ip;
-    };
+        struct WGConfInterface {
+            WGKey privateKey;
+            IpAddressArea ipArea;
+            std::vector<IPAddress> dns;
+        };
 
-    struct AddressArea {
-        WGIPAddress ip;
-        uint32_t cidr; // 掩码
-    };
+        struct WGConfPeer {
+            WGKey publicKey;
+            WebSitePoint endpoint; // 要建立链接的站点地址
+            std::vector<IpAddressArea> allowedIPs; // 需要路由的ip地址域
+            uint32_t persistentKeepalive; // 保活时间
+        };
 
-    /**
-     * 需要注意可以是域名
-     */
-    struct Endpoint {
-        std::string ipStrOrDomain; // ip地址或者域名
-        uint32_t port; // 远程端口，没有默认80
-    };
-
-    struct WGConfInterface {
-        WGKey privateKey;
-        AddressArea address;
-        std::vector<WGIPAddress> dns;
-    };
-
-    struct WGConfPeer {
-        WGKey publicKey;
-        Endpoint endpoint; // 要建立链接的站点地址
-        std::vector<AddressArea> allowedIPs; // 需要路由的ip地址域
-        uint32_t persistentKeepalive; // 保活时间
-    };
-
-    /**
-     * WireGuard 配置实体
-     * demo：
-     * [Interface]
-     * PrivateKey = <你的客户端私钥>
-     * Address = 10.0.0.2/24
-     * DNS = 8.8.8.8, 1.1.1.1
-     *
-     * [Peer]
-     * PublicKey = <服务器公钥>
-     * Endpoint = your.server.com:51820
-     * AllowedIPs = 0.0.0.0/0
-     * PersistentKeepalive = 25
-     *
-     */
-    struct WGConf {
-        WGConfInterface inter;
-        std::vector<WGConfPeer> peers;
-    };
+        /**
+         * WireGuard 配置实体
+         * demo：
+         * [Interface]
+         * PrivateKey = <你的客户端私钥>
+         * Address = 10.0.0.2/24
+         * DNS = 8.8.8.8, 1.1.1.1
+         *
+         * [Peer]
+         * PublicKey = <服务器公钥>
+         * Endpoint = your.server.com:51820
+         * AllowedIPs = 0.0.0.0/0
+         * PersistentKeepalive = 25
+         *
+         */
+        struct WGConf {
+            WGConfInterface inter;
+            std::vector<WGConfPeer> peers;
+        };
 
 
-    /**
-     * 解析WireGuard 的 conf 文件内容，解析成实实体
-     *
-     * @param content conf WireGuard配置文件内容
-     * @return 转化为数据实体
-     */
-    WGConf readConfFileToEntity(const std::string &content);
+        /**
+         * 解析WireGuard 的 conf 文件内容，解析成实实体
+         *
+         * @param content conf WireGuard配置文件内容
+         * @return 转化为数据实体
+         */
+        WGConf readConfFileToEntity(const std::string &content);
 
 
-    /**
-     * 将配置文件解析成json
-     * 由于字段比较多，为了减少跨语言之间的配置读写，使用json序列化
-     *
-     * @param content 配置文件内容
-     * @return 解析的json
-     */
-    std::string readConfFileToJson(const std::string &content);
+        /**
+         * 将配置文件解析成json
+         * 由于字段比较多，为了减少跨语言之间的配置读写，使用json序列化
+         *
+         * @param content 配置文件内容
+         * @return 解析的json
+         */
+        std::string readConfFileToJson(const std::string &content);
 
-    std::string wgConfToJson(const WGConf &config);
+        std::string wgConfToJson(const WGConf &config);
+    }
 } // WireGuardTools
 
 #endif //WG_MAIN_CONFFILE_H

@@ -43,7 +43,6 @@ namespace WireGuard {
     public:
         /**
          * @param config 设备配置
-         * @param iAmInitiator 判断是否为发起者
          * @return
          */
         Device(const DeviceRegisterConfig &config);

@@ -27,7 +27,7 @@
 #include "conf_file.h"
 #include "entity.h"
 
-namespace WireGuardTools {
+namespace WireGuard {
     namespace DNS {
         /**
          * @return 将域名解析成ip地址
