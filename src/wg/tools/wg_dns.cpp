@@ -36,34 +36,32 @@
 #include <arpa/inet.h>
 #endif
 
-namespace WireGuardTools {
+namespace WireGuard {
     namespace DNS {
-        WireGuard::IPAddress readDomainToIp(const std::string &domain) {
-            struct addrinfo hints{};
-            struct addrinfo *result = nullptr;
-            struct addrinfo *ptr = nullptr;
-            int iResult;
+        IPAddress readDomainToIp(const std::string &domain) {
+            addrinfo hints{};
+            addrinfo *result = nullptr;
 
             hints.ai_family = AF_UNSPEC;
             hints.ai_socktype = SOCK_STREAM;
             hints.ai_protocol = IPPROTO_TCP;
 
-            iResult = getaddrinfo(domain.c_str(), nullptr, &hints, &result);
+            const int iResult = getaddrinfo(domain.c_str(), nullptr, &hints, &result);
             if (iResult != 0) {
-                throw std::runtime_error("getaddrinfo failed: " + std::string(gai_strerror(iResult)));
+                throw std::runtime_error("get addrinfo failed: " + std::string(gai_strerror(iResult)));
             }
 
-            WireGuard::IPAddress ipAddress{};
+            IPAddress ipAddress{};
 
-            for (ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
+            for (auto ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
                 if (ptr->ai_family == AF_INET) {
-                    auto ipv4 = reinterpret_cast<struct sockaddr_in *>(ptr->ai_addr);
-                    ipAddress.family = WireGuard::IPAddress::IPv4;
+                    const auto ipv4 = reinterpret_cast<struct sockaddr_in *>(ptr->ai_addr);
+                    ipAddress.family = IPAddress::IPv4;
                     ipAddress.ip.ipv4 = ipv4->sin_addr.s_addr;
                     break;
                 } else if (ptr->ai_family == AF_INET6) {
                     auto ipv6 = reinterpret_cast<struct sockaddr_in6 *>(ptr->ai_addr);
-                    ipAddress.family = WireGuard::IPAddress::IPv6;
+                    ipAddress.family = IPAddress::IPv6;
                     memcpy(ipAddress.ip.ipv6, ipv6->sin6_addr.s6_addr, sizeof(ipAddress.ip.ipv6));
                     break;
                 }

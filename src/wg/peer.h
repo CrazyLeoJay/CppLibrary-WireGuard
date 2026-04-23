@@ -118,7 +118,6 @@ namespace WireGuard {
          * 验证并解密 Initiation 消息，提取远程节点的静态公钥
          *
          * @param msg 握手信息
-         * @param clientConfig 本地客户端配置
          * @return 是否匹配
          */
         bool handleHandshakeInitiation(const MessageInitiation &msg);
@@ -126,7 +125,7 @@ namespace WireGuard {
         /**
          * @brief 创建握手 Response 消息（响应远程节点）
          *
-         * @param msg 输出的 Response 消息结构
+         * @param senderIndex 消息的 senderIndex
          * @return bool 成功返回 true，失败返回 false
          */
         MessageResponse createHandshakeResponse(const uint32_t &senderIndex);
@@ -134,7 +133,7 @@ namespace WireGuard {
     public:
         PublicKey getPublicKey() const { return config.public_key; }
 
-        std::vector<IPAddress> getAllowedIps() const { return config.allowedIps; }
+        std::vector<IpAddressArea> getAllowedIps() const { return config.allowedIps; }
 
         /**
          * @brief 获取 Peer 的网络端点

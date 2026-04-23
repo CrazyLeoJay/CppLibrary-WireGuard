@@ -66,8 +66,7 @@ TEST(tools_conf, readWireGuardConfFileToJson) {
 
     LOG_INFO("read file: \n%s" , test_wg_conf.c_str());
 
-
-    auto json = WireGuardTools::readConfFileToJson(test_wg_conf);
+    const auto json = WireGuard::Tools::readConfFileToJson(test_wg_conf);
     LOG_INFO("read file to Json: \n%s" , json.c_str());
 
 

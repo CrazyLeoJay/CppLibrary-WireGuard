@@ -189,8 +189,6 @@ namespace WireGuard {
             uint8_t ipv6[16];
         } ip;
 
-        uint8_t cidr = -1; // -1表示没有掩码
-
         bool operator==(const IPAddress &other) const;
 
         std::string toIpStr() const;
@@ -208,6 +206,14 @@ namespace WireGuard {
         uint16_t port = 0;
 
         bool operator==(const Endpoint &other) const { return address == other.address && port == other.port; }
+    };
+
+    /**
+     * 地址区域，有掩码
+     */
+    struct IpAddressArea {
+        IPAddress address;
+        uint8_t cidr = -1; // -1表示没有掩码
     };
 
     constexpr uint8_t IPv4HeaderLen = 20;
@@ -234,7 +240,7 @@ namespace WireGuard {
     struct PeerConfig {
         PublicKey public_key{};
         Endpoint endpoint{};
-        std::vector<IPAddress> allowedIps{};
+        std::vector<IpAddressArea> allowedIps{};
         std::shared_ptr<SymmetricKey> pre_share_key{}; // 预共享密钥。可选，用于提升安全性
         uint32_t keepaliveInterval{25}; // 我们默认是需要心跳包的
     };

@@ -25,7 +25,6 @@
 #include "WGException.h"
 #include <arpa/inet.h>
 #include <complex>
-#include <cstdint>
 #include <cstring>
 #include <netinet/in.h>
 #include <sys/select.h>
@@ -36,11 +35,11 @@
 #include "sys/epoll.h"
 
 namespace WireGuard {
-    WireGuard::UDPSocket::UDPSocket() = default;
+    UDPSocket::UDPSocket() = default;
 
-    WireGuard::UDPSocket::~UDPSocket() { close(); };
+    UDPSocket::~UDPSocket() { close(); };
 
-    int WireGuard::UDPSocket::initSocket(
+    int UDPSocket::initSocket(
         const std::shared_ptr<uint32_t> &port, const std::shared_ptr<IPAddress> &bindAddress
     ) {
         _port = port;
@@ -49,7 +48,7 @@ namespace WireGuard {
         return _fd;
     }
 
-    int WireGuard::UDPSocket::createSocket() {
+    int UDPSocket::createSocket() {
         // 由于存在socket 被迫终端重新创建的情况，这里要先close 关闭一下之前开启的fd
         close();
         // int socket(int domain, int type, int protocol);
@@ -75,7 +74,7 @@ namespace WireGuard {
             _port = std::make_shared<uint32_t>();
         }
         if (_port) {
-            struct sockaddr_in addr{};
+            sockaddr_in addr{};
             addr.sin_family = AF_INET;
             addr.sin_port = htons(*_port);
             if (_bindAddress && _bindAddress->family == IPAddress::IPv4) {
@@ -83,7 +82,7 @@ namespace WireGuard {
             } else {
                 addr.sin_addr.s_addr = htonl(INADDR_ANY);
             }
-            if (::bind(_fd, (struct sockaddr *) &addr, sizeof(addr)) < 0) {
+            if (::bind(_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
                 close();
                 throw WGException("绑定到端口异常: %d", *_port);
             }
@@ -104,7 +103,7 @@ namespace WireGuard {
             return false;
         }
 
-        struct epoll_event ev;
+        epoll_event ev{};
         ev.events = EPOLLIN;
         ev.data.fd = _fd.load();
         if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, _fd.load(), &ev) == -1) {
@@ -122,7 +121,7 @@ namespace WireGuard {
         return _fd;
     }
 
-    ssize_t WireGuard::UDPSocket::read(char *buf, size_t len, Endpoint &endpoint) {
+    ssize_t UDPSocket::read(char *buf, const size_t len, Endpoint &endpoint) {
         if (!_initialized) {
             LOG_WARN("socket 未初始化");
             throw WGException(WGErrType::SOCKET_CLOSE_SING);
@@ -137,7 +136,7 @@ namespace WireGuard {
         }
     }
 
-    ssize_t WireGuard::UDPSocket::read_select(char *buf, size_t len, Endpoint &endpoint) {
+    ssize_t UDPSocket::read_select(char *buf, size_t len, Endpoint &endpoint) const {
         // 使用 IO 多路复用，防止
         fd_set read_fds;
         // 清空 fd_set 集合（必须初始化）
@@ -154,7 +153,7 @@ namespace WireGuard {
         // 这样当有停止信号写入管道时，select 会立即返回
         FD_SET(wakeup_pipe_[0], &read_fds);
 
-        // 调用 select 阻塞等待，直到以下任一情况发生：
+        // 调用 select 阻塞等待，直到以下任 一 情况发生：
         //   - UDP socket 有数据可读
         //   - 自管道有数据可读（即收到停止信号）
         //   - 发生错误
@@ -178,15 +177,15 @@ namespace WireGuard {
         return -1;
     }
 
-    ssize_t WireGuard::UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
+    ssize_t UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
         // 阻塞等待事件，-1 表示无限期等待
-        int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
+        const int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
         if (nfds == -1) {
             return -1;
         }
         // 遍历所有就绪的事件
         for (int i = 0; i < nfds; ++i) {
-            int fd = events[i].data.fd;
+            const int fd = events[i].data.fd;
             // 检查是否是 UDP socket 事件
             if (fd == _fd.load()) {
                 return pip_read_socket(buf, len, endpoint);
@@ -200,19 +199,19 @@ namespace WireGuard {
         return -1;
     }
 
-    void WireGuard::UDPSocket::pip_read_wake() {
+    void UDPSocket::pip_read_wake() const {
         // 从管道读取一个字节（必须读走，否则下次 select 仍会触发）
         // 这里只读一个字节，因为我们只写了一个字节作为信号
         char dummy;
-        ssize_t n = ::read(wakeup_pipe_[0], &dummy, 1);
+        ::read(wakeup_pipe_[0], &dummy, 1);
         // 抛出异常，表示管道正常关闭
         throw WGException(WGErrType::SOCKET_CLOSE_SING);
     }
 
-    ssize_t WireGuard::UDPSocket::pip_read_socket(char *buf, size_t len, Endpoint &endpoint) {
+    ssize_t UDPSocket::pip_read_socket(char *buf, size_t len, Endpoint &endpoint) const {
         struct sockaddr_in addr{};
         socklen_t addrLen = sizeof(addr);
-        auto ret = recvfrom(_fd.load(), buf, len, 0, (struct sockaddr *) &addr, &addrLen);
+        const auto ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
         if (ret < 0) {
             //            if (errno == EAGAIN || errno == EWOULDBLOCK) {
             //                return -1; // 没有数据（或暂时无法写入）或标记为“可稍后重试”
@@ -239,7 +238,7 @@ namespace WireGuard {
      * @param endpoint
      * @return
      */
-    ssize_t WireGuard::UDPSocket::write(const void *buf, const size_t len, const Endpoint &endpoint) {
+    ssize_t UDPSocket::write(const void *buf, const size_t len, const Endpoint &endpoint) const {
         if (!_initialized) {
             throw WGException("还未初始化");
         }
@@ -255,20 +254,20 @@ namespace WireGuard {
         }
         ssize_t ret;
         if (endpoint.address.family == IPAddress::IPv4) {
-            struct sockaddr_in addr{};
+            sockaddr_in addr{};
             memset(&addr, 0, sizeof(addr)); // 清零
             addr.sin_family = AF_INET;
             addr.sin_port = htons(endpoint.port);
             addr.sin_addr.s_addr = endpoint.address.ip.ipv4;
-            ret = sendto(_fd.load(), buf, len, 0, (struct sockaddr *) &addr, sizeof(struct sockaddr_in));
+            ret = sendto(_fd.load(), buf, len, 0, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_in));
         } else if (endpoint.address.family == IPAddress::IPv6) {
             // IPv6 支持
-            struct sockaddr_in6 addr{};
+            sockaddr_in6 addr{};
             memset(&addr, 0, sizeof(addr)); // 清零
             addr.sin6_family = AF_INET6;
             addr.sin6_port = htons(endpoint.port);
             std::memcpy(&addr.sin6_addr, endpoint.address.ip.ipv6, 16);
-            ret = sendto(_fd.load(), buf, len, 0, (struct sockaddr *) &addr, sizeof(struct sockaddr_in6));
+            ret = sendto(_fd.load(), buf, len, 0, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_in6));
         } else {
             throw WGException("特殊数据类型，ipv?");
         }
@@ -282,9 +281,9 @@ namespace WireGuard {
         return ret;
     }
 
-    bool WireGuard::UDPSocket::isRunning() { return _initialized && _fd.load() != -1; }
+    bool UDPSocket::isRunning() const { return _initialized && _fd.load() != -1; }
 
-    void WireGuard::UDPSocket::close() {
+    void UDPSocket::close() {
         if (wakeup_pipe_[1] != -1) {
             // 管道写入唤醒包
             char wake = 1;
@@ -301,11 +300,11 @@ namespace WireGuard {
             epoll_fd_ = -1;
         }
         // 关闭唤醒通道
-        for (auto i = 0; i < MAX_WAKEUP_PIP_COUNT; ++i) {
-            auto wp_fd = wakeup_pipe_[i];
+        for (int &i: wakeup_pipe_) {
+            const auto wp_fd = i;
             if (wp_fd != -1) {
                 ::close(wp_fd);
-                wakeup_pipe_[i] = -1;
+                i = -1;
             }
         }
         _initialized = false;

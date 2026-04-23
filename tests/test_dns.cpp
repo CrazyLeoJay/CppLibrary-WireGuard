@@ -26,8 +26,8 @@
 #include "gtest/gtest.h"
 #include "tools/wg_dns.h"
 TEST(DNS, testDomainToIp) {
-    auto result = WireGuardTools::DNS::readDomainToIp("www.baidu.com");
+    auto result = WireGuard::DNS::readDomainToIp("www.baidu.com");
     LOG_INFO("IP：%s", result.toIpStr().c_str());
-    result = WireGuardTools::DNS::readDomainToIp("www.google.com");
+    result = WireGuard::DNS::readDomainToIp("www.google.com");
     LOG_INFO("IP：%s", result.toIpStr().c_str());
 }

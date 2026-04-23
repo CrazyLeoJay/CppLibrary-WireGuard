@@ -41,18 +41,18 @@ namespace WireGuard {
 
     void WireGuard::AllowedIPs::addPeer(const std::shared_ptr<Peer> &peer) {
         std::lock_guard<std::mutex> lock(mutex);
-        std::vector<IPAddress> allowedIps = peer->getAllowedIps();
-        for (IPAddress item: allowedIps) {
-            if (item.family == IPAddress::IPv4) {
+        std::vector<IpAddressArea> allowedIps = peer->getAllowedIps();
+        for (IpAddressArea item: allowedIps) {
+            if (item.address.family == IPAddress::IPv4) {
                 //                uint8_t ipBytes[4];
-                LOG_INFO("ip bin: %{public}s", item.toIpHex().c_str());
-                const uint8_t *ipBytes = reinterpret_cast<const uint8_t *>(&item.ip.ipv4);
+                LOG_INFO("ip bin: %{public}s", item.address.toIpHex().c_str());
+                const auto *ipBytes = reinterpret_cast<const uint8_t *>(&item.address.ip.ipv4);
                 LOG_INFO("ip bin ipBytes: %{public}s", crypto::bin2Hex(ipBytes, 4).c_str());
-                uint32_t cidr = item.cidr > 0 ? item.cidr : (4 * 8); // 32
+                const uint32_t cidr = item.cidr > 0 ? item.cidr : (4 * 8); // 32
                 insertTrieNode(ipv4Root, ipBytes, sizeof(uint32_t), cidr, peer);
             } else {
-                uint32_t cidr = item.cidr > 0 ? item.cidr : (16 * 8); // 128
-                insertTrieNode(ipv6Root, item.ip.ipv6, 16, cidr, peer);
+                const uint32_t cidr = item.cidr > 0 ? item.cidr : (16 * 8); // 128
+                insertTrieNode(ipv6Root, item.address.ip.ipv6, 16, cidr, peer);
             }
         }
     }
