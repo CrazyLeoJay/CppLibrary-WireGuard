@@ -56,7 +56,7 @@ namespace WireGuard {
             WebSitePoint endpoint; // 要建立链接的站点地址
             std::vector<IpAddressArea> allowedIPs; // 需要路由的ip地址域
             uint32_t persistentKeepalive; // 保活时间
-            std::shared_ptr<WGKey> preSharedKey{};// 共享密钥，可能为null
+            std::shared_ptr<WGKey> preSharedKey{}; // 共享密钥，可能为null
         };
 
         /**
@@ -79,6 +79,12 @@ namespace WireGuard {
             std::vector<WGConfPeer> peers;
         };
 
+        bool isIPv4(const std::string &str);
+        bool isIPv6(const std::string &str);
+        bool isValidIPAddress(const std::string &str);
+        bool isValidDomain(const std::string &str);
+        bool isValidBase64Key(const std::string &str);
+
 
         /**
          * 解析WireGuard 的 conf 文件内容，解析成实实体
@@ -87,7 +93,6 @@ namespace WireGuard {
          * @return 转化为数据实体
          */
         WGConf readConfFileToEntity(const std::string &content);
-
 
         /**
          * 将配置文件解析成json
