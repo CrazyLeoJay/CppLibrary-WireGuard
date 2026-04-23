@@ -16,7 +16,7 @@
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
 
 /**
- *
+ * 设置界面
  *
  * Created on 2026/4/21.
  * @author leojay`fu

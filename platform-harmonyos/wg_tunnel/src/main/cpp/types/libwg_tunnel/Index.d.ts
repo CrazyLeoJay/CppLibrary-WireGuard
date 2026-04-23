@@ -14,70 +14,43 @@
  * limitations under the License.
  *
  */
-export const add: (a: number, b: number) => number;
+import { ClientRegisterConfig, KeyPair, WGConf } from './entity';
 
-export const makeKeyPair: () => KeyPair;
+export const makeKeyPair: () => Promise<KeyPair>;
 
-export const genPrivateKey: () => string;
+export const genPrivateKey: () => Promise<string>;
 
-export function genPublicKey(privateKey: string): string;
+export function genPublicKey(privateKey: string): Promise<string>;
 
-export interface KeyPair {
-  privateKey: string;
-  publicKey: string;
-}
+export function readWGConf(conf: string): Promise<WGConf>;
 
-/**
- * @author leojay`fu
- */
-export interface ClientRegisterConfig {
-  device: DeviceConfig; // 客户端配置
-  peers: PeerConfig[]; // 对等端配置列表
-}
+export function readWGConfToJson(conf: string): Promise<string>;
+
+export function isIpv4(ip: string): Promise<boolean>;
+
+export function isIpv6(ip: string): Promise<boolean>;
 
 /**
- * @author leojay`fu
+ * 是否为IP地址，ipv4或者ipv6
+ * @param ip
+ * @returns
  */
-export interface DeviceConfig {
-  deviceName: string; // 设备名称，或者配置名
-  privateKey: string; // 本地私钥
-  publicKey: string; // 本地公钥
-  listenerPort?: number; //本地监听端口(0或者空表示使用默认值 51820)
-  bindAddress?: IPAddress; // 绑定本地ip，一般是null，如果有多网卡情况，可以指定ip监听。
-}
+export function isIpAddress(ip: string): Promise<boolean>;
 
 /**
- * @author leojay`fu
+ * 是否为域名
+ * @param domain
+ * @returns
  */
-export interface PeerConfig {
-  publicKey: string; // 对等节点的PublicKey 必有
-  endpoint: Endpoint; // 远端IP、端口 必有
-  allowedIps: IPAddress[]; // 允许访问的IP规则 必须有，通过这个去选择流量
-  preSharedKey?: string; // 预共享密钥。可选
-  keepaliveInterval?: number; // 保活时间间隔 s
-}
+export function isValidDomain(domain: string): Promise<boolean>;
 
 /**
- * @author leojay`fu
+ * 是否为base64位的Key
+ * @param key
+ * @returns
  */
-export interface Endpoint {
-  address: IPAddress;
-  port: number;
-}
+export function isValidBase64Key(key: string): Promise<boolean>;
 
-/**
- * @author leojay`fu
- */
-export interface IPAddress {
-  ip: string;
-  isIpv4: boolean; // true表示为ipv4， 否则为 ipv6
-  cidr?: number;
-}
-
-// 当前Socket发生变化时回调，并且第一次初始化时，也要回调
-export interface SocketFdListener {
-  listener: (fd: number) => void;
-}
 
 /**
  * @author leojay`fu
@@ -99,3 +72,5 @@ export class WireGuardDevice {
   // @ts-ignore
   async close(): Promise<void>;
 }
+
+export { KeyPair };

@@ -59,10 +59,10 @@ export default class WGMainViewModel {
       enableAlbum: true
     })
       .then((data: scanBarcode.ScanResult) => {
-        LLog.info(TAG, `扫描结果：${data.originalValue}}`)
-
+        LLog.info(TAG, `扫描结果：${data.originalValue}`)
         // todo 通过二维码内容识别为配置，并添加入数据列表中
 
+        WireGuard.configToJson(data.originalValue)
       })
       .catch((e: BusinessError) => {
         LLog.error(TAG, { error: e, message: "扫码异常" })

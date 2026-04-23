@@ -48,9 +48,9 @@ export default class WGNewConfigViewModel {
     }
   }
 
-  makeKeyPair() {
+  async makeKeyPair() {
     try {
-      let kp = WireGuard.makeKeyPair();
+      let kp = await WireGuard.makeKeyPair();
       this.client.publicKey = kp.publicKey;
       this.client.privateKey = kp.privateKey;
       this.lastPrivateKey = kp.privateKey;
@@ -61,7 +61,7 @@ export default class WGNewConfigViewModel {
   }
 
   @Monitor("client.privateKey")
-  listenerPrivateKey() {
+  async listenerPrivateKey() {
     // LLog.info(TAG, `${this.client.privateKey}`)
     if (this.client.privateKey) {
       try {
@@ -69,7 +69,7 @@ export default class WGNewConfigViewModel {
           return;
         }
         if (Tools.is44Key(this.client.privateKey)) {
-          let pubKey = WireGuard.genPublicKey(this.client.privateKey);
+          let pubKey = await WireGuard.genPublicKey(this.client.privateKey);
           this.client.publicKey = pubKey;
         } else {
           this.client.publicKey = undefined;
@@ -245,10 +245,7 @@ export default class WGNewConfigViewModel {
     const pc: PeerConfig = {
       publicKey: config.publicKey!,
       endpoint: {
-        address: {
-          ip: ipPort.ip,
-          isIpv4: isEndpointIpv4,
-        },
+        ipStrOrDomain: ipPort.ipOrDomain,
         port: ipPort.port
       },
       allowedIps: allowedIps,

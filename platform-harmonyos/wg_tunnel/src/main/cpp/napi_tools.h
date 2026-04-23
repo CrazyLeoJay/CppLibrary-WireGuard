@@ -1,5 +1,5 @@
 /*
-* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+ * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,9 @@
 /**
  * Napi 实现工具类
  */
+#include "tools/conf_file.h"
 #include <node_api.h>
+
 namespace NapiTools {
     struct TsfnContext {
         napi_ref callbackRef;
@@ -37,6 +39,13 @@ namespace NapiTools {
     struct ThreadData {
         napi_threadsafe_function tsfn;
     };
+
+    napi_value createNvForWGConf(napi_env &env, WireGuard::Tools::WGConf &conf);
+
+    std::string napiGetString(napi_env &env, napi_value obj);
+    
+    napi_value makeNapiBool(napi_env &env, const bool &value);
+
 }; // namespace NapiTools
 
 #endif // WIREGUARD_NAPI_TOOLS_H

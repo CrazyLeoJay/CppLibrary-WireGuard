@@ -1,64 +1,64 @@
 #include "napi/native_api.h"
 #include "WireGuardDevice.h"
+#include "tools/conf_file.h"
 #include <cstdint>
+#include <hilog/log.h>
 
-static napi_value Add(napi_env env, napi_callback_info info) {
-    size_t argc = 2;
-    napi_value args[2] = {nullptr};
-
-    napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-
-    napi_valuetype valuetype0;
-    napi_typeof(env, args[0], &valuetype0);
-
-    napi_valuetype valuetype1;
-    napi_typeof(env, args[1], &valuetype1);
-
-    double value0;
-    napi_get_value_double(env, args[0], &value0);
-
-    double value1;
-    napi_get_value_double(env, args[1], &value1);
-
-    napi_value sum;
-    napi_create_double(env, value0 + value1, &sum);
-
-    return sum;
-}
-
-static napi_value MakeKeyPair(napi_env env, napi_callback_info info) {
+static napi_value NAPI_Global_makeKeyPair(napi_env env, napi_callback_info info) {
     try {
+        napi_status ns;
 //    napi_value ta;
 //    napi_get_cb_info(env, info, nullptr, nullptr, &ta, nullptr);
 
         WireGuard::PrivateKey key;
         WireGuard::PublicKey pub;
-        WireGuard::Crypto::generatePrivateKey(key);
-        WireGuard::Crypto::generatePublicKey(pub, key);
+        WireGuard::crypto::generatePrivateKey(key);
+        WireGuard::crypto::generatePublicKey(pub, key);
 
         // interface KeyPair{
         //  privateKey:string;
         //  publicKey:string;
         //}
         napi_value result;
-        napi_create_object(env, &result);
+        ns = napi_create_object(env, &result);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
 
-        auto pkStr = WireGuard::Crypto::bin32Array2Base64(key);
+        auto pkStr = WireGuard::crypto::bin32Array2Base64(key);
 
         std::string pkName = "privateKey";
         napi_value privateLabel;
         napi_value nvPrivate;
-        napi_create_string_utf8(env, pkName.data(), NAPI_AUTO_LENGTH, &privateLabel);
-        napi_create_string_utf8(env, pkStr.data(), NAPI_AUTO_LENGTH, &nvPrivate);
-        napi_set_property(env, result, privateLabel, nvPrivate);
+        ns = napi_create_string_utf8(env, pkName.data(), NAPI_AUTO_LENGTH, &privateLabel);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_create_string_utf8(env, pkStr.data(), NAPI_AUTO_LENGTH, &nvPrivate);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_property(env, result, privateLabel, nvPrivate);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
 
-        auto pubKStr = WireGuard::Crypto::bin32Array2Base64(pub);
+        auto pubKStr = WireGuard::crypto::bin32Array2Base64(pub);
         std::string pubName = "publicKey";
         napi_value publicLabel;
         napi_value nvPublic;
-        napi_create_string_utf8(env, pubName.data(), NAPI_AUTO_LENGTH, &publicLabel);
-        napi_create_string_utf8(env, pubKStr.data(), NAPI_AUTO_LENGTH, &nvPublic);
-        napi_set_property(env, result, publicLabel, nvPublic);
+        ns = napi_create_string_utf8(env, pubName.data(), NAPI_AUTO_LENGTH, &publicLabel);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_create_string_utf8(env, pubKStr.data(), NAPI_AUTO_LENGTH, &nvPublic);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_property(env, result, publicLabel, nvPublic);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
 
         return result;
 
@@ -68,16 +68,20 @@ static napi_value MakeKeyPair(napi_env env, napi_callback_info info) {
     }
 }
 
-static napi_value GenPrivateKey(napi_env env, napi_callback_info info) {
+static napi_value NAPI_Global_genPrivateKey(napi_env env, napi_callback_info info) {
 
     try {
+        napi_status ns;
         WireGuard::PrivateKey key;
-        WireGuard::Crypto::generatePrivateKey(key);
+        WireGuard::crypto::generatePrivateKey(key);
 
-        auto pkStr = WireGuard::Crypto::bin32Array2Base64(key);
+        auto pkStr = WireGuard::crypto::bin32Array2Base64(key);
 
         napi_value nvPrivate;
-        napi_create_string_utf8(env, pkStr.data(), NAPI_AUTO_LENGTH, &nvPrivate);
+        ns = napi_create_string_utf8(env, pkStr.data(), NAPI_AUTO_LENGTH, &nvPrivate);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
         return nvPrivate;
     } catch (const std::exception &e) {
         napi_throw_error(env, "获取私钥", e.what());
@@ -85,25 +89,38 @@ static napi_value GenPrivateKey(napi_env env, napi_callback_info info) {
     }
 }
 
-static napi_value GenPublicKey(napi_env env, napi_callback_info info) {
+static napi_value NAPI_Global_genPublicKey(napi_env env, napi_callback_info info) {
     try {
+        napi_status ns;
         napi_value nvPublic;
         size_t argc = 1;
         napi_value args[argc];
         napi_value arkTs;
-        napi_get_cb_info(env, info, &argc, args, &arkTs, nullptr);
+        ns = napi_get_cb_info(env, info, &argc, args, &arkTs, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
 
         size_t len;
-        napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
+        ns = napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
         char *buf = new char[len + 1];
-        napi_get_value_string_utf8(env, args[0], buf, len + 1, &len);
+        ns = napi_get_value_string_utf8(env, args[0], buf, len + 1, &len);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
 
-        WireGuard::PrivateKey privateKey = WireGuard::Crypto::base642Bin32Array(std::string(buf, len));
+        WireGuard::PrivateKey privateKey = WireGuard::crypto::base642Bin32Array(std::string(buf, len));
         WireGuard::PublicKey pub;
-        WireGuard::Crypto::generatePublicKey(pub, privateKey);
+        WireGuard::crypto::generatePublicKey(pub, privateKey);
 
-        auto pubKStr = WireGuard::Crypto::bin32Array2Base64(pub);
-        napi_create_string_utf8(env, pubKStr.data(), NAPI_AUTO_LENGTH, &nvPublic);
+        auto pubKStr = WireGuard::crypto::bin32Array2Base64(pub);
+        ns = napi_create_string_utf8(env, pubKStr.data(), NAPI_AUTO_LENGTH, &nvPublic);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
         return nvPublic;
     } catch (const std::exception &e) {
         napi_throw_error(env, "获取公钥", e.what());
@@ -111,14 +128,183 @@ static napi_value GenPublicKey(napi_env env, napi_callback_info info) {
     }
 }
 
+static napi_value NAPI_Global_readWGConf(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        size_t len;
+        ns = napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        char *buf = new char[len + 1];
+        ns = napi_get_value_string_utf8(env, args[0], buf, len + 1, &len);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        WireGuard::Tools::readConfFileToJson(std::string(buf));
+        WireGuard::Tools::WGConf entity = WireGuard::Tools::readConfFileToEntity(std::string(buf));
+        return NapiTools::createNvForWGConf(env, entity);
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
+
+
+static napi_value NAPI_Global_readWGConfToJson(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        size_t len;
+        ns = napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        char *buf = new char[len + 1];
+        ns = napi_get_value_string_utf8(env, args[0], buf, len + 1, &len);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        WireGuard::Tools::readConfFileToJson(std::string(buf));
+        std::string entity = WireGuard::Tools::readConfFileToJson(std::string(buf));
+        napi_value result;
+        ns = napi_create_string_utf8(env, entity.c_str(), entity.length(), &result);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        return result;
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
+
+static napi_value NAPI_Global_isIpv4(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        bool result = WireGuard::Tools::isIPv4(nvContent);
+
+        return NapiTools::makeNapiBool(env, result);
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
+
+static napi_value NAPI_Global_isIpv6(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        bool result = WireGuard::Tools::isIPv6(nvContent);
+
+        return NapiTools::makeNapiBool(env, result);
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
+static napi_value NAPI_Global_isIpAddress(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        bool result = WireGuard::Tools::isValidIPAddress(nvContent);
+
+        return NapiTools::makeNapiBool(env, result);
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
+
+static napi_value NAPI_Global_isValidDomain(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        bool result = WireGuard::Tools::isValidDomain(nvContent);
+
+        return NapiTools::makeNapiBool(env, result);
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
+static napi_value NAPI_Global_isValidBase64Key(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        bool result = WireGuard::Tools::isValidBase64Key(nvContent);
+
+        return NapiTools::makeNapiBool(env, result);
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
     wg_napi::Init(env, exports);
     napi_property_descriptor desc[] = {
-        {"add", nullptr, Add, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"makeKeyPair", nullptr, MakeKeyPair, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"genPrivateKey", nullptr, GenPrivateKey, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"genPublicKey", nullptr, GenPublicKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {     "makeKeyPair", nullptr,      NAPI_Global_makeKeyPair, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {   "genPrivateKey", nullptr,    NAPI_Global_genPrivateKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {    "genPublicKey", nullptr,     NAPI_Global_genPublicKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {      "readWGConf", nullptr,       NAPI_Global_readWGConf, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"readWGConfToJson", nullptr, NAPI_Global_readWGConfToJson, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {          "isIpv4", nullptr,           NAPI_Global_isIpv4, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {          "isIpv6", nullptr,           NAPI_Global_isIpv6, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {     "isIpAddress", nullptr,      NAPI_Global_isIpAddress, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {   "isValidDomain", nullptr,    NAPI_Global_isValidDomain, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, 4, desc);
     return exports;
@@ -131,7 +317,7 @@ static napi_module demoModule = {
     .nm_filename = nullptr,
     .nm_register_func = Init,
     .nm_modname = "wg_tunnel",
-    .nm_priv = ((void *)0),
+    .nm_priv = ((void *) 0),
     .reserved = {0},
 };
 

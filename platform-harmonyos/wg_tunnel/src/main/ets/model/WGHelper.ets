@@ -92,8 +92,8 @@ export namespace WireGuard {
    *
    * @returns 获取一个密钥对
    */
-  export function makeKeyPair(): KeyPair {
-    return native.makeKeyPair();
+  export async function makeKeyPair(): Promise<KeyPair> {
+    return await native.makeKeyPair();
   }
 
   /**
@@ -102,8 +102,8 @@ export namespace WireGuard {
    * @param privateKey 私钥
    * @returns 公钥
    */
-  export function genPublicKey(privateKey: string): string {
-    return native.genPublicKey(privateKey);
+  export async function genPublicKey(privateKey: string): Promise<string> {
+    return await native.genPublicKey(privateKey);
   }
 
   /**
@@ -175,6 +175,21 @@ export namespace WireGuard {
 
   export function getRunningServer(): ConnectState {
     return AppStorageV2.connect<ConnectState>(ConnectState, () => new ConnectState())!;
+  }
+
+
+  export async function configToJson(qrContent: string) {
+    try {
+      let result = await native.readWGConf(qrContent);
+      LLog.info(TAG, `扫描：${JSON.stringify(result)}`)
+
+      // helper.config.insertNewConfig({
+      //
+      // })
+
+    } catch (e) {
+      LLog.error(TAG, e);
+    }
   }
 }
 
@@ -264,7 +279,8 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
     throw new WGAppException("未配置Peer");
   }
   const routes: vpnExtension.RouteInfo[] = config.peers.map((peer) => {
-    const remoteIp = peer.endpoint.address.ip;
+    // todo 需要将域名转为ip
+    const remoteIp = peer.endpoint.ipStrOrDomain;
     return peer.allowedIps.map((allowed) => {
       return {
         interface: "vpn-tun",

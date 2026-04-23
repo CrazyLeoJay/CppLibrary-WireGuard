@@ -78,6 +78,7 @@ namespace wg_napi {
     void GetConnectConfig(napi_env env, napi_value arg, WireGuard::DeviceRegisterConfig &config);
     void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &peer);
     void GetPeer(napi_env env, napi_value arg, WireGuard::PeerConfig &peer);
+    void GetIpAddressArea(napi_env env, napi_value arg, WireGuard::IpAddressArea &ipAddress);
     void GetIPAddress(napi_env env, napi_value arg, WireGuard::IPAddress &ipAddress);
     void GetEndpoint(napi_env env, napi_value arg, WireGuard::Endpoint &endpoint);
 

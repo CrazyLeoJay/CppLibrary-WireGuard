@@ -42,15 +42,19 @@ export interface DeviceConfig {
 
 export interface PeerConfig {
   publicKey: string,
-  endpoint: Endpoint, // 远程端点，用于连接 需要 ip 和 端口
+  endpoint: WebSitePoint, // 远程端点，用于连接 需要 (ip/域名) 和 端口，在链接时需要替换为ip
   preSharedKey?: string, // 共享参数可以为 空 必要时加强安全性（ps：我觉得可以配置自动生成）
   allowedIps: IPAddress[], // 需要路由的IP段，这里需要配置掩码。判断ip值时，强制需要配置掩码
   keepaliveInterval?: number, // 单位默认s
 }
 
-export interface Endpoint {
-  address: IPAddress,
-  port: number,
+/**
+ * 站点：域名或者ip地址 和 端口
+ * 域名和ip地址都可
+ */
+export interface WebSitePoint {
+  ipStrOrDomain: string; // ip地址或者域名
+  port: number; // 远程端口，没有默认80
 }
 
 export interface IPAddress {

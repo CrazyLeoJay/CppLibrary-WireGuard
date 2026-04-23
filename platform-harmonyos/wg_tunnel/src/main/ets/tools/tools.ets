@@ -91,16 +91,15 @@ export default class Tools {
         throw new WGAppException("port 转换失败")
       }
       return {
-        ip: ip,
+        ipOrDomain: ip,
         port: port,
       };
     }
     return {
-      ip: content,
+      ipOrDomain: content,
       port: 80,
     };
   }
-
 }
 
 interface IpCidrSplit {
@@ -108,14 +107,17 @@ interface IpCidrSplit {
   cidr: number;
 }
 
+/**
+ * 包含域名情况
+ */
 interface IpPortSplit {
-  ip: string,
+  ipOrDomain: string,
   port: number;
 }
 
 class Regex {
-   static IPV4_PATTERN = `((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)`
-   static PORT_PATTERN = `[0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-3][0-5]`
+  static IPV4_PATTERN = `((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)`
+  static PORT_PATTERN = `[0-9]|[1-9][0-9]{1,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-3][0-5]`
   static ipv4 = RegExp(`^${Regex.IPV4_PATTERN}$`)
   static ipv4Mark = RegExp(`^${Regex.IPV4_PATTERN}\/([0-9]|[1-2][0-9]|3[0-2])$`)
   static ipv4OrMark = RegExp(`^${Regex.IPV4_PATTERN}(\/([0-9]|[1-2][0-9]|3[0-2]))?$`)

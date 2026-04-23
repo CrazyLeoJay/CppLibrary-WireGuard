@@ -1,5 +1,5 @@
 /*
-* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+ * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@
 #include "arpa/inet.h"
 #include "entity.h"
 #include "WGException.h"
-#include "crypto.h"
+#include "crypto/crypto.h"
 
 #include <sys/stat.h>
 #include <unistd.h>
@@ -278,16 +278,14 @@ namespace wg_napi {
                 LOG_INFO("wireGuard initSocket invoke client create");
                 WireGuard::Logs::print_space([&]() {
                     auto privateKey = deviceHelper->configPtr.get()->client.private_key;
-                    LOG_DEBUG(
-                        "private key=%{public}s",
-                        WireGuard::Crypto::bin2B64(privateKey.data(), privateKey.size()).c_str()
-                    );
+                    auto ipStr = WireGuard::crypto::bin2B64(privateKey.data(), privateKey.size());
+                    LOG_DEBUG("private key=%{public}s", ipStr.c_str());
                 });
                 deviceHelper->device = std::make_shared<WireGuard::Device>(*deviceHelper->configPtr);
                 uint32_t sockFd = deviceHelper->device->initSocket(onChange);
                 LOG_INFO("wireGuard initSocket invoke socket_fd: %{public}d", sockFd);
                 napi_value tunnelFd;
-                napi_create_int32(env, sockFd, &tunnelFd);
+                napi_create_int64(env, sockFd, &tunnelFd);
                 return tunnelFd;
             } else {
                 throw WireGuard::WGException("client unwrap failure");
@@ -470,13 +468,13 @@ namespace wg_napi {
         peer.public_key = getPropToDecodeBase64WGKey(env, arg, "publicKey");
 
         // allowedIps - ✅ 使用局部变量
-        std::vector<WireGuard::IPAddress> allowedIps;
+        std::vector<WireGuard::IpAddressArea> allowedIps;
         auto findItemCallback = [](napi_env env, napi_value nvItem, uint32_t index) {
-            WireGuard::IPAddress allowedIP;
-            GetIPAddress(env, nvItem, allowedIP);
+            WireGuard::IpAddressArea allowedIP;
+            GetIpAddressArea(env, nvItem, allowedIP);
             return allowedIP;
         };
-        getForArray<WireGuard::IPAddress>(env, arg, "allowedIps", allowedIps, findItemCallback);
+        getForArray<WireGuard::IpAddressArea>(env, arg, "allowedIps", allowedIps, findItemCallback);
         peer.allowedIps = std::move(allowedIps);
 
         // endpoint
@@ -543,6 +541,26 @@ namespace wg_napi {
             }
         }
     }
+    void GetIpAddressArea(napi_env env, napi_value arg, WireGuard::IpAddressArea &ipArea) {
+        napi_value nvIpAddress;
+        napi_get_named_property(env, arg, "address", &nvIpAddress);
+        GetIPAddress(env, nvIpAddress, ipArea.address);
+
+        bool hasCidr;
+        napi_has_named_property(env, arg, "cidr", &hasCidr);
+        if (hasCidr) {
+            auto cidr = getPropUint32_t(env, arg, "cidr");
+            if (cidr > 255) {
+                throw WireGuard::WGException("cidr超出 uint8_t 精度");
+            }
+            ipArea.cidr = cidr;
+        } else {
+            // 有/ 有掩码
+            // 表示没有 /
+//            ipArea.cidr = -1;
+            throw WireGuard::WGException("ip 域必须指定掩码");
+        }
+    }
 
     void GetIPAddress(napi_env env, napi_value arg, WireGuard::IPAddress &ipAddress) {
         auto ip = getPropString(env, arg, "ip");
@@ -551,19 +569,7 @@ namespace wg_napi {
         if (ip.empty()) {
             throw std::invalid_argument("ip地址不能为空");
         }
-        bool hasCidr;
-        napi_has_named_property(env, arg, "cidr", &hasCidr);
-        if (hasCidr) {
-            auto cidr = getPropUint32_t(env, arg, "cidr");
-            if (cidr > 255) {
-                throw std::invalid_argument("cidr超出 uint8_t 精度");
-            }
-            ipAddress.cidr = cidr;
-        } else {
-            // 有/ 有掩码
-            // 表示没有 /
-            ipAddress.cidr = -1;
-        }
+
 
         LOG_DEBUG("设置ip： %{public}s", ip.c_str());
         setIp(ipAddress, isIpv4, ip);
@@ -602,7 +608,7 @@ namespace wg_napi {
     std::array<uint8_t, 32> getPropToDecodeBase64WGKey(napi_env env, napi_value obj, const std::string propertyName) {
         auto str = getPropString(env, obj, propertyName);
         try {
-            return WireGuard::Crypto::base642Bin32Array(str);
+            return WireGuard::crypto::base642Bin32Array(str);
         } catch (const WireGuard::WGException &e) {
             throw WireGuard::WGException(propertyName + " 格式异常，无法转换为32位bin");
         }
