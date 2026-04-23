@@ -63,10 +63,10 @@ namespace WireGuard {
     TEST(Noise_Handshake, serverDecodeInitiationMessage) {
         const std::string hex =
                 "010000003a3e1613a8d7f898fc0d3bd961bea695a24bd7909061cd3e1d0de0a4daa8b804b620292dbf889016d704caca8b942469583851cba029c94fbcd74c1f9387262b40761a13cb652aad37a8449a8ef2fd5c62e5c040d6e4be3a8bf6200f16e319eaa2df23f8c504ba35e77b722eca1c15cdb646320a1779aa09b68af64df06daa3a00000000000000000000000000000000";
-        auto bytes = hexStringToArray(hex);
+        const auto bytes = hexStringToArray(hex);
         // MessageInitiation msg{};
         // std::memcpy(&msg, bytes.data(), bytes.size());
-        auto msg = *reinterpret_cast<const MessageInitiation *>(bytes.data());
+        const auto msg = *reinterpret_cast<const MessageInitiation *>(bytes.data());
         printf("sender:%s\nephemeral:%s\nencrypted:%s\nTimestamp:%s\nmac1:%s\n",
                crypto::bin2Hex(msg.senderIndex).c_str(),
                crypto::bin32Array2Base64(reinterpret_cast<const std::array<uint8_t, 32> &>(msg.ephemeral)).c_str(),
