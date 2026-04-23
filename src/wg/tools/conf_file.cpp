@@ -303,7 +303,7 @@ namespace WireGuard {
             json << R"("privateKey":")" << crypto::bin32Array2Base64(conf.inter.privateKey) << "\",";
             json << "\"address\":{";
             json << R"("ip":")" << ipToStr(conf.inter.ipArea.address) << "\",";
-            json << "\"cidr\":" << conf.inter.ipArea.cidr;
+            json << "\"cidr\":" << std::to_string(conf.inter.ipArea.cidr);
             json << "},";
             json << "\"dns\":[";
             for (size_t i = 0; i < conf.inter.dns.size(); i++) {
@@ -327,7 +327,7 @@ namespace WireGuard {
                 for (size_t j = 0; j < peer.allowedIPs.size(); j++) {
                     if (j > 0) json << ",";
                     const auto &ip = peer.allowedIPs[j];
-                    json << R"({"ip":")" << ipToStr(ip.address) << R"(","cidr":)" << ip.cidr << "}";
+                    json << R"({"ip":")" << ipToStr(ip.address) << R"(","cidr":)" << std::to_string(ip.cidr) << "}";
                 }
                 json << "],";
                 json << "\"persistentKeepalive\":" << peer.persistentKeepalive;
