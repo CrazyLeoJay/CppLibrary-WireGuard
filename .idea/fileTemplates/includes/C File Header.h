@@ -1,5 +1,5 @@
 /*
-* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+ * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,14 +12,18 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
+ 
+#if ($HEADER_COMMENTS)
+/**
+ * Created by $USER_NAME on ${DATE}.
+#if ($ORGANIZATION_NAME && $ORGANIZATION_NAME != "")
+ * Copyright (c) $YEAR ${ORGANIZATION_NAME}#if (!$ORGANIZATION_NAME.endsWith(".")).#end All rights reserved.
+#end
+ *
+ * @author leojay`fu
+ * @email crazyleojay@163.com
+ * @url https://github.com/CrazyLeoJay
+ */
+#end
 
-//
-// Created on 2026/4/7.
-// @author leojay`fu
-//
-// Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
-// please include "napi/native_api.h".
-
-#include "pipwait.h"

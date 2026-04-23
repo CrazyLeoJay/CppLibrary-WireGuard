@@ -28,7 +28,7 @@
 
 #include "allowedips.h"
 #include "WGException.h"
-#include "tools/tools.h"
+#include "tools.h"
 #include <cstdint>
 #include <cstring>
 #include <memory>
@@ -47,7 +47,7 @@ namespace WireGuard {
                 //                uint8_t ipBytes[4];
                 LOG_INFO("ip bin: %{public}s", item.toIpHex().c_str());
                 const uint8_t *ipBytes = reinterpret_cast<const uint8_t *>(&item.ip.ipv4);
-                LOG_INFO("ip bin ipBytes: %{public}s", Crypto::bin2Hex(ipBytes, 4).c_str());
+                LOG_INFO("ip bin ipBytes: %{public}s", crypto::bin2Hex(ipBytes, 4).c_str());
                 uint32_t cidr = item.cidr > 0 ? item.cidr : (4 * 8); // 32
                 insertTrieNode(ipv4Root, ipBytes, sizeof(uint32_t), cidr, peer);
             } else {
@@ -192,7 +192,7 @@ namespace WireGuard {
         auto ip = node->bits.size() <= 4
                       ? Tools::ipv4_to_string(node->bits.data())
                       : Tools::ipv6_to_string(node->bits.data());
-        msg = "node: (" + ip + "/" + Crypto::bin2Hex(node->bits.data(), node->bits.size()) + ")";
+        msg = "node: (" + ip + "/" + crypto::bin2Hex(node->bits.data(), node->bits.size()) + ")";
 
         msg += "/掩码=";
         msg += std::to_string(node->cidr);

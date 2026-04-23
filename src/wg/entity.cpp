@@ -22,8 +22,8 @@
 // please include "napi/native_api.h".
 
 #include "entity.h"
-#include "crypto.h"
-#include "tools/tools.h"
+#include "crypto/crypto.h"
+#include "tools.h"
 #include <arpa/inet.h>
 
 namespace WireGuard {
@@ -37,9 +37,9 @@ namespace WireGuard {
 
     std::string WireGuard::IPAddress::toIpHex() const {
         if (family == IPv4) {
-            return Crypto::bin2Hex(ip.ipv4);
+            return crypto::bin2Hex(ip.ipv4);
         } else {
-            return Crypto::bin2Hex(ip.ipv6, 16);
+            return crypto::bin2Hex(ip.ipv6, 16);
         }
     }
 

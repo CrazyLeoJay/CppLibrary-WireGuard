@@ -8,7 +8,7 @@ add_library(${PROJECT_NAME} STATIC
         entity.h entity.cpp
         version.h
         messages.h
-        crypto.h crypto.cpp
+        crypto/crypto.h crypto/crypto.cpp
         allowedips.h allowedips.cpp
         peer.h peer.cpp
         queueing.h queueing.cpp
@@ -19,11 +19,15 @@ add_library(${PROJECT_NAME} STATIC
         keypair.h keypair.cpp
         cookie.h cookie.cpp
         device.h device.cpp
-        encoding.hpp encoding.cpp
+        crypto/encoding.hpp crypto/encoding.cpp
         crypto/nonce.cpp
         crypto/nonce.h
-        tools/tools.h tools/tools.cpp
-        tools/pipwait.h tools/pipwait.cpp
+        tools.h tools.cpp
+        pipwait.h pipwait.cpp
+        tools/wg_dns.h
+        tools/wg_dns.cpp
+        tools/conf_file.h
+        tools/conf_file.cpp
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE sodium wg_clib logs)

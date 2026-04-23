@@ -26,7 +26,7 @@
 #include <algorithm>
 
 #include "WGException.h"
-#include "crypto.h"
+#include "crypto/crypto.h"
 #include "messages.h"
 #include "sodium/crypto_verify_16.h"
 
@@ -136,7 +136,7 @@ namespace WireGuard {
 
             // 转为 const uint8_t*（只读）
             const uint8_t *bytes = reinterpret_cast<const uint8_t *>(&msg);
-            return Crypto::blake2bCookie(key, bytes, mac1_input_length);
+            return crypto::blake2bCookie(key, bytes, mac1_input_length);
         }
 
         bool isEmpty(const CookieData &cookie) {

@@ -24,7 +24,7 @@
 #ifndef WIREGUARD_KEYPAIR_H
 #define WIREGUARD_KEYPAIR_H
 
-#include "crypto.h"
+#include "crypto/crypto.h"
 #include <bitset>
 #include <atomic>
 #include <cstdint>

@@ -23,8 +23,8 @@
 
 #include "device.h"
 #include "WGException.h"
-#include "tools/pipwait.h"
-#include "tools/tools.h"
+#include "pipwait.h"
+#include "tools.h"
 #include <cerrno>
 #include <cstddef>
 #include <unistd.h>
@@ -391,7 +391,7 @@ namespace WireGuard {
 
         auto *msg = reinterpret_cast<const MessageInitiation *>(data);
         // 查找对应的 Peer（需要解密静态公钥）
-        PublicKey pk = Crypto::Message::getPublicKey(*msg, config.private_key);
+        PublicKey pk = crypto::getPublicKey(*msg, config.private_key);
         if (_peers.find(pk) == _peers.end()) {
             LOG_WARN("地址（%{public}s）未找到注册设备", WireGuard::Tools::printStr(endpoint.address).c_str());
             return;
@@ -478,7 +478,7 @@ namespace WireGuard {
             _keypairIndexPeers[msg->receiverIndex] = keypair;
             // 发送等待的数据包
             sendStagedPackets(currentPeer);
-            LOG_INFO("握手成功 并存储密钥 remoteIndex=%{public}s", Crypto::bin2Hex(msg->senderIndex).c_str());
+            LOG_INFO("握手成功 并存储密钥 remoteIndex=%{public}s", crypto::bin2Hex(msg->senderIndex).c_str());
             // 发送心跳包
             encryptPacketAndSendSocket(currentPeer, nullptr, 0);
         } else {
@@ -519,7 +519,7 @@ namespace WireGuard {
             throw WGException("未找到远端Peer");
         }
         if (_keypairIndexPeers.find(msg->keyIndex) == _keypairIndexPeers.end()) {
-            throw WGException("未找到远端KeyPair index=0x%s", Crypto::bin2Hex(msg->keyIndex).c_str());
+            throw WGException("未找到远端KeyPair index=0x%s", crypto::bin2Hex(msg->keyIndex).c_str());
         }
         //        // 获取到当前 peer
         auto currentPeer = _receiverIndexPeers[msg->keyIndex];

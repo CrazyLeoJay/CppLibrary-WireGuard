@@ -25,7 +25,7 @@
 #define WIREGUARD_DEVICE_H
 #include "allowedips.h"
 #include "entity.h"
-#include "tools/pipwait.h"
+#include "pipwait.h"
 #include "udp_socket.h"
 #include <cstdint>
 #include <random>
