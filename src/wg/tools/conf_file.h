@@ -56,6 +56,7 @@ namespace WireGuard {
             WebSitePoint endpoint; // 要建立链接的站点地址
             std::vector<IpAddressArea> allowedIPs; // 需要路由的ip地址域
             uint32_t persistentKeepalive; // 保活时间
+            std::shared_ptr<WGKey> preSharedKey{};// 共享密钥，可能为null
         };
 
         /**

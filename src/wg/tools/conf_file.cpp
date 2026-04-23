@@ -23,157 +23,156 @@
 #endif
 
 namespace WireGuard {
-
     namespace Tools {
-         namespace {
-        std::string trim(const std::string &str) {
-            auto start = str.find_first_not_of(" \t\n\r");
-            auto end = str.find_last_not_of(" \t\n\r");
-            if (start == std::string::npos || end == std::string::npos) {
-                return "";
-            }
-            return str.substr(start, end - start + 1);
-        }
-
-        std::vector<std::string> split(const std::string &str, char delimiter) {
-            std::vector<std::string> tokens;
-            std::string token;
-            std::istringstream tokenStream(str);
-            while (std::getline(tokenStream, token, delimiter)) {
-                token = trim(token);
-                if (!token.empty()) {
-                    tokens.push_back(token);
+        namespace {
+            std::string trim(const std::string &str) {
+                auto start = str.find_first_not_of(" \t\n\r");
+                auto end = str.find_last_not_of(" \t\n\r");
+                if (start == std::string::npos || end == std::string::npos) {
+                    return "";
                 }
-            }
-            return tokens;
-        }
-
-        bool isIPv4(const std::string &str) {
-            struct sockaddr_in sa;
-            return inet_pton(AF_INET, str.c_str(), &(sa.sin_addr)) != 0;
-        }
-
-        bool isIPv6(const std::string &str) {
-            struct sockaddr_in6 sa;
-            return inet_pton(AF_INET6, str.c_str(), &(sa.sin6_addr)) != 0;
-        }
-
-        bool isValidIPAddress(const std::string &str) {
-            return isIPv4(str) || isIPv6(str);
-        }
-
-        bool isValidDomain(const std::string &str) {
-            if (str.empty() || str.length() > 253) {
-                return false;
-            }
-            std::regex domainRegex(
-                R"(^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$)"
-            );
-            return std::regex_match(str, domainRegex);
-        }
-
-        bool isValidBase64Key(const std::string &str) {
-            if (str.length() != 44) {
-                return false;
-            }
-            std::regex base64Regex(R"(^[A-Za-z0-9+/]{43}[A-Za-z0-9+/=]$)");
-            return std::regex_match(str, base64Regex);
-        }
-
-        bool isValidCIDR(uint32_t cidr, WireGuard::IPAddress::Family family) {
-            if (family == WireGuard::IPAddress::Family::IPv4) {
-                return cidr >= 0 && cidr <= 32;
-            } else {
-                return cidr >= 0 && cidr <= 128;
-            }
-        }
-
-        bool isValidPort(uint32_t port) {
-            return port > 0 && port <= 65535;
-        }
-
-        IPAddress parseIPAddress(const std::string &ipStr) {
-            IPAddress addr{};
-            if (isIPv4(ipStr)) {
-                addr.family = IPAddress::IPv4;
-                inet_pton(AF_INET, ipStr.c_str(), &addr.ip.ipv4);
-            } else if (isIPv6(ipStr)) {
-                addr.family = IPAddress::IPv6;
-                inet_pton(AF_INET6, ipStr.c_str(), addr.ip.ipv6);
-            }
-            return addr;
-        }
-
-        std::string ipToStr(const IPAddress &ip) {
-            char buffer[INET6_ADDRSTRLEN];
-            if (ip.family == IPAddress::IPv4) {
-                inet_ntop(AF_INET, &ip.ip.ipv4, buffer, sizeof(buffer));
-            } else {
-                inet_ntop(AF_INET6, ip.ip.ipv6, buffer, sizeof(buffer));
-            }
-            return std::string(buffer);
-        }
-
-        void validateConf(const WGConf &conf) {
-            if (conf.inter.privateKey[0] == 0) {
-                throw WireGuard::WGException("Interface PrivateKey 不能为空");
+                return str.substr(start, end - start + 1);
             }
 
-            if (conf.inter.ipArea.cidr == static_cast<uint32_t>(-1)) {
-                throw WireGuard::WGException("Interface Address 不能为空");
-            }
-
-            if (!isValidCIDR(conf.inter.ipArea.cidr, conf.inter.ipArea.address.family)) {
-                throw WireGuard::WGException("Interface Address CIDR 无效，IPv4 范围应为 0-32，IPv6 范围应为 0-128");
-            }
-
-            for (const auto &dns: conf.inter.dns) {
-                if (!isValidIPAddress(ipToStr(dns))) {
-                    throw WireGuard::WGException("Interface DNS 地址格式无效: " + ipToStr(dns));
-                }
-            }
-
-            if (conf.peers.empty()) {
-                throw WireGuard::WGException("必须至少配置一个 Peer");
-            }
-
-            for (const auto &peer: conf.peers) {
-                if (peer.publicKey[0] == 0) {
-                    throw WireGuard::WGException("Peer PublicKey 不能为空");
-                }
-
-                if (peer.endpoint.ipStrOrDomain.empty()) {
-                    throw WireGuard::WGException("Peer Endpoint 地址不能为空");
-                }
-
-                if (!isValidIPAddress(peer.endpoint.ipStrOrDomain) &&
-                    !isValidDomain(peer.endpoint.ipStrOrDomain)) {
-                    throw WireGuard::WGException("Peer Endpoint 地址格式无效: " + peer.endpoint.ipStrOrDomain);
-                }
-
-                if (!isValidPort(peer.endpoint.port)) {
-                    throw WireGuard::WGException("Peer Endpoint 端口无效，范围应为 1-65535");
-                }
-
-                if (peer.allowedIPs.empty()) {
-                    throw WireGuard::WGException("Peer AllowedIPs 不能为空");
-                }
-
-                for (const auto &ip: peer.allowedIPs) {
-                    if (ip.cidr == static_cast<uint32_t>(-1)) {
-                        throw WireGuard::WGException("Peer AllowedIPs CIDR 不能为空");
+            std::vector<std::string> split(const std::string &str, char delimiter) {
+                std::vector<std::string> tokens;
+                std::string token;
+                std::istringstream tokenStream(str);
+                while (std::getline(tokenStream, token, delimiter)) {
+                    token = trim(token);
+                    if (!token.empty()) {
+                        tokens.push_back(token);
                     }
-                    if (!isValidCIDR(ip.cidr, ip.address.family)) {
-                        throw WireGuard::WGException("Peer AllowedIPs CIDR 无效，IPv4 范围应为 0-32，IPv6 范围应为 0-128");
+                }
+                return tokens;
+            }
+
+            bool isIPv4(const std::string &str) {
+                struct sockaddr_in sa;
+                return inet_pton(AF_INET, str.c_str(), &(sa.sin_addr)) != 0;
+            }
+
+            bool isIPv6(const std::string &str) {
+                struct sockaddr_in6 sa;
+                return inet_pton(AF_INET6, str.c_str(), &(sa.sin6_addr)) != 0;
+            }
+
+            bool isValidIPAddress(const std::string &str) {
+                return isIPv4(str) || isIPv6(str);
+            }
+
+            bool isValidDomain(const std::string &str) {
+                if (str.empty() || str.length() > 253) {
+                    return false;
+                }
+                std::regex domainRegex(
+                    R"(^([a-zA-Z0-9]([a-zA-Z0-9\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$)"
+                );
+                return std::regex_match(str, domainRegex);
+            }
+
+            bool isValidBase64Key(const std::string &str) {
+                if (str.length() != 44) {
+                    return false;
+                }
+                std::regex base64Regex(R"(^[A-Za-z0-9+/]{43}[A-Za-z0-9+/=]$)");
+                return std::regex_match(str, base64Regex);
+            }
+
+            bool isValidCIDR(uint32_t cidr, IPAddress::Family family) {
+                if (family == IPAddress::Family::IPv4) {
+                    return cidr >= 0 && cidr <= 32;
+                } else {
+                    return cidr >= 0 && cidr <= 128;
+                }
+            }
+
+            bool isValidPort(uint32_t port) {
+                return port > 0 && port <= 65535;
+            }
+
+            IPAddress parseIPAddress(const std::string &ipStr) {
+                IPAddress addr{};
+                if (isIPv4(ipStr)) {
+                    addr.family = IPAddress::IPv4;
+                    inet_pton(AF_INET, ipStr.c_str(), &addr.ip.ipv4);
+                } else if (isIPv6(ipStr)) {
+                    addr.family = IPAddress::IPv6;
+                    inet_pton(AF_INET6, ipStr.c_str(), addr.ip.ipv6);
+                }
+                return addr;
+            }
+
+            std::string ipToStr(const IPAddress &ip) {
+                char buffer[INET6_ADDRSTRLEN];
+                if (ip.family == IPAddress::IPv4) {
+                    inet_ntop(AF_INET, &ip.ip.ipv4, buffer, sizeof(buffer));
+                } else {
+                    inet_ntop(AF_INET6, ip.ip.ipv6, buffer, sizeof(buffer));
+                }
+                return std::string(buffer);
+            }
+
+            void validateConf(const WGConf &conf) {
+                if (conf.inter.privateKey[0] == 0) {
+                    throw WGException("Interface PrivateKey 不能为空");
+                }
+
+                if (conf.inter.ipArea.cidr == static_cast<uint32_t>(-1)) {
+                    throw WGException("Interface Address 不能为空");
+                }
+
+                if (!isValidCIDR(conf.inter.ipArea.cidr, conf.inter.ipArea.address.family)) {
+                    throw WGException("Interface Address CIDR 无效，IPv4 范围应为 0-32，IPv6 范围应为 0-128");
+                }
+
+                for (const auto &dns: conf.inter.dns) {
+                    if (!isValidIPAddress(ipToStr(dns))) {
+                        throw WGException("Interface DNS 地址格式无效: " + ipToStr(dns));
                     }
                 }
 
-                if (peer.persistentKeepalive > 65535) {
-                    throw WireGuard::WGException("Peer PersistentKeepalive 无效，最大值应为 65535");
+                if (conf.peers.empty()) {
+                    throw WGException("必须至少配置一个 Peer");
+                }
+
+                for (const auto &peer: conf.peers) {
+                    if (peer.publicKey[0] == 0) {
+                        throw WGException("Peer PublicKey 不能为空");
+                    }
+
+                    if (peer.endpoint.ipStrOrDomain.empty()) {
+                        throw WGException("Peer Endpoint 地址不能为空");
+                    }
+
+                    if (!isValidIPAddress(peer.endpoint.ipStrOrDomain) &&
+                        !isValidDomain(peer.endpoint.ipStrOrDomain)) {
+                        throw WGException("Peer Endpoint 地址格式无效: " + peer.endpoint.ipStrOrDomain);
+                    }
+
+                    if (!isValidPort(peer.endpoint.port)) {
+                        throw WGException("Peer Endpoint 端口无效，范围应为 1-65535");
+                    }
+
+                    if (peer.allowedIPs.empty()) {
+                        throw WGException("Peer AllowedIPs 不能为空");
+                    }
+
+                    for (const auto &ip: peer.allowedIPs) {
+                        if (ip.cidr == static_cast<uint32_t>(-1)) {
+                            throw WGException("Peer AllowedIPs CIDR 不能为空");
+                        }
+                        if (!isValidCIDR(ip.cidr, ip.address.family)) {
+                            throw WGException("Peer AllowedIPs CIDR 无效，IPv4 范围应为 0-32，IPv6 范围应为 0-128");
+                        }
+                    }
+
+                    if (peer.persistentKeepalive > 65535) {
+                        throw WGException("Peer PersistentKeepalive 无效，最大值应为 65535");
+                    }
                 }
             }
         }
-    }
 
         WGConf readConfFileToEntity(const std::string &content) {
             WGConf conf{};
@@ -233,7 +232,7 @@ namespace WireGuard {
 
                 if (inInterface) {
                     if (key == "PrivateKey") {
-                        conf.inter.privateKey = WireGuard::crypto::base642Bin32Array(value);
+                        conf.inter.privateKey = crypto::base642Bin32Array(value);
                     } else if (key == "Address") {
                         size_t slashPos = value.find('/');
                         if (slashPos != std::string::npos) {
@@ -249,7 +248,7 @@ namespace WireGuard {
                     }
                 } else if (inPeer && currentPeer) {
                     if (key == "PublicKey") {
-                        currentPeer->publicKey = WireGuard::crypto::base642Bin32Array(value);
+                        currentPeer->publicKey = crypto::base642Bin32Array(value);
                     } else if (key == "Endpoint") {
                         size_t colonPos = value.rfind(':');
                         if (colonPos != std::string::npos) {
@@ -272,6 +271,8 @@ namespace WireGuard {
                         }
                     } else if (key == "PersistentKeepalive") {
                         currentPeer->persistentKeepalive = static_cast<uint32_t>(std::stoi(value));
+                    } else if (key == "PreSharedKey") {
+                        currentPeer->preSharedKey = std::make_shared<WGKey>(crypto::base642Bin32Array(value));
                     }
                 }
             }
@@ -290,7 +291,7 @@ namespace WireGuard {
         }
 
         std::string readConfFileToJson(const std::string &content) {
-            WGConf conf = readConfFileToEntity(content);
+            const WGConf conf = readConfFileToEntity(content);
             return wgConfToJson(conf);
         }
 
@@ -299,7 +300,7 @@ namespace WireGuard {
             json << "{";
 
             json << "\"interface\":{";
-            json << R"("privateKey":")" << WireGuard::crypto::bin32Array2Base64(conf.inter.privateKey) << "\",";
+            json << R"("privateKey":")" << crypto::bin32Array2Base64(conf.inter.privateKey) << "\",";
             json << "\"address\":{";
             json << R"("ip":")" << ipToStr(conf.inter.ipArea.address) << "\",";
             json << "\"cidr\":" << conf.inter.ipArea.cidr;
@@ -317,7 +318,7 @@ namespace WireGuard {
                 if (i > 0) json << ",";
                 const auto &peer = conf.peers[i];
                 json << "{";
-                json << R"("publicKey":")" << WireGuard::crypto::bin32Array2Base64(peer.publicKey) << "\",";
+                json << R"("publicKey":")" << crypto::bin32Array2Base64(peer.publicKey) << "\",";
                 json << "\"endpoint\":{";
                 json << R"("ipStrOrDomain":")" << peer.endpoint.ipStrOrDomain << "\",";
                 json << "\"port\":" << peer.endpoint.port;
@@ -330,6 +331,9 @@ namespace WireGuard {
                 }
                 json << "],";
                 json << "\"persistentKeepalive\":" << peer.persistentKeepalive;
+                if (peer.preSharedKey) {
+                    json << R"(,"preSharedKey":")" << crypto::bin32Array2Base64(peer.publicKey) << "\"";
+                }
                 json << "}";
             }
             json << "]";

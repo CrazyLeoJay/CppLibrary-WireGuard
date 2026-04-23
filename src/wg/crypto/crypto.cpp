@@ -39,7 +39,7 @@ namespace WireGuard {
         std::string bin2Hex(const uint8_t *data, const size_t &len) {
             std::vector<char> hex_out(len * 2 + 1); // +1 for null terminator
             sodium_bin2hex(hex_out.data(), hex_out.size(), data, len);
-            return std::string(hex_out.data(), len * 2);
+            return std::string{hex_out.data(), len * 2};
         }
 
         std::string bin2Hex(const uint32_t &data) {
@@ -47,10 +47,10 @@ namespace WireGuard {
         }
 
         std::string bin2B64(const uint8_t *data, const size_t &len) {
-            auto resultLen = sodium_base64_ENCODED_LEN(len, sodium_base64_VARIANT_ORIGINAL);
+            const auto resultLen = sodium_base64_ENCODED_LEN(len, sodium_base64_VARIANT_ORIGINAL);
             std::vector<char> hex_out(resultLen); // +1 for null terminator
             sodium_bin2base64(hex_out.data(), resultLen, data, len, sodium_base64_VARIANT_ORIGINAL);
-            return std::string(hex_out.data(), resultLen);
+            return std::string{hex_out.data(), resultLen};
         }
 
         std::vector<uint8_t> b642bin(const std::string &b64Str) {
@@ -77,7 +77,7 @@ namespace WireGuard {
             return hex_out;
         }
 
-        std::vector<uint8_t> hex2Bin(std::string hexStr) {
+        std::vector<uint8_t> hex2Bin(const std::string &hexStr) {
             std::vector<uint8_t> bin_out(hexStr.size() / 2 + 1);
             size_t bin_len = 0;
             sodium_hex2bin(
@@ -89,15 +89,15 @@ namespace WireGuard {
             return bin_out;
         }
 
-        const std::array<uint8_t, 32> base642Bin32Array(const std::string &b64) { return Base64::key_from_base64(b64); }
+        std::array<uint8_t, 32> base642Bin32Array(const std::string &b64) { return Base64::key_from_base64(b64); }
 
-        const std::string bin32Array2Base64(const std::array<uint8_t, 32> &bytes) {
+        std::string bin32Array2Base64(const std::array<uint8_t, 32> &bytes) {
             // sodium_bin2base64 的输出缓冲区
             char b64[sodium_base64_ENCODED_LEN(32, sodium_base64_VARIANT_ORIGINAL)];
 
             // 直接转换二进制到 Base64
             sodium_bin2base64(b64, sizeof(b64), bytes.data(), 32, sodium_base64_VARIANT_ORIGINAL);
-            return std::string(b64);
+            return std::string{b64};
         }
 
 
@@ -120,6 +120,7 @@ namespace WireGuard {
             // 返回值：0 表示成功，-1 表示失败
             return crypto_scalarmult_curve25519_base(pub.data(), priv.data()) == 0;
         }
+
         SymmetricKey dh(const PrivateKey &private_key, const PublicKey &public_key) {
             SymmetricKey shared;
             if (crypto_scalarmult_curve25519(shared.data(), private_key.data(), public_key.data()) != 0) {
