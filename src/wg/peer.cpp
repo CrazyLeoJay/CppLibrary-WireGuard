@@ -39,7 +39,7 @@ namespace WireGuard {
 
     void Peer::updateEndpoint(Endpoint ep) { endpoint = ep; }
 
-    bool WireGuard::Peer::isCanSendData(const bool &iAmInitiator) {
+    bool Peer::isCanSendData(const bool &iAmInitiator) {
         if (iAmInitiator) {
             return noiseSend.canSendData();
         } else {
@@ -47,12 +47,12 @@ namespace WireGuard {
         }
     }
 
-    void WireGuard::Peer::updateHeartbeatPacketSendTime() { this->lastKeepaliveSent_ = Clock::now(); }
+    void Peer::updateHeartbeatPacketSendTime() { this->lastKeepaliveSent_ = Clock::now(); }
 
-    std::chrono::milliseconds WireGuard::Peer::heartbeatPacketSendWaitTime() {
+    std::chrono::milliseconds Peer::heartbeatPacketSendWaitTime() const {
         // 计算等待时间
-        auto wait = std::chrono::seconds(config.keepaliveInterval) - (Clock::now() - lastKeepaliveSent_);
-        auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(wait);
+        const auto wait = std::chrono::seconds(config.keepaliveInterval) - (Clock::now() - lastKeepaliveSent_);
+        const auto wait_ms = std::chrono::duration_cast<std::chrono::milliseconds>(wait);
         return std::max(wait_ms, std::chrono::milliseconds(0));
     }
 
@@ -72,14 +72,14 @@ namespace WireGuard {
 
     std::vector<uint8_t> Peer::decryptPacket(const MessageData *msg, const size_t &len) const {
         std::lock_guard<std::mutex> guard(mutex_);
-        auto kp = keyPairs_.getCurrent();
+        const auto kp = keyPairs_.getCurrent();
         if (!kp || !kp->sending.isValid) {
             throw WGException("密钥失效"); // 无有效密钥或发送方向失效
         }
 
-        size_t cipherLen = len - sizeof(MessageData);
+        const size_t cipherLen = len - sizeof(MessageData);
         const uint8_t *data = msg->encryptedData;
-        auto nonce = msg->counter;
+        const auto nonce = msg->counter;
         std::vector<uint8_t> plaintext;
         kp->decrypt(plaintext, data, cipherLen, nonce);
         return plaintext;
@@ -90,7 +90,7 @@ namespace WireGuard {
         // 创建 keyPair
         auto keyPair = iAmInitiator ? noiseSend.makeKeyPair(true) : noiseReceive.makeKeyPair(false);
         // 设置当前Peer的 keyPair
-        auto currentKp = keyPairs_.getCurrent();
+        const auto currentKp = keyPairs_.getCurrent();
         if (currentKp) {
             keyPairs_.setPrevious(currentKp);
         }
@@ -114,10 +114,10 @@ namespace WireGuard {
         lastDataReceived_ = Clock::now(); // 更新最后接收时间
     }
 
-    void Peer::needsReKey() {
+    void Peer::needsReKey() const {
         std::lock_guard<std::mutex> guard(mutex_);
 
-        auto kp = keyPairs_.getCurrent();
+        const auto kp = keyPairs_.getCurrent();
         if (!kp) {
             throw WGException("当前没有密钥");
         }
@@ -167,7 +167,7 @@ namespace WireGuard {
     void Peer::clear() {
     }
 
-    void WireGuard::Peer::init() {
+    void Peer::init() {
         if (std::all_of(clientConfig.private_key.begin(), clientConfig.private_key.end(), [](uint8_t it) {
             return it == 0;
         })) {
@@ -209,7 +209,7 @@ namespace WireGuard {
         return msg;
     }
 
-    void WireGuard::Peer::verifyHandshakeInitiationResponse(const MessageResponse &msg) {
+    void Peer::verifyHandshakeInitiationResponse(const MessageResponse &msg) {
         std::lock_guard<std::mutex> lock(handshakeMutex_);
         noiseSend.verifyHandshakeInitiationResponse(msg);
         lastReceivedHandshake_ = Clock::now();

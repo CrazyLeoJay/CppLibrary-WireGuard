@@ -305,7 +305,7 @@ namespace WireGuard {
         // 预先计算 DH
         dh = crypto::dh(local_private, remote_public);
         init_chain_key = crypto::hash(crypto::CONSTRUCTION);
-        auto hashBefore = crypto::mixHash(init_chain_key, crypto::IDENTIFIER);
+        const auto hashBefore = crypto::mixHash(init_chain_key, crypto::IDENTIFIER);
         crypto::printHashChainKey(hashBefore, init_chain_key, "init", [](const std::string &log) {
             LOG_DEBUG("%{public}s", log.c_str());
         });

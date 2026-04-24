@@ -248,7 +248,6 @@ namespace WireGuard {
 
     struct DeviceConfig {
         std::string device_name;
-        PublicKey public_key{};
         PrivateKey private_key{};
         std::shared_ptr<uint32_t> listener_port; // 监听端口默认没有，这样socket可以随机选择一个端口进行绑定
         std::shared_ptr<IPAddress> bind_address;

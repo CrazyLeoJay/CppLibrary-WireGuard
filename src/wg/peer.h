@@ -159,7 +159,7 @@ namespace WireGuard {
         /**
          * @return  返回还需要等待的心跳时间
          */
-        std::chrono::milliseconds heartbeatPacketSendWaitTime();
+        std::chrono::milliseconds heartbeatPacketSendWaitTime() const;
 
         /**
          * 加密数据包为要发送的数据 并且打包为 MessageData 格式
@@ -268,7 +268,7 @@ namespace WireGuard {
          * 
          *  @throw 需要重新握手，没有抛出则不需要
          */
-        void needsReKey();
+        void needsReKey() const;
 
         /**
          * @brief 获取当前使用的密钥对
