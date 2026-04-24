@@ -49,6 +49,7 @@ namespace WireGuard {
             WGKey privateKey;
             IpAddressArea ipArea;
             std::vector<IPAddress> dns;
+            std::shared_ptr<uint32_t> listenerPort; // 监听端口
         };
 
         struct WGConfPeer {

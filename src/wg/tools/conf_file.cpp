@@ -131,6 +131,14 @@ namespace WireGuard {
                 }
             }
 
+
+            if (conf.inter.listenerPort) {
+                if (!isValidPort(*conf.inter.listenerPort)) {
+                    throw WGException("Interface ListenerPort 值不合理: %s ", *conf.inter.listenerPort);
+                }
+            }
+
+
             if (conf.peers.empty()) {
                 throw WGException("必须至少配置一个 Peer");
             }
@@ -243,6 +251,8 @@ namespace WireGuard {
                         for (const auto &dns: dnsList) {
                             conf.inter.dns.push_back(parseIPAddress(dns));
                         }
+                    } else if (key == "ListenerPort") {
+                        conf.inter.listenerPort = std::make_shared<uint32_t>(std::stoi(value));
                     }
                 } else if (inPeer && currentPeer) {
                     if (key == "PublicKey") {
