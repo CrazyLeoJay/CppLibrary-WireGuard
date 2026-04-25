@@ -135,7 +135,7 @@ struct InterfaceCardView {
 
         Column() {
           Text('局域网IP地址').width('100%')
-          Text(`${this.data.conf.inter?.ipArea.address}/${this.data.conf.inter.ipArea?.cidr ??
+          Text(`${this.data.conf.inter?.ipArea.address.ip}/${this.data.conf.inter.ipArea?.cidr ??
             (this.data.conf.inter.ipArea?.address.isIpv4 ? 32 : 128)}`).width('100%')
         }
 
