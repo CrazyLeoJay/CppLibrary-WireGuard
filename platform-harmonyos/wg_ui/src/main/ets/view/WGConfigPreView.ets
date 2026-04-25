@@ -148,8 +148,8 @@ struct InterfaceCardView {
 
       Toggle({
         type: ToggleType.Switch,
-        // isOn: this.vm.isVpnOpen
-        isOn: (this.vm.params != undefined && this.state.runningConfigId == this.vm.params?.id)
+        isOn: this.vm.isVpnOpen!!
+        // isOn: (this.vm.params != undefined && this.state.runningConfigId == this.vm.params?.id)
       })
         .layoutGravity(LocalizedAlignment.TOP_END)
         .margin({

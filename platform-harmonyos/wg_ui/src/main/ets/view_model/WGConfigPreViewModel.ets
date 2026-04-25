@@ -17,7 +17,7 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import {
-  LLog, Tools, VpnConnHelper, WGConfInterface, WGConfPeer, WGDBConf, WireGuard
+  ConnectState, LLog, Tools, WGConfPeer, WGDBConf, WireGuard
 } from 'wg_tunnel';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -28,7 +28,16 @@ export default class WGConfigPreViewModel {
   nav: NavPathStack = new NavPathStack();
   params?: WGConfigPreViewParams
   @Trace data?: WGDBConf
-  private helper?: VpnConnHelper;
+  /**
+   * 用于判断当前Vpn是否运行中
+   * @returns 当前Vpn是否运行中
+   */
+  @Trace isVpnOpen: boolean = false;
+
+  constructor() {
+    const state: ConnectState = WireGuard.getRunningServer();
+    this.isVpnOpen = this.params != undefined && state.runningConfigId == this.params?.id
+  }
 
   @Computed
   get client(): WGDBConf | undefined {
@@ -40,13 +49,6 @@ export default class WGConfigPreViewModel {
     return this.data?.conf.peers ?? []
   }
 
-  /**
-   * 用于判断当前Vpn是否运行中
-   * @returns 当前Vpn是否运行中
-   */
-  get isVpnOpen() {
-    return false;
-  }
 
   async loadData(params: WGConfigPreViewParams) {
     this.data = WireGuard.helper.config.getConfigForId(params.id)
@@ -102,7 +104,14 @@ export default class WGConfigPreViewModel {
       //     })
       // }
     } catch (e) {
-      LLog.error(TAG, e);
+      this.isVpnOpen = false;
+      context.getPromptAction().showToast({
+        message: `VPN开启失败：${e}}`
+      })
+      LLog.error(TAG, {
+        error: e,
+        message: "开启VPN异常"
+      });
     }
   }
 }
