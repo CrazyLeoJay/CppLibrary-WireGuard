@@ -14,17 +14,18 @@
  * limitations under the License.
  *
  */
-import native, { KeyPair } from 'libwg_tunnel.so';
+import native from 'libwg_tunnel.so';
 import { DatabaseHelper } from './db/wgdb';
 import { Context } from '@ohos.abilityAccessCtrl';
 import WGDao from './db/WGDao';
-import { WGDeviceConfig } from './entity/WGClientConfig';
+import { makeWGConf2VpnStartConfig, WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
 import ConnectState from './entity/ConnectState';
 import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
 import { bundleManager, common } from '@kit.AbilityKit';
+import { IPAddressArea, KeyPair, WGConf } from './entity/napi_entity';
 
 const TAG = "wgHelper"
 
@@ -160,6 +161,15 @@ export namespace WireGuard {
     }
   }
 
+  /**
+   * 将数据库实体转换为可以启动的vpn参数
+   * @param config 数据库实体
+   * @returns vpn启动参数
+   */
+  export async function toVpnStartConfig(config: WGDBConf): Promise<WGDeviceConfig> {
+    return await makeWGConf2VpnStartConfig(config)
+  }
+
   /*
    * 其他功能
    */
@@ -177,18 +187,37 @@ export namespace WireGuard {
     return AppStorageV2.connect<ConnectState>(ConnectState, () => new ConnectState())!;
   }
 
+  export async function readWgConf(qrContent: string): Promise<WGConf> {
+    let result = await native.readWGConf(qrContent);
+    // LLog.info(TAG, `扫描：${JSON.stringify(result)}`)
+    return result;
+  }
 
-  export async function configToJson(qrContent: string) {
-    try {
-      let result = await native.readWGConf(qrContent);
-      LLog.info(TAG, `扫描：${JSON.stringify(result)}`)
+  export namespace Tools {
+    export async function isIpv4(ip: string): Promise<boolean> {
+      return await native.isIpv4(ip);
+    }
 
-      // helper.config.insertNewConfig({
-      //
-      // })
+    export async function isIpv6(ip: string): Promise<boolean> {
+      return await native.isIpv6(ip);
+    }
 
-    } catch (e) {
-      LLog.error(TAG, e);
+    /**
+     * 是否为IP地址
+     * @param ip
+     * @returns
+     */
+    export async function isIpAddress(ip: string): Promise<boolean> {
+      return await native.isIpAddress(ip);
+    }
+
+    /**
+     * 是否为域名
+     * @param ip
+     * @returns
+     */
+    export async function isValidDomain(domain: string): Promise<boolean> {
+      return await native.isValidDomain(domain);
     }
   }
 }
@@ -270,23 +299,22 @@ export class VpnConnHelper {
  * @returns
  */
 export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
-  const vpnIp = config.device.vpnIp!;
-  const vpnAddress = vpnIp.ip!;
-  const vpnAddressFamily = vpnIp.isIpv4 ? 1 : 2;
-  const vpnAddressPrefixLen = config.device.vpnIp?.cidr ?? 32
-  const dns = config.device.dns ?? []
+  const vpnIp = config.vpn.vpnIp!;
+  const vpnAddress = vpnIp.address.ip!;
+  const vpnAddressFamily = vpnIp.address.isIpv4 ? 1 : 2;
+  const vpnAddressPrefixLen = config.vpn.vpnIp?.cidr ?? 32
+  const dns = config.vpn.dns ?? []
   if (config.peers.length == 0) {
     throw new WGAppException("未配置Peer");
   }
   const routes: vpnExtension.RouteInfo[] = config.peers.map((peer) => {
-    // todo 需要将域名转为ip
-    const remoteIp = peer.endpoint.ipStrOrDomain;
-    return peer.allowedIps.map((allowed) => {
+    const remoteIp = peer.endpoint.address.ip;
+    return peer.allowedIps.map((allowed: IPAddressArea) => {
       return {
         interface: "vpn-tun",
         destination: {
-          address: { address: allowed.ip, family: allowed.isIpv4 ? 1 : 2 },
-          prefixLength: allowed.cidr ?? (allowed.isIpv4 ? 32 : 128),
+          address: { address: allowed.address.ip, family: allowed.address.isIpv4 ? 1 : 2 },
+          prefixLength: allowed.cidr ?? (allowed.address.isIpv4 ? 32 : 128),
         },
         gateway: {
           address: remoteIp,
@@ -303,7 +331,7 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
       address: { address: vpnAddress, family: vpnAddressFamily }, prefixLength: vpnAddressPrefixLen
     }],
     mtu: 1400,
-    dnsAddresses: dns,
+    dnsAddresses: dns.map((it) => it.ip),
     routes: routes,
   }
   return vpnConfig;

@@ -14,7 +14,7 @@
  * limitations under the License.
  *
  */
-import { ClientRegisterConfig, KeyPair, WGConf } from './entity';
+import { DeviceRegisterConfig, KeyPair, WGConf } from '../../../ets/model/entity/napi_entity';
 
 export const makeKeyPair: () => Promise<KeyPair>;
 
@@ -51,6 +51,10 @@ export function isValidDomain(domain: string): Promise<boolean>;
  */
 export function isValidBase64Key(key: string): Promise<boolean>;
 
+/**
+ * 将域名转为iP
+ */
+export function dnsToIp(domain: string): Promise<string>;
 
 /**
  * @author leojay`fu
@@ -64,7 +68,7 @@ export class WireGuardDevice {
    * @returns socket 连接符
    */
   // @ts-ignore
-  async initVpn(config: ClientRegisterConfig, listener: (fd: number) => void): Promise<number>;
+  async initVpn(config: DeviceRegisterConfig, listener: (fd: number) => void): Promise<number>;
 
   // @ts-ignore
   async start(tunFd: number): Promise<void>;
@@ -73,4 +77,3 @@ export class WireGuardDevice {
   async close(): Promise<void>;
 }
 
-export { KeyPair };

@@ -6,7 +6,7 @@ export interface KeyPair {
 /**
  * @author leojay`fu
  */
-export interface ClientRegisterConfig {
+export interface DeviceRegisterConfig {
   device: DeviceConfig; // 客户端配置
   peers: PeerConfig[]; // 对等端配置列表
 }
@@ -15,9 +15,7 @@ export interface ClientRegisterConfig {
  * @author leojay`fu
  */
 export interface DeviceConfig {
-  deviceName: string; // 设备名称，或者配置名
   privateKey: string; // 本地私钥
-  publicKey: string; // 本地公钥
   listenerPort?: number; //本地监听端口(0或者空表示使用默认值 51820)
   bindAddress?: IPAddress; // 绑定本地ip，一般是null，如果有多网卡情况，可以指定ip监听。
 }
@@ -28,7 +26,7 @@ export interface DeviceConfig {
 export interface PeerConfig {
   publicKey: string; // 对等节点的PublicKey 必有
   endpoint: Endpoint; // 远端IP、端口 必有
-  allowedIps: IPAddress[]; // 允许访问的IP规则 必须有，通过这个去选择流量
+  allowedIps: IPAddressArea[]; // 允许访问的IP规则 必须有，通过这个去选择流量
   preSharedKey?: string; // 预共享密钥。可选
   keepaliveInterval?: number; // 保活时间间隔 s
 }
@@ -69,6 +67,7 @@ export interface WGConf {
 export interface WGConfInterface {
   privateKey: string;
   ipArea: IPAddressArea;
+  listenerPort?: number,
   dns: IPAddress[];
 }
 
@@ -76,7 +75,7 @@ export interface WGConfPeer {
   publicKey: string;
   endpoint: WebSitePoint; // 要建立链接的站点地址
   allowedIPs: IPAddressArea[]; // 需要路由的ip地址域
-  persistentKeepalive: Number; // 保活时间
+  keepaliveInterval: Number; // 保活间隔
   preSharedKey?: string; // 共享密钥，可能为null
 }
 

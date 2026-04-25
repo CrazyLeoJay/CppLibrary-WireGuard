@@ -48,7 +48,7 @@ namespace WireGuard {
 
             const int iResult = getaddrinfo(domain.c_str(), nullptr, &hints, &result);
             if (iResult != 0) {
-                throw std::runtime_error("get addrinfo failed: " + std::string(gai_strerror(iResult)));
+                throw std::runtime_error("域名解析失败: " + std::string(gai_strerror(iResult)));
             }
 
             IPAddress ipAddress{};

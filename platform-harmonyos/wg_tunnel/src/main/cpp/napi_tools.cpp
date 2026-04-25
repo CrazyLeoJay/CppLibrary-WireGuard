@@ -230,7 +230,7 @@ namespace NapiTools {
             if (ns != napi_ok) {
                 throw WireGuard::WGException("napi调用异常");
             }
-            ns = napi_set_named_property(env, result, "persistentKeepalive", nvKeepalive);
+            ns = napi_set_named_property(env, result, "keepaliveInterval", nvKeepalive);
             if (ns != napi_ok) {
                 throw WireGuard::WGException("napi调用异常");
             }
@@ -289,7 +289,7 @@ namespace NapiTools {
     }
 
 
-    std::string napiGetString(napi_env &env,napi_value obj) {
+    std::string napiGetString(napi_env &env, napi_value obj) {
         napi_status ns;
         size_t len;
         ns = napi_get_value_string_utf8(env, obj, nullptr, 0, &len);
@@ -303,13 +303,22 @@ namespace NapiTools {
         }
         return std::string{buf};
     }
-    
-    napi_value makeNapiBool(napi_env &env, const bool &value){
+
+    napi_value makeNapiBool(napi_env &env, const bool &value) {
         napi_value nvBool;
         auto ns = napi_get_boolean(env, value, &nvBool);
-          if (ns != napi_ok) {
+        if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
         return nvBool;
+    }
+
+    napi_value makeNapiString(napi_env &env, const std::string &value) {
+        napi_value nvValue;
+        auto ns = napi_create_string_utf8(env, value.c_str(), value.length(), &nvValue);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        return nvValue;
     }
 };

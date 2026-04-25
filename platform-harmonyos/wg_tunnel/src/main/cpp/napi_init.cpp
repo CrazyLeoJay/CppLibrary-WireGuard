@@ -1,6 +1,7 @@
 #include "napi/native_api.h"
 #include "WireGuardDevice.h"
 #include "tools/conf_file.h"
+#include "tools/wg_dns.h"
 #include <cstdint>
 #include <hilog/log.h>
 
@@ -291,6 +292,25 @@ static napi_value NAPI_Global_isValidBase64Key(napi_env env, napi_callback_info 
         return nullptr;
     }
 }
+static napi_value NAPI_Global_dnsToIp(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0]);
+//        bool result = WireGuard::Tools::isValidBase64Key(nvContent);
+        auto ip = WireGuard::DNS::readDomainToIp(nvContent);
+        return NapiTools::makeNapiString(env, ip.toIpStr());
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
     wg_napi::Init(env, exports);
@@ -305,8 +325,9 @@ static napi_value Init(napi_env env, napi_value exports) {
         {     "isIpAddress", nullptr,      NAPI_Global_isIpAddress, nullptr, nullptr, nullptr, napi_default, nullptr},
         {   "isValidDomain", nullptr,    NAPI_Global_isValidDomain, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {         "dnsToIp", nullptr,          NAPI_Global_dnsToIp, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
-    napi_define_properties(env, exports, 4, desc);
+    napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
 }
 EXTERN_C_END

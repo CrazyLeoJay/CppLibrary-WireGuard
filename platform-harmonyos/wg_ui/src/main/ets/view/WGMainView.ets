@@ -15,10 +15,10 @@
  *
  */
 import WGMainViewModel, { MainItemData } from '../view_model/WGMainViewModel';
-import { ComposeTitleBar, SymbolGlyphModifier } from '@kit.ArkUI';
-import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
+import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
+import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
 
 const TAG = "WG主页";
 
@@ -78,12 +78,22 @@ export struct WGMainViewNavDest {
   }
 }
 
+@Builder
+function buildDialog(params: QRCodeNewParams) {
+  QRCodeNewWGConfDialog({
+    wgConf: params.wgConf,
+  })
+}
+
+
 /**
  * WG主界面
  */
 @ComponentV2
 export struct WGMainView {
   @Param vm: WGMainViewModel = new WGMainViewModel();
+  @Local isShow: boolean = true;
+
   funcBtn: MenuElement[] = [
     {
       value: "导入配置",
@@ -95,6 +105,28 @@ export struct WGMainView {
       value: "扫描二维码添加",
       action: () => {
         this.vm.scanQRCodeAdd(this.getUIContext())
+          .then((wgConf) => {
+            const contentNode = new ComponentContent(this.getUIContext(), wrapBuilder(buildDialog),
+              {
+                wgConf: wgConf
+              } as QRCodeNewConfig
+            );
+            this.getUIContext()
+              .getPromptAction()
+              .openCustomDialogWithController(contentNode, new promptAction.DialogController(), {
+                onDidDisappear: () => {
+                  // 重新加载数据
+                  this.vm.loadConfigs();
+                }
+              })
+              .then(() => {
+                LLog.info(TAG, "open 弹窗")
+                contentNode.dispose()
+              })
+              .catch((e: BusinessError) => {
+                LLog.info(TAG, e);
+              })
+          })
       }
     },
     {
@@ -106,7 +138,6 @@ export struct WGMainView {
       }
     },
   ];
-  @Local isShow: boolean = true;
 
   aboutToAppear(): void {
     this.vm.loadConfigs();

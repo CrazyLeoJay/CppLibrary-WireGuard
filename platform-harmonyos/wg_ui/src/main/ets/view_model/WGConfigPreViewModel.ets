@@ -14,12 +14,11 @@
  * limitations under the License.
  *
  */
-import { DeviceConfig, PeerConfig, WGDeviceConfig } from 'wg_tunnel/src/main/ets/model/entity/WGClientConfig';
-import { VpnConnHelper, WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
-import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import { pasteboard } from '@kit.BasicServicesKit';
-import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
+import {
+  LLog, Tools, VpnConnHelper, WGConfInterface, WGConfPeer, WGDBConf, WireGuard
+} from 'wg_tunnel';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
@@ -28,17 +27,17 @@ const TAG = "配置查看"
 export default class WGConfigPreViewModel {
   nav: NavPathStack = new NavPathStack();
   params?: WGConfigPreViewParams
-  @Trace data?: WGDeviceConfig
+  @Trace data?: WGDBConf
   private helper?: VpnConnHelper;
 
   @Computed
-  get client(): DeviceConfig | undefined {
-    return this.data?.device
+  get client(): WGDBConf | undefined {
+    return this.data
   }
 
   @Computed
-  get peers(): PeerConfig[] {
-    return this.data?.peers ?? []
+  get peers(): WGConfPeer[] {
+    return this.data?.conf.peers ?? []
   }
 
   /**
@@ -78,8 +77,9 @@ export default class WGConfigPreViewModel {
     try {
       const id = this.params!.id;
       const config = this.data!;
-
-      WireGuard.runWGConfig(context.getHostContext()!, id, config, isOn)
+      // 转化实体
+      const vpnConf = await WireGuard.toVpnStartConfig(config);
+      WireGuard.runWGConfig(context.getHostContext()!, id, vpnConf, isOn)
         .catch((e: BusinessError) => {
           LLog.error(TAG, e);
         })

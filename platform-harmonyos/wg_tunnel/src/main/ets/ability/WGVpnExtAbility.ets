@@ -17,8 +17,8 @@
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { Want } from '@kit.AbilityKit';
 import { LLog } from '../tools/LLog';
-import { WGDeviceConfig } from '../model/entity/WGClientConfig';
 import { VpnConnHelper, WireGuard } from '../model/WGHelper';
+import { WGDeviceConfig } from '../model/entity/WGConfigEntity';
 
 const TAG = "vpn_ability"
 

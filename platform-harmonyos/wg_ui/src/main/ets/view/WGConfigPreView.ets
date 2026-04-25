@@ -14,8 +14,7 @@
  * limitations under the License.
  *
  */
-import ConnectState from 'wg_tunnel/src/main/ets/model/entity/ConnectState';
-import { DeviceConfig, PeerConfig } from 'wg_tunnel/src/main/ets/model/entity/WGClientConfig';
+import { ConnectState, WGConfPeer, WGDBConf, WGDeviceConfig } from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
@@ -36,6 +35,7 @@ export struct WGConfigPreViewNavDest {
   aboutToAppear(): void {
 
   }
+
   build() {
     NavDestination() {
       WGConfigPreView({ vm: this.vm })
@@ -98,8 +98,13 @@ function cardBackgroundStyle() {
 @ComponentV2
 struct InterfaceCardView {
   @Param @Require vm: WGConfigPreViewModel
-  @Param @Require data: DeviceConfig
+  @Param @Require data: WGDBConf
   @Local state: ConnectState = WireGuard.getRunningServer();
+  @Local publicKey: string = ""
+
+  async aboutToAppear(): Promise<void> {
+    this.publicKey = await WireGuard.genPublicKey(this.data.conf.inter.privateKey)
+  }
 
   build() {
     Stack() {
@@ -110,12 +115,12 @@ struct InterfaceCardView {
           .align(Alignment.Start)
         Column() {
           Text('名称').width('100%')
-          Text(this.data.deviceName).width('100%')
+          Text(this.data.name).width('100%')
         }
 
         Column() {
           Text('公钥').width('100%')
-          Text(this.data.publicKey)
+          Text(this.publicKey)
             .width('100%')
             .maxLines(1)
             .ellipsisMode(EllipsisMode.END)
@@ -123,17 +128,20 @@ struct InterfaceCardView {
             .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
         .onClick(() => {
-          this.vm.copy44KeyToSystem(this.getUIContext(), this.data.publicKey)
+          if (this.publicKey.length > 0) {
+            this.vm.copy44KeyToSystem(this.getUIContext(), this.publicKey)
+          }
         })
 
         Column() {
           Text('局域网IP地址').width('100%')
-          Text(`${this.data.vpnIp?.ip}/${this.data.vpnIp?.cidr ?? (this.data.vpnIp?.isIpv4 ? 32 : 128)}`).width('100%')
+          Text(`${this.data.conf.inter?.ipArea.address}/${this.data.conf.inter.ipArea?.cidr ??
+            (this.data.conf.inter.ipArea?.address.isIpv4 ? 32 : 128)}`).width('100%')
         }
 
         Column() {
           Text('DNS服务器').width('100%')
-          Text(`${this.data.dns?.join(", ") ?? "(未定义)"}`).width('100%')
+          Text(`${this.data.conf.inter.dns?.map((it) => it.ip).join(", ") ?? "(未定义)"}`).width('100%')
         }
       }
       .cardBackgroundStyle()
@@ -162,7 +170,7 @@ struct InterfaceCardView {
 @ComponentV2
 struct PeerCardView {
   @Param @Require vm: WGConfigPreViewModel
-  @Param @Require data: PeerConfig
+  @Param @Require data: WGConfPeer
   @Param @Require index: number
   private TAG = "";
 
@@ -186,12 +194,12 @@ struct PeerCardView {
 
       Column() {
         Text('路由的IP地址（段）').width('100%')
-        Text(`${this.data.allowedIps.map((it) => `${it.ip}/${it.cidr ?? 32}`).join(", ")}`).width('100%')
+        Text(`${this.data.allowedIPs.map((it) => `${it.address.ip}/${it.cidr ?? 32}`).join(", ")}`).width('100%')
       }
 
       Column() {
         Text(`对端`).width('100%')
-        Text(`${this.data.endpoint.address.ip}:${this.data.endpoint.port}`).width('100%')
+        Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%')
       }
 
       Column() {

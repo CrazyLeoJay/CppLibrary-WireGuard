@@ -16,8 +16,11 @@
  */
 import { ORM } from '@ibestservices/ibest-orm';
 import { JSON } from '@kit.ArkTS';
-import { WGDeviceConfig } from '../entity/WGClientConfig';
+import { LLog, Tools } from '../../../../../Index';
+import { WGDBConf } from '../entity/WGConfigEntity';
 import WgConfigTable from './table/WgConfigTable';
+
+const TAG = "db"
 
 /**
  * wg 配置数据操作
@@ -36,7 +39,7 @@ export default class WGDao {
       .find()
   }
 
-  getConfigForId(id: number): WGDeviceConfig | undefined {
+  getConfigForId(id: number): WGDBConf | undefined {
     let result = this.orm.query(WgConfigTable)
       .select("config")
       .where({ id: id })
@@ -44,23 +47,23 @@ export default class WGDao {
     if (!result || !result.config || result.config?.length == 0) {
       return undefined;
     }
-    return JSON.parse(result.config) as WGDeviceConfig
+    return JSON.parse(result.config) as WGDBConf
   }
 
-  insertNewConfig(config: WGDeviceConfig) {
+  insertNewConfig(config: WGDBConf) {
     let cStr = JSON.stringify(config);
     const table = new WgConfigTable();
-    table.name = config.device.deviceName;
+    table.name = config.name;
     table.config = cStr;
     this.orm.insert(table);
   }
 
-  updateConfig(id: number, config: WGDeviceConfig) {
+  updateConfig(id: number, config: WGDBConf) {
     let cStr = JSON.stringify(config);
     this.orm.query(WgConfigTable)
       .where({ id: id })
       .update({
-        name: config.device.deviceName,
+        name: config.name,
         config: cStr,
       });
   }

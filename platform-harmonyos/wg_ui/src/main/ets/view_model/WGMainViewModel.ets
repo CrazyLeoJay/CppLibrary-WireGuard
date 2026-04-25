@@ -20,6 +20,7 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
+import { WGConf } from 'wg_tunnel';
 
 const TAG = "主页"
 
@@ -52,20 +53,15 @@ export default class WGMainViewModel {
     this.wgList.splice(index, 1)
   }
 
-  scanQRCodeAdd(context: UIContext) {
-    scanBarcode.startScanForResult(context.getHostContext(), {
+  scanQRCodeAdd(context: UIContext): Promise<WGConf> {
+    return scanBarcode.startScanForResult(context.getHostContext(), {
       scanTypes: [scanCore.ScanType.QR_CODE],
       enableMultiMode: true,
       enableAlbum: true
     })
       .then((data: scanBarcode.ScanResult) => {
         LLog.info(TAG, `扫描结果：${data.originalValue}`)
-        // todo 通过二维码内容识别为配置，并添加入数据列表中
-
-        WireGuard.configToJson(data.originalValue)
-      })
-      .catch((e: BusinessError) => {
-        LLog.error(TAG, { error: e, message: "扫码异常" })
+        return WireGuard.readWgConf(data.originalValue)
       })
   }
 

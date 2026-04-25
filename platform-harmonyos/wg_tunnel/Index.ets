@@ -13,6 +13,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-export { WireGuard } from './src/main/ets/model/WGHelper';
-
-export { LLog } from './src/main/ets/tools/LLog';
+export * from './src/main/ets/model/WGHelper';
+export * from './src/main/ets/tools/LLog';
+export { default as Tools } from './src/main/ets/tools/tools';
+export * from './src/main/ets/tools/http';
+export * from './src/main/ets/model/entity/napi_entity';
+export * from './src/main/ets/model/entity/WGConfigEntity';
+export * from './src/main/ets/model/entity/PeerEditConfig';
+export * from './src/main/ets/model/entity/ClientEditConfig';
+export { default as ConnectState } from './src/main/ets/model/entity/ConnectState';

@@ -15,6 +15,10 @@
     {
       "name": "wg_float_button_svg_color",
       "value": "#000000"
+    },
+    {
+      "name": "wg_dialog_background_color",
+      "value": "#fff"
     }
   ]
 }

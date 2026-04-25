@@ -19,9 +19,9 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { pasteboard } from '@kit.BasicServicesKit';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
-import { IPAddress, PeerConfig, WGDeviceConfig } from 'wg_tunnel/src/main/ets/model/entity/WGClientConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
+import { IPAddressArea, WGConfPeer, WGDBConf } from 'wg_tunnel';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 
@@ -103,12 +103,12 @@ export default class WGNewConfigViewModel {
    * PrivateKey:CKvZGm8S0HoQUwvUIsZ8wd39Bqt/5Z5vaJNuKX4LHGI=
    * PublicKey :gN9lnPxypH67F7KystwjDdpwNsT007AV8s/MOOc0QGM=
    */
-  save(context: UIContext) {
+  async save(context: UIContext) {
     // LLog.info(TAG, `config: ${json.stringify(this.client)}`)
     // LLog.info(TAG, `peer: ${json.stringify(this.peers)}`)
 
     try {
-      let db = this.checkAndMakeDBConfig();
+      let db = await this.checkAndMakeDBConfig();
       LLog.info(TAG, `db Config : ${JSON.stringify(db)}`)
       WireGuard.helper.config.insertNewConfig(db);
       this.nav.pop({});
@@ -148,7 +148,7 @@ export default class WGNewConfigViewModel {
    * 检查参数并且构建保存实体
    * @returns
    */
-  private checkAndMakeDBConfig(): WGDeviceConfig {
+  private async checkAndMakeDBConfig(): Promise<WGDBConf> {
     if (Tools.isBlank(this.client.deviceName)) {
       throw new WGAppException("设备名称不能为空")
     }
@@ -161,19 +161,19 @@ export default class WGNewConfigViewModel {
       throw new WGAppException("本地公钥格式异常")
     }
 
-    let ipAddress: IPAddress
+    let ipAddress: IPAddressArea
     if (Tools.isIpv4OrMark(this.client.vpnAddress)) {
       const ic = Tools.getIpCidr(this.client.vpnAddress!)
       if (ic.cidr < -1 || ic.cidr > 32) {
         throw new WGAppException("ipv4 掩码取值范围为0-32")
       }
-      ipAddress = { ip: ic.ip, isIpv4: true, cidr: ic.cidr }
+      ipAddress = { address: { ip: ic.ip, isIpv4: true, }, cidr: ic.cidr }
     } else if (Tools.isIpv6OrMark(this.client.vpnAddress)) {
       const ic = Tools.getIpCidr(this.client.vpnAddress!)
       if (ic.cidr < -1 || ic.cidr > 128) {
         throw new WGAppException("ipv6 掩码取值范围为0-128")
       }
-      ipAddress = { ip: ic.ip, isIpv4: false, cidr: ic.cidr }
+      ipAddress = { address: { ip: ic.ip, isIpv4: false }, cidr: ic.cidr }
     } else {
       throw new WGAppException(`局域网Ip地址（${this.client.vpnAddress}）不合法`)
     }
@@ -181,30 +181,31 @@ export default class WGNewConfigViewModel {
     if (this.peers.length == 0) {
       throw new WGAppException("至少包含一个 Peer")
     }
-    const dbPeers = this.peers.map((it) => this.checkForPeer(it))
-    const dbStr: WGDeviceConfig = {
-      device: {
-        deviceName: this.client.deviceName!,
-        privateKey: this.client.privateKey!,
-        publicKey: this.client.publicKey!,
-        listenerPort: this.client.listenerPort,
-        vpnIp: ipAddress,
-      },
-      peers: dbPeers,
-    }
-    return dbStr;
+    const dbPeers = await Promise.all(this.peers.map((it) => this.checkForPeer(it)));
+    return {
+      name: this.client.deviceName,
+      conf: {
+        inter: {
+          privateKey: this.client.privateKey,
+          ipArea: ipAddress,
+          listenerPort: this.client.listenerPort,
+          // dns:
+        },
+        peers: dbPeers,
+      }
+    } as WGDBConf;
   }
 
-  private checkForPeer(config: PeerEditConfig): PeerConfig {
+  private async checkForPeer(config: PeerEditConfig): Promise<WGConfPeer> {
     if (!Tools.is44Key(config.publicKey)) {
       throw new WGAppException("Peer 公钥格式异常")
     }
-    let isEndpointIpv4: boolean;
+    if (!config.address) {
+      throw new WGAppException("Peer 目标地址为空")
+    }
     // 远程端点
-    if (Tools.isIpv4OrPort(config.address)) {
-      isEndpointIpv4 = true
-    } else if (Tools.isIpv6OrPort(config.address)) {
-      isEndpointIpv4 = false
+    if (await WireGuard.Tools.isIpAddress(config.address) || await WireGuard.Tools.isValidDomain(config.address)) {
+      // 是ip或者域名
     } else {
       throw new WGAppException("地址格式异常，必须是合法的IP+端口")
     }
@@ -219,13 +220,13 @@ export default class WGNewConfigViewModel {
 
     // 路由
     const allowedIps = config.allowedIps!.map((it) => {
-      let ip: IPAddress;
+      let ip: IPAddressArea;
       if (Tools.isIpv4Mark(it)) {
         const ic = Tools.getIpCidr(it)
         if (ic.cidr < -1 || ic.cidr > 32) {
           throw new WGAppException(`${it} ipv4 掩码取值范围为0-32`)
         }
-        ip = { ip: ic.ip, cidr: ic.cidr, isIpv4: true }
+        ip = { address: { ip: ic.ip, isIpv4: true }, cidr: ic.cidr }
       } else if (Tools.isIpv4OrMark(it)) {
         throw new WGAppException(`${it} 需要配置掩码`)
       } else if (Tools.isIpv6Mark(it)) {
@@ -233,7 +234,7 @@ export default class WGNewConfigViewModel {
         if (ic.cidr < -1 || ic.cidr > 128) {
           throw new WGAppException(`${it} ipv6 掩码取值范围为0-128`)
         }
-        ip = { ip: ic.ip, cidr: ic.cidr, isIpv4: false }
+        ip = { address: { ip: ic.ip, isIpv4: false }, cidr: ic.cidr }
       } else if (Tools.isIpv6OrMark(it)) {
         throw new WGAppException(`${it} 需要配置掩码`)
       } else {
@@ -242,17 +243,16 @@ export default class WGNewConfigViewModel {
       return ip;
     })
 
-    const pc: PeerConfig = {
+    return {
       publicKey: config.publicKey!,
       endpoint: {
         ipStrOrDomain: ipPort.ipOrDomain,
         port: ipPort.port
       },
-      allowedIps: allowedIps,
+      allowedIPs: allowedIps,
       preSharedKey: config.preSharedKey,
       keepaliveInterval: config.keepaliveInterval,
-    }
-    return pc;
+    } as WGConfPeer;
   }
 }
 

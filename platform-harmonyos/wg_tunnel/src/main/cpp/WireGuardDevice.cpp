@@ -442,11 +442,9 @@ namespace wg_napi {
     }
 
     void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &device) {
-        // 获取 privateKey
         device.device_name = getPropString(env, arg, "deviceName");
+        // 获取 privateKey
         device.private_key = getPropToDecodeBase64WGKey(env, arg, "privateKey");
-        // 获取 publicKey
-        device.public_key = getPropToDecodeBase64WGKey(env, arg, "publicKey");
 
         if (isHasProp(env, arg, "listenerPort")) {
             // 获取 listenerPort
