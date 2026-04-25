@@ -14,7 +14,7 @@
  * limitations under the License.
  *
  */
-import { ConnectState, WGConfPeer, WGDBConf, WGDeviceConfig } from 'wg_tunnel';
+import { ConnectState, WGConfPeer, WGDBConf } from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
@@ -191,6 +191,23 @@ struct PeerCardView {
       .onClick(() => {
         this.vm.copy44KeyToSystem(this.getUIContext(), this.data.publicKey)
       })
+
+      if (this.data.preSharedKey) {
+        Column() {
+          Text('预共享密钥').width('100%')
+          Text(`${this.data.preSharedKey}`)
+            .width('100%')
+            .maxLines(1)
+            .layoutGravity(LocalizedAlignment.START)
+            .align(Alignment.Start)
+            .ellipsisMode(EllipsisMode.END)
+            .wordBreak(WordBreak.BREAK_ALL)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .onClick(() => {
+          this.vm.copy44KeyToSystem(this.getUIContext(), this.data.preSharedKey!)
+        })
+      }
 
       Column() {
         Text('路由的IP地址（段）').width('100%')
