@@ -21,6 +21,10 @@ import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
 import { WGConf } from 'wg_tunnel';
+import { fileIo, picker } from '@kit.CoreFileKit';
+import { common } from '@kit.AbilityKit';
+import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
+import { buffer } from '@kit.ArkTS';
 
 const TAG = "主页"
 
@@ -80,6 +84,45 @@ export default class WGMainViewModel {
       .catch((e: BusinessError) => {
         LLog.error(TAG, { error: e, message: "生成二维码异常" })
       })
+  }
+
+  /**
+   * @throws 解析异常
+   */
+  async readWGConfForSystemFile(uiContext: UIContext): Promise<WGConf> {
+    const documentSelectOptions = new picker.DocumentSelectOptions();
+    documentSelectOptions.maxSelectNumber = 1; // 最多选择5个文件
+    // // 指定选择的文件或者目录的URI（可选）
+    // documentSelectOptions.defaultFilePathUri = "file://docs/storage/Users/currentUser/test";
+    // 选择文件的后缀类型过滤（可选），例如只显示.txt和.pdf
+    // documentSelectOptions.fileSuffixChoices = ['文档|.conf'];
+    documentSelectOptions.fileSuffixFilters = ['WireGuard配置|.conf'];
+
+    let context = uiContext.getHostContext() as common.UIAbilityContext;
+    const documentViewPicker = new picker.DocumentViewPicker(context);
+    const uris: Array<string> = await documentViewPicker.select(documentSelectOptions)
+    if (uris.length != 1) {
+      throw new WGAppException("未选择到指定文件")
+    }
+    const resUrl = uris[0];
+    LLog.info(TAG, `资源：${resUrl}`)
+    let file: fileIo.File | undefined
+    try {
+      file = await fileIo.open(resUrl, fileIo.OpenMode.READ_ONLY)
+      // todo 一般情况下 1m 的内存足够配置，后续还是要在c++处构建可以通过流写入的方式
+      const buf = new ArrayBuffer(1024 * 1024)
+      const readLen = await fileIo.read(file.fd, buf)
+      if (readLen <= 0) {
+        throw new WGAppException("没有读取到配置")
+      }
+      const content = buffer.from(buf).toString()
+      // const content = await fileIo.read(fd);
+      return WireGuard.readWgConf(content)
+    } finally {
+      if (file) {
+        fileIo.close(file);
+      }
+    }
   }
 }
 

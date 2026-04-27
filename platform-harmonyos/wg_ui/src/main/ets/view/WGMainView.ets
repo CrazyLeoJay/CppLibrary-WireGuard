@@ -19,6 +19,7 @@ import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } 
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
+import { WGConf } from 'wg_tunnel';
 
 const TAG = "WG主页";
 
@@ -93,12 +94,18 @@ function buildDialog(params: QRCodeNewParams) {
 export struct WGMainView {
   @Param vm: WGMainViewModel = new WGMainViewModel();
   @Local isShow: boolean = true;
-
   funcBtn: MenuElement[] = [
     {
       value: "导入配置",
       action: () => {
-        // todo 通过文件系统，读取配置文件，识别后添加到数据列表
+        // 通过文件系统，读取配置文件，识别后添加到数据列表
+        this.vm.readWGConfForSystemFile(this.getUIContext())
+          .then((wgConf) => {
+            this.newConfigDialog(wgConf);
+          })
+          .catch((e: BusinessError) => {
+            LLog.error(TAG, e)
+          })
       }
     },
     {
@@ -106,26 +113,10 @@ export struct WGMainView {
       action: () => {
         this.vm.scanQRCodeAdd(this.getUIContext())
           .then((wgConf) => {
-            const contentNode = new ComponentContent(this.getUIContext(), wrapBuilder(buildDialog),
-              {
-                wgConf: wgConf
-              } as QRCodeNewConfig
-            );
-            this.getUIContext()
-              .getPromptAction()
-              .openCustomDialogWithController(contentNode, new promptAction.DialogController(), {
-                onDidDisappear: () => {
-                  // 重新加载数据
-                  this.vm.loadConfigs();
-                }
-              })
-              .then(() => {
-                LLog.info(TAG, "open 弹窗")
-                contentNode.dispose()
-              })
-              .catch((e: BusinessError) => {
-                LLog.info(TAG, e);
-              })
+            this.newConfigDialog(wgConf);
+          })
+          .catch((e: BusinessError) => {
+            LLog.error(TAG, e)
           })
       }
     },
@@ -211,6 +202,29 @@ export struct WGMainView {
           this.vm.deleteConfig(it.index, it.item);
         })
     }
+  }
+
+  newConfigDialog(wgConf: WGConf) {
+    const contentNode = new ComponentContent(this.getUIContext(), wrapBuilder(buildDialog),
+      {
+        wgConf: wgConf
+      } as QRCodeNewConfig
+    );
+    this.getUIContext()
+      .getPromptAction()
+      .openCustomDialogWithController(contentNode, new promptAction.DialogController(), {
+        onDidDisappear: () => {
+          // 重新加载数据
+          this.vm.loadConfigs();
+        }
+      })
+      .then(() => {
+        LLog.info(TAG, "open 弹窗")
+        contentNode.dispose()
+      })
+      .catch((e: BusinessError) => {
+        LLog.info(TAG, e);
+      })
   }
 }
 
