@@ -262,7 +262,7 @@ namespace WireGuard {
         uint8_t reserved_zero[3]{0};
         uint8_t reserved = 0;
         uint32_t receiverIndex{}; // 接收方的索引
-        uint8_t nonce[24]{}; // ChaCha20 的 nonce
+        uint8_t nonce[NONCE_LEN]{}; // ChaCha20 的 nonce
         uint8_t encryptedCookie[16 + 16]{}; // 加密的 Cookie + MAC
     };
 

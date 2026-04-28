@@ -47,7 +47,7 @@ namespace WireGuard {
     constexpr size_t HASH_LEN = 32;
     constexpr size_t AUTHTAG_LEN = 16;
     constexpr size_t COOKIE_LEN = 16;
-    constexpr size_t NONCE_LEN = 12;
+    constexpr size_t NONCE_LEN = 24;
     constexpr size_t COOKIE_NONCE_LEN = 12;
     constexpr size_t BLAKE2S_BLOCK_SIZE = 64;
     constexpr size_t BLAKE2S_HASH_SIZE = 32;

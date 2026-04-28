@@ -85,9 +85,6 @@ namespace WireGuard {
         // ========== 数据包队列 ==========
         std::queue<std::vector<uint8_t> > stagedPackets_; // 等待握手完成后发送的数据包队列
 
-        // ========== Cookie管理 ==========
-        CookieManager cookieManager;
-
     public:
         void init();
 
@@ -312,20 +309,6 @@ namespace WireGuard {
          * - 返回的队列包含所有等待的数据包
          */
         std::queue<std::vector<uint8_t> > consumeStagedPackets();
-
-        /**
-         * 验证握手消息的cookie
-         * @param msg
-         * @return
-         * @Throw
-         */
-        void verifyHandshakeInitiationCookie(const MessageInitiation *msg);
-
-        /**
-         * 解密Cookie
-         * @param cookie
-         */
-        void decryptCookie(const MessageCookie *cookie);
 
         void clear();
     };

@@ -96,9 +96,25 @@ namespace WireGuard {
         class NOISEReceive : public NOISE {
         public:
             void init(const PrivateKey &local_private);
+            /**
+             * 仅获取协议中的 publicKey
+             * @param msg 信息
+             */
+            PublicKey onlyDecodeHandshakePublicKey(const MessageInitiation &msg) const;
 
-            void decodeCheckHandshakeInitiation(const MessageInitiation &msg);
+            /**
+             * 从头计算握手协议，并且解析验证
+             *
+             * @param msg
+             */
+            void decodeCheckHandshakeInitiation(const MessageInitiation &msg) const;
 
+
+            /**
+             * 创建握手响应
+             * @param senderIndex 服务解析索引
+             * @return 响应信息
+             */
             MessageResponse createHandshakeResponse(const uint32_t &senderIndex);
 
             bool canSendData() override { return state == receive_created_handshake_response_msg; }
