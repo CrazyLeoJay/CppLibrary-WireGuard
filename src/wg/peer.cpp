@@ -141,29 +141,6 @@ namespace WireGuard {
         return result;
     }
 
-    void Peer::verifyHandshakeInitiationCookie(const MessageInitiation *msg) {
-        if (cookie::isEmpty(msg->mac1)) {
-            throw WGException("mac1 没有记录，无法解密");
-        }
-        if (!cookieManager.verifyMac1(msg, getPublicKey())) {
-            throw WGException("mac1 不合法");
-        }
-
-        if (cookie::isEmpty(msg->mac2)) {
-            // todo 需要计算 mac2 并且通知客户端
-            throw WGException("需要发送验证Cookie 重新握手");
-        }
-        // todo 验证mac2
-    }
-
-    void Peer::decryptCookie(const MessageCookie *cookie) {
-        auto mac = cookieManager.mac1;
-        if (cookie::isEmpty(mac)) {
-            throw WGException("mac1 没有记录，无法解密");
-        }
-        //        cookieManager.verifyMac1(cookie, getPublicKey());
-    }
-
     void Peer::clear() {
     }
 

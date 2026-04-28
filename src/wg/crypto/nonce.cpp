@@ -92,13 +92,57 @@ namespace WireGuard {
         state = NOISEState::init;
     }
 
-    void Noise::NOISEReceive::decodeCheckHandshakeInitiation(const MessageInitiation &msg) {
+    PublicKey Noise::NOISEReceive::onlyDecodeHandshakePublicKey(const MessageInitiation &msg) const {
         std::lock_guard<std::mutex> lock(_noiseMutex);
-        // 初始化参数
-        // initHashAndChainKey();
+        // 获取对端的临时公钥
+        std::memcpy(remote_ephemeral_public_key.data(), msg.ephemeral, PUBLIC_KEY_LEN);
+        //  hash 和 chain_key混淆 临时公钥
+        hash = crypto::mixHash(init_hash, remote_ephemeral_public_key);
+        crypto::kdf(chain_key, init_chain_key, remote_ephemeral_public_key.data(), PUBLIC_KEY_LEN);
+        Logs::print_space([&]() {
+            crypto::printHashChainKey(hash, chain_key, "add 临时公钥", [](const std::string &log) {
+                LOG_DEBUG("%{public}s", log.c_str());
+            });
+        });
 
+        // chain_key  混入 本地私钥和临时公钥的DH
+        SymmetricKey eDh;
+        try {
+            eDh = crypto::dh(local_private, remote_ephemeral_public_key);
+            LOG_DEBUG("共享密钥（DH）：%{public}s\n", crypto::bin2B64(eDh.data(), HASH_LEN).c_str());
+        } catch (const std::exception &e) {
+            throw WGException("DH（本地私钥，临时公钥） 计算异常: %{public}s", e.what());
+        }
+
+        // 派生临时密钥
+        SymmetricKey temp_key{};
+        crypto::kdf2(chain_key, temp_key, chain_key, eDh.data(), PUBLIC_KEY_LEN);
+        Logs::print_space([&]() {
+            LOG_DEBUG("派生临时密钥（tempKey）：%{public}s\n", crypto::bin2B64(temp_key.data(), SYMMETRIC_KEY_LEN).c_str());
+            crypto::printHashChainKey(hash, chain_key, "ck add temp_key", [](const std::string &log) {
+                LOG_DEBUG("%{public}s", log.c_str());
+            });
+        });
+        // 解密 对方公钥
+        try {
+            const auto plan_text =
+                    crypto::decodeAEAD(temp_key, 0, msg.encryptedStatic, sizeof(msg.encryptedStatic), &hash);
+            std::memcpy(remote_public.data(), plan_text.data(), PUBLIC_KEY_LEN);
+            Logs::print_space([&]() {
+                LOG_DEBUG(
+                    "解密静态公钥（peerPublicKey）：%{public}s\n",
+                    crypto::bin2B64(remote_public.data(), PUBLIC_KEY_LEN).c_str()
+                );
+            });
+        } catch (const WGException &e) {
+            throw WGException("解析对方公钥异常：%{public}s", e.what());
+        }
+        return remote_public;
+    }
+
+    void Noise::NOISEReceive::decodeCheckHandshakeInitiation(const MessageInitiation &msg) const {
+        std::lock_guard<std::mutex> lock(_noiseMutex);
         remote_index = msg.senderIndex;
-
         // 获取对端的临时公钥
         // PublicKey remote_ephemeral_public_key{};
         std::memcpy(remote_ephemeral_public_key.data(), msg.ephemeral, PUBLIC_KEY_LEN);
@@ -201,6 +245,7 @@ namespace WireGuard {
 
         state = NOISEState::receive_checked_handshake_initiation_msg;
     }
+
 
     MessageResponse Noise::NOISEReceive::createHandshakeResponse(const uint32_t &senderIndex) {
         std::lock_guard<std::mutex> lock(_noiseMutex);
@@ -505,5 +550,4 @@ namespace WireGuard {
         state = send_consume_handshake_response_msg;
         Logs::print_space([&]() { LOG_DEBUG("InitiationResponse 验证完成"); });
     }
-
 } // namespace WireGuard

@@ -53,6 +53,7 @@ namespace WireGuard {
         bool iAmInitiator{true}; // 是否为发起者。默认是，会率先主动发起握手
 
         const DeviceConfig &config{};
+        const PublicKey localPublicKey{};
         UDPSocket socket{};
         AllowedIPs allowedIps{};
 
@@ -82,6 +83,9 @@ namespace WireGuard {
         mutable std::atomic<bool> isLoopTunRunning{false}; // 用于判断和控制 tun 是否在读取中
         // =============== 本地代理Proxy（未开发） ===============
 
+        // =============== Cookie 挑战配置 ===============
+        bool enableCookie{false}; // 是否开启 cookie 挑战
+        CookieChecker cookieChecker{localPublicKey};
 
     public: // 对外操作方法
         /**
@@ -94,7 +98,7 @@ namespace WireGuard {
          *
          * @param tunFd 网卡套接字，用于读写本地虚拟VPN网卡数据
          */
-        virtual void start(const uint32_t &tunFd);
+        void start(const uint32_t &tunFd);
 
 
         /**
@@ -194,20 +198,43 @@ namespace WireGuard {
 
         /**
          * 发送Cookie 相应
-         * @param peer
+         *
+         * cookie 只需要 握手消息和 mac2 参与即可
+         *
+         * 如果需要cookie挑战，那么需要遵循以下规则
+         * > 验证mac1需要对端公钥
+         * > 验证mac2只需要cookie即可
+         * - 收到消息后，不解析publicKey，先验证cookie
+         *  - 如果cookie为空、或者cookie失效，不验证mac2，直接cookie挑战。
+         *  - 如果mac2为空或者无效，发送cookie挑战。
+         *  - 如果mac2验证失败，直接返回
+         *  - 如果mac2验证成功，则走正常流程
+         *
+         * @param endpoint
+         * @param msg
+         * @return 是否挑战成功！ 如果是true，表示验证成功
+         *                      如果是false，表示可能cookie挑战失败或者cookie失效，才刚发出cookie
          */
-        void sendCookieReply(std::shared_ptr<Peer> &peer);
+        bool checkCookieReply(const Endpoint &endpoint, const MessageInitiation &msg);
+
+        /**
+         * 发送Cookie到客户端
+         *
+         * @param msg 发起放的索引
+         * @param endpoint 发送的端点
+         */
+        void sendCookieReply(const MessageInitiation &msg, const Endpoint &endpoint);
 
         /**
          * 加密数据包后并发送到对应的Peer
          */
-        void encryptPacketAndSendSocket(const std::shared_ptr<Peer> &peer, const uint8_t *data, size_t len);
+        void encryptPacketAndSendSocket(const std::shared_ptr<Peer> &peer, const uint8_t *data, size_t len) const;
 
     private: // 主动操作：发送数据包、发起握手等
         /**
          * 发送 peer 等待的数据包
          */
-        void sendStagedPackets(const std::shared_ptr<Peer> &peer);
+        void sendStagedPackets(const std::shared_ptr<Peer> &peer) const;
 
         /**
          * 缓存要发送的数据，并且让peer重新握手

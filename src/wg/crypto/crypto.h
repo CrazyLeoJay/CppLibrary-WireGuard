@@ -30,8 +30,10 @@
 #include <cstdint>
 #include <string>
 #include <cstring>
+#include <unistd.h>
 #include <vector>
 #include "../version.h"
+
 
 namespace WireGuard {
     namespace crypto {
@@ -88,6 +90,7 @@ namespace WireGuard {
          */
         bool generatePublicKey(PublicKey &pub, const PrivateKey &priv);
 
+        PublicKey generatePublicKey(const PrivateKey &priv);
 
         /**
          * 对私钥和公钥进行Curve25519曲线上的点乘运算，返回32字节的输出。
@@ -261,6 +264,8 @@ namespace WireGuard {
          * @return
          */
         CookieData blake2bCookie(const SymmetricKey &key, const uint8_t *data, const size_t len);
+
+        void randombytes(uint8_t *buf, const size_t len);
     } // namespace Crypto
 } // namespace WireGuard
 
