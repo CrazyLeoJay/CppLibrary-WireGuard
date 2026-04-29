@@ -197,7 +197,7 @@ namespace WireGuard {
 
         void decodeAEAD(
             std::vector<uint8_t> &plaintext, const SymmetricKey &key, uint64_t counter, const uint8_t *ciphertext,
-            size_t ciphertext_len, const Hash *auth
+            const size_t ciphertext_len, const Hash *auth
         ) {
             if (sodium_init() < 0)
                 throw std::runtime_error("sodium_init failed");
@@ -452,7 +452,7 @@ namespace WireGuard {
             std::vector<uint8_t> plaintext(plaintext_len);
 
             unsigned long long decrypted_len;
-            int ret = crypto_aead_xchacha20poly1305_ietf_decrypt(
+            const int ret = crypto_aead_xchacha20poly1305_ietf_decrypt(
                 plaintext.data(), &decrypted_len,
                 nullptr, // nsec
                 ciphertext, ciphertext_len, ad, ad_len, nonce, key
@@ -500,7 +500,7 @@ namespace WireGuard {
         }
 
         PublicKey getPublicKey(const MessageInitiation &msg, const PrivateKey &local_private_key) {
-            Noise::NOISEReceive receive{};
+            const Noise::NOISEReceive receive{};
             receive.init(local_private_key);
             return receive.onlyDecodeHandshakePublicKey(msg);
         }
