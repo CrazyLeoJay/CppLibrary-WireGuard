@@ -23,11 +23,10 @@
 #include "peer.h"
 #include <algorithm>
 #include "WGException.h"
-#include <cstdint>
 
 namespace WireGuard {
-    Peer::Peer(const DeviceConfig &clientConfig, const PeerConfig &config)
-        : clientConfig(clientConfig), config(config), endpoint(config.endpoint) {
+    Peer::Peer(const ContentKey &content_key, const PeerConfig &config)
+        : content_key(content_key), config(config), endpoint(config.endpoint) {
     }
 
     Peer::~Peer() = default;
@@ -145,12 +144,12 @@ namespace WireGuard {
     }
 
     void Peer::init() {
-        if (std::all_of(clientConfig.private_key.begin(), clientConfig.private_key.end(), [](uint8_t it) {
+        if (std::all_of(content_key.local_private_key.begin(), content_key.local_private_key.end(), [](uint8_t it) {
             return it == 0;
         })) {
             throw WGException(
                 "无效的本地私钥：不能为全零: key=%s",
-                crypto::bin32Array2Base64(clientConfig.private_key).c_str()
+                crypto::bin32Array2Base64(content_key.local_private_key).c_str()
             );
         }
         if (std::all_of(config.public_key.begin(), config.public_key.end(), [](uint8_t it) { return it == 0; })) {
@@ -160,8 +159,8 @@ namespace WireGuard {
             );
         }
 
-        noiseSend.init(clientConfig.private_key, config.public_key);
-        noiseReceive.init(clientConfig.private_key);
+        noiseSend.init(content_key.local_private_key, config.public_key);
+        noiseReceive.init(content_key.local_private_key);
         if (config.pre_share_key) {
             std::memcpy(noiseSend.pre_shared_key.data(), config.pre_share_key->data(), SYMMETRIC_KEY_LEN);
             std::memcpy(noiseReceive.pre_shared_key.data(), config.pre_share_key->data(), SYMMETRIC_KEY_LEN);
@@ -169,20 +168,23 @@ namespace WireGuard {
         initialized = true;
     }
 
-    MessageInitiation Peer::createHandshakeInitiation(const uint32_t &senderIndex) {
+    MessageInitiation Peer::createHandshakeInitiation(const uint32_t &senderIndex, const bool &force) {
         std::lock_guard<std::mutex> lock(handshakeMutex_);
 
-        auto now = Clock::now();
-        auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - lastSentHandshake_).count();
+        const auto now = Clock::now();
+        if (!force) {
+            // 如果不是强制，就需要检查间隔时间，防止发送太多
+            const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(now - lastSentHandshake_).count();
 
-        if (elapsed < REKEY_TIMEOUT) {
-            throw WGException("创建太频繁"); // 速率限制：防止频繁发送握手（最小间隔 5 秒）
+            if (elapsed < REKEY_TIMEOUT) {
+                throw WGException("创建太频繁"); // 速率限制：防止频繁发送握手（最小间隔 5 秒）
+            }
         }
 
-        auto msg = noiseSend.encodeHandshakeInitiation(senderIndex);
+        const auto msg = noiseSend.encodeHandshakeInitiation(senderIndex);
 
         lastSentHandshake_ = now; // 更新最后发送时间
-        handshakeAttempts_++; // 增加尝试次数
+        ++handshakeAttempts_; // 增加尝试次数
         return msg;
     }
 
@@ -204,5 +206,10 @@ namespace WireGuard {
         const auto msg = noiseReceive.createHandshakeResponse(senderIndex);
         lastSentHandshake_ = Clock::now(); // 更新最后发送时间
         return msg;
+    }
+
+    void Peer::handleCookie(const MessageCookie &msg) const {
+        std::lock_guard<std::mutex> guard(handshakeMutex_);
+        noiseSend.decryptCookie(msg);
     }
 }; // namespace WireGuard

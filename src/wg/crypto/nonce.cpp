@@ -72,13 +72,13 @@ namespace WireGuard {
         return keypair;
     }
 
-    void Noise::NOISEReceive::init(const PrivateKey &local_private) {
+    void Noise::NOISEReceive::init(const PrivateKey &local_private) const {
         state = NOISEState::none;
         this->local_private = local_private;
         crypto::generatePublicKey(local_public, local_private);
         init_chain_key = crypto::hash(crypto::CONSTRUCTION);
         // 接收端主要是用于解析，这里使用 本地公钥初始化
-        auto init_init_hash = crypto::mixHash(init_chain_key, crypto::IDENTIFIER);
+        const auto init_init_hash = crypto::mixHash(init_chain_key, crypto::IDENTIFIER);
         Logs::print_space([&]() {
             crypto::printHashChainKey(init_init_hash, init_chain_key, "init", [](const std::string &log) {
                 LOG_DEBUG("%{public}s", log.c_str());
@@ -86,8 +86,10 @@ namespace WireGuard {
         });
 
         init_hash = crypto::mixHash(init_init_hash, local_public);
-        crypto::printHashChainKey(init_hash, init_chain_key, "add (接收端公钥)", [](const std::string &log) {
-            LOG_DEBUG("%{public}s", log.c_str());
+        Logs::print_space([&] {
+            crypto::printHashChainKey(init_hash, init_chain_key, "add (接收端公钥)", [](const std::string &log) {
+                LOG_DEBUG("%{public}s", log.c_str());
+            });
         });
         state = NOISEState::init;
     }
@@ -142,6 +144,9 @@ namespace WireGuard {
 
     void Noise::NOISEReceive::decodeCheckHandshakeInitiation(const MessageInitiation &msg) const {
         std::lock_guard<std::mutex> lock(_noiseMutex);
+        // 验证mac1
+        CookieChecker::verifyMac1(msg, local_public);
+
         remote_index = msg.senderIndex;
         // 获取对端的临时公钥
         // PublicKey remote_ephemeral_public_key{};
@@ -175,7 +180,7 @@ namespace WireGuard {
         });
         // 解密 对方公钥
         try {
-            auto plan_text =
+            const auto plan_text =
                     crypto::decodeAEAD(temp_key, 0, msg.encryptedStatic, sizeof(msg.encryptedStatic), &hash);
             std::memcpy(remote_public.data(), plan_text.data(), PUBLIC_KEY_LEN);
             LOG_DEBUG(
@@ -183,7 +188,7 @@ namespace WireGuard {
                 crypto::bin2B64(remote_public.data(), PUBLIC_KEY_LEN).c_str()
             );
         } catch (const WGException &e) {
-            throw WGException("解析对方公钥异常：%{public}s", e.what());
+            throw WGException("解析对方公钥异常：%s", e.what());
         }
 
         // hash 混入对方公钥的加密字段
@@ -211,8 +216,8 @@ namespace WireGuard {
         try {
             // 解密时间戳 并且将时间戳加入 hash
             Timestamp timestamp{};
-            auto etLen = sizeof(msg.encryptedTimestamp);
-            auto time = crypto::decodeAEAD(temp_key, 0, msg.encryptedTimestamp, etLen, &hash);
+            constexpr auto etLen = sizeof(msg.encryptedTimestamp);
+            const auto time = crypto::decodeAEAD(temp_key, 0, msg.encryptedTimestamp, etLen, &hash);
             std::memcpy(timestamp.data(), time.data(), TIMESTAMP_LEN);
             hash = crypto::mixHash(hash, msg.encryptedTimestamp, etLen);
         } catch (const WGException &e) {
@@ -223,31 +228,10 @@ namespace WireGuard {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
         });
-        // mac 验证和hash
-        // 初始化 cookie hash 验证
-        auto cookieInitHash = crypto::mixHash(crypto::LABEL_MAC1, local_public);
-
-        // 转为 const uint8_t*（只读）
-        const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
-        size_t mac1_input_length = sizeof(MessageInitiation) - COOKIE_LEN * 2;
-        auto mac1 = crypto::MAC(cookieInitHash, bytes, mac1_input_length);
-        if (std::memcmp(mac1.data(), msg.mac1, COOKIE_LEN) != 0) {
-            throw WGException("MAC1 验证失败！");
-        }
-
-        if (last_received_cookie) {
-            size_t mac2_input_length = sizeof(MessageInitiation) - COOKIE_LEN;
-            auto mac2 = crypto::MAC(last_received_cookie->data(), COOKIE_LEN, bytes, mac2_input_length);
-            if (std::memcmp(mac2.data(), msg.mac2, COOKIE_LEN) != 0) {
-                throw WGException("MAC2 验证失败！");
-            }
-        }
-
         state = NOISEState::receive_checked_handshake_initiation_msg;
     }
 
-
-    MessageResponse Noise::NOISEReceive::createHandshakeResponse(const uint32_t &senderIndex) {
+    MessageResponse Noise::NOISEReceive::createHandshakeResponse(const uint32_t &senderIndex) const {
         std::lock_guard<std::mutex> lock(_noiseMutex);
         if (state != NOISEState::receive_checked_handshake_initiation_msg) {
             throw WGException("必须是处理完成握手之后才能创建响应");
@@ -283,9 +267,10 @@ namespace WireGuard {
         const auto e_dh = crypto::dh(ephemeral_private_key, remote_ephemeral_public_key);
         crypto::kdf(chain_key, chain_key, e_dh.data(), PUBLIC_KEY_LEN);
         Logs::print_space([&]() {
-            auto logStr = std::string("混合本地临私钥 和 对方临时公钥") +
-                          "\nlocal ephemeral private key: " + crypto::bin32Array2Base64(ephemeral_private_key) +
-                          "\nremote ephemeral public key: " + crypto::bin32Array2Base64(remote_ephemeral_public_key);
+            const auto logStr = std::string("混合本地临私钥 和 对方临时公钥") +
+                                "\nlocal ephemeral private key: " + crypto::bin32Array2Base64(ephemeral_private_key) +
+                                "\nremote ephemeral public key: " + crypto::bin32Array2Base64(
+                                    remote_ephemeral_public_key);
             crypto::printHashChainKey(hash, chain_key, logStr, [](const std::string &log) {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
@@ -294,9 +279,9 @@ namespace WireGuard {
         const auto e_dh2 = crypto::dh(ephemeral_private_key, remote_public);
         crypto::kdf(chain_key, chain_key, e_dh2.data(), PUBLIC_KEY_LEN);
         Logs::print_space([&]() {
-            auto logStr = std::string("混合本地临私钥 和 对方公钥") +
-                          "\nlocal ephemeral private key: " + crypto::bin32Array2Base64(ephemeral_private_key) +
-                          "\nremote           public key: " + crypto::bin32Array2Base64(remote_public);
+            const auto logStr = std::string("混合本地临私钥 和 对方公钥") +
+                                "\nlocal ephemeral private key: " + crypto::bin32Array2Base64(ephemeral_private_key) +
+                                "\nremote           public key: " + crypto::bin32Array2Base64(remote_public);
             crypto::printHashChainKey(hash, chain_key, logStr, [](const std::string &log) {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
@@ -316,33 +301,23 @@ namespace WireGuard {
             LOG_DEBUG("加密密钥：%s", crypto::bin2B64(key.data(), SYMMETRIC_KEY_LEN).c_str());
         });
         // 加密空数据
-        auto encodeStr = crypto::encodeAEAD(key, 0, nullptr, 0, &hash);
+        const auto encodeStr = crypto::encodeAEAD(key, 0, nullptr, 0, &hash);
         std::memcpy(msg.encryptedNothing, encodeStr.data(), encodeStr.size());
         Logs::print_space([&]() { LOG_DEBUG("加密证完成"); });
 
-        // mac 填充
-        auto cookieInitHash = crypto::mixHash(crypto::LABEL_MAC1, remote_public);
         // 处理mac1
-        // 转为 const uint8_t*（只读）
-        const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
-        size_t mac1_input_length = sizeof(MessageResponse) - COOKIE_LEN * 2;
-        auto mac1 = crypto::MAC(cookieInitHash, bytes, mac1_input_length);
+        const auto mac1 = CookieChecker::computeMac1(msg, remote_public);
         std::memcpy(msg.mac1, mac1.data(), COOKIE_LEN);
 
         // 处理mac2
-        if (last_received_cookie) {
-            size_t mac2_input_length = sizeof(MessageResponse) - COOKIE_LEN;
-            auto mac2 = crypto::MAC(last_received_cookie->data(), COOKIE_LEN, bytes, mac2_input_length);
-            std::memcpy(msg.mac2, mac2.data(), COOKIE_LEN);
-        } else {
-            std::memset(msg.mac2, 0, COOKIE_LEN);
-        }
+        std::memset(msg.mac2, 0, COOKIE_LEN);
+        // 如果有mac2，在device端添加。接收端的cookie在Device中存储
         state = NOISEState::receive_created_handshake_response_msg;
         Logs::print_space([&]() { LOG_DEBUG("InitiationResponse 构建完成"); });
         return msg;
     }
 
-    void Noise::NOISESend::init(const PrivateKey &local_private, const PublicKey &remote_public) {
+    void Noise::NOISESend::init(const PrivateKey &local_private, const PublicKey &remote_public) const {
         state = NOISEState::none;
         this->local_private = local_private;
         this->remote_public = remote_public;
@@ -378,8 +353,8 @@ namespace WireGuard {
         // hash 混淆 临时公钥
         hash = crypto::mixHash(init_hash, ephemeral_public_key);
         crypto::kdf(chain_key, init_chain_key, ephemeral_public_key.data(), PUBLIC_KEY_LEN);
-        LOG_DEBUG("临时公钥：%{public}s\n", crypto::bin32Array2Base64(ephemeral_public_key).c_str());
         Logs::print_space([&]() {
+            LOG_DEBUG("临时公钥：%{public}s\n", crypto::bin32Array2Base64(ephemeral_public_key).c_str());
             crypto::printHashChainKey(hash, chain_key, "add 临时公钥", [](const std::string &log) {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
@@ -402,7 +377,7 @@ namespace WireGuard {
             });
         });
         // AEAD
-        auto encode = crypto::encodeAEAD(tempKey, 0, local_public.data(), PUBLIC_KEY_LEN, &hash);
+        const auto encode = crypto::encodeAEAD(tempKey, 0, local_public.data(), PUBLIC_KEY_LEN, &hash);
         std::memcpy(msg.encryptedStatic, encode.data(), encode.size()); // 将本地公钥进行加密写入
         // 混入hash
         hash = crypto::mixHash(hash, encode.data(), encode.size());
@@ -430,20 +405,14 @@ namespace WireGuard {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
         });
-        // mac 填充
-        auto cookieInitHash = crypto::mixHash(crypto::LABEL_MAC1, remote_public);
 
-        // 处理mac1
-        // 转为 const uint8_t*（只读）
-        const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
-        size_t mac1_input_length = sizeof(MessageInitiation) - COOKIE_LEN * 2;
-        auto mac1 = crypto::MAC(cookieInitHash, bytes, mac1_input_length);
-        std::memcpy(msg.mac1, mac1.data(), COOKIE_LEN);
+        // 生成 mac1
+        initHandshakeMac1 = CookieChecker::computeMac1(msg, remote_public);;
+        std::memcpy(msg.mac1, initHandshakeMac1.data(), COOKIE_LEN);
 
-        // 处理mac2
         if (last_received_cookie) {
-            size_t mac2_input_length = sizeof(MessageInitiation) - COOKIE_LEN;
-            auto mac2 = crypto::MAC(last_received_cookie->data(), COOKIE_LEN, bytes, mac2_input_length);
+            // 生成mac2
+            const auto mac2 = CookieChecker::computeMac2(msg, *last_received_cookie.get());
             std::memcpy(msg.mac2, mac2.data(), COOKIE_LEN);
         } else {
             std::memset(msg.mac2, 0, COOKIE_LEN);
@@ -455,6 +424,18 @@ namespace WireGuard {
 
     void Noise::NOISESend::verifyHandshakeInitiationResponse(const MessageResponse &msg) const {
         std::lock_guard<std::mutex> lock(_noiseMutex);
+
+        // 客户端无需验证mac2，可以直接验证mac1，来判断数据是否正确，然后获取到正确的 加密链
+        // 也可以通过验证mac2 来判断服务端是否被串改？但实际上不解析毫无影响。因为只有服务端记录了正确的公钥
+        // 所以这里注释解析mac2过程，而不删除，提示之后可以根据这一点进行功能拓展。
+        // if (last_received_cookie) {
+        //     // 验证 mac2
+        //     CookieChecker::verifyMac2(msg, *last_received_cookie.get());
+        // }
+        // 验证 mac1 证明该响应是服务端专门为你这次握手生成的，防止伪造和重放。
+        // 如果mac1 不一致，表示服务端有问题，不是目标
+        CookieChecker::verifyMac1(msg, local_public);
+
         // 需要判断当前状态，是否为刚握手完成，否则应该抛出异常重新握手
         if (state != NOISEState::send_created_handshake_initiation_msg) {
             throw WGException("必须在发送握手请求后才能处理响应，应该重新握手");
@@ -483,9 +464,9 @@ namespace WireGuard {
         const SymmetricKey e_dh1 = crypto::dh(ephemeral_private_key, e);
         crypto::kdf(chain_key, chain_key, e_dh1.data(), PUBLIC_KEY_LEN);
         Logs::print_space([&]() {
-            auto logStr = std::string("混合本地临私钥 和 对方临时公钥") +
-                          "\nlocal ephemeral private key: " + crypto::bin32Array2Base64(ephemeral_private_key) +
-                          "\nremote ephemeral public key: " + crypto::bin32Array2Base64(e);
+            const auto logStr = std::string("混合本地临私钥 和 对方临时公钥") +
+                                "\nlocal ephemeral private key: " + crypto::bin32Array2Base64(ephemeral_private_key) +
+                                "\nremote ephemeral public key: " + crypto::bin32Array2Base64(e);
             crypto::printHashChainKey(hash, chain_key, logStr, [](const std::string &log) {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
@@ -495,9 +476,9 @@ namespace WireGuard {
         const auto e_dh2 = crypto::dh(local_private, e);
         crypto::kdf(chain_key, chain_key, e_dh2.data(), PUBLIC_KEY_LEN);
         Logs::print_space([&]() {
-            auto logStr = std::string("混合本地私钥 和 对方临时公钥") +
-                          "\nlocal           private key: " + crypto::bin32Array2Base64(local_private) +
-                          "\nremote ephemeral public key: " + crypto::bin32Array2Base64(e);
+            const auto logStr = std::string("混合本地私钥 和 对方临时公钥") +
+                                "\nlocal           private key: " + crypto::bin32Array2Base64(local_private) +
+                                "\nremote ephemeral public key: " + crypto::bin32Array2Base64(e);
             crypto::printHashChainKey(hash, chain_key, logStr, [](const std::string &log) {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
@@ -519,35 +500,23 @@ namespace WireGuard {
         // 解密空数据
         crypto::decodeAEAD(key, 0, msg.encryptedNothing, sizeof(msg.encryptedNothing), &hash);
         Logs::print_space([&]() { LOG_DEBUG("解密成功："); });
-        // mac 填充
-        auto cookieInitHash = crypto::mixHash(crypto::LABEL_MAC1, local_public);
-        // 处理mac1
-        // 转为 const uint8_t*（只读）
-        const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
-        size_t mac1_input_length = sizeof(msg) - COOKIE_LEN * 2;
-        auto mac1 = crypto::MAC(cookieInitHash, bytes, mac1_input_length);
-        if (std::memcmp(msg.mac1, mac1.data(), COOKIE_LEN) != 0) {
-            // std::memcpy(msg.mac1, mac1.data(), COOKIE_LEN);
-            throw WGException(
-                "mac1 验证失败 msg.mac1=%s c_mac1=%s", crypto::bin2B64(msg.mac1, COOKIE_LEN).c_str(),
-                crypto::bin2B64(mac1.data(), COOKIE_LEN).c_str()
-            );
-        }
-
-        // 处理mac2
-        if (last_received_cookie) {
-            size_t mac2_input_length = sizeof(msg) - COOKIE_LEN;
-            auto mac2 = crypto::MAC(last_received_cookie->data(), COOKIE_LEN, bytes, mac2_input_length);
-            if (std::memcmp(msg.mac2, mac2.data(), COOKIE_LEN) != 0) {
-                // std::memcpy(msg.mac2, mac2.data(), COOKIE_LEN);
-                throw WGException(
-                    "mac2 验证失败msg.mac2=%s c_mac2=%s", crypto::bin2B64(msg.mac2, COOKIE_LEN).c_str(),
-                    crypto::bin2B64(mac2.data(), COOKIE_LEN).c_str()
-                );
-            }
-        }
 
         state = send_consume_handshake_response_msg;
         Logs::print_space([&]() { LOG_DEBUG("InitiationResponse 验证完成"); });
+    }
+
+    void Noise::NOISESend::decryptCookie(const MessageCookie &msg) const {
+        if (state != NOISEState::send_created_handshake_initiation_msg) {
+            throw WGException("必须在发起握手后才能解析cookie");
+        }
+
+        const auto data = crypto::decodeXAEAD(
+            crypto::mixHash(crypto::LABEL_COOKIE, local_public).data(),
+            msg.nonce,
+            msg.encryptedCookie, sizeof(msg.encryptedCookie),
+            initHandshakeMac1.data(), COOKIE_LEN
+        );
+
+        std::memcpy(last_received_cookie->data(), data.data(), COOKIE_LEN);
     }
 } // namespace WireGuard

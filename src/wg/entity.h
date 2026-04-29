@@ -208,6 +208,31 @@ namespace WireGuard {
         bool operator==(const Endpoint &other) const { return address == other.address && port == other.port; }
     };
 
+    struct IPAddressHash {
+        size_t operator()(const IPAddress &addr) const {
+            if (addr.family == IPAddress::IPv4) {
+                // IPv4: hash the 32-bit value
+                return std::hash<uint32_t>{}(addr.ip.ipv4);
+            } else {
+                size_t h = 0;
+                for (const unsigned char i : addr.ip.ipv6) {
+                    h = h * 31 + i;
+                }
+                return h;
+            }
+        }
+    };
+
+    struct EndpointHash {
+        size_t operator()(const Endpoint &ep) const {
+            const size_t h1 = IPAddressHash{}(ep.address);
+            const size_t h2 = std::hash<uint16_t>{}(ep.port);
+            // return h1 ^ (h2 << 1); // 或者 h1 * 31 + h2
+            return h1 * 31 + h2;
+        }
+    };
+
+
     /**
      * 地址区域，有掩码
      */
@@ -264,5 +289,15 @@ namespace WireGuard {
 
     // 数据包回调
     using PacketCallback = std::function<void(const uint8_t * data, size_t len, const PublicKey & peerPublicKey)>;
+
+
+    struct ContentKey {
+        PublicKey local_private_key{};
+        PublicKey local_public_key{};
+        /**
+         * @param private_key 本地私钥，根据发送端和接收端不同
+         */
+        explicit ContentKey(const PrivateKey &private_key);
+    };
 } // namespace WireGuard
 #endif // WIREGUARD_ENTITY_H
