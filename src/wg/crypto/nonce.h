@@ -57,7 +57,7 @@ namespace WireGuard {
             virtual ~NOISE() = default;
 
             mutable PrivateKey local_private{}; // 本地私钥
-            mutable PrivateKey local_public{}; // 本地公钥
+            mutable PublicKey local_public{}; // 本地公钥
             mutable PublicKey remote_public{}; // 对端公钥  发送端需要初始化，接收端需要解析后写入
             mutable PrivateKey ephemeral_private_key{}; // 握手时临时密钥
             mutable PublicKey ephemeral_public_key{}; // 握手时临时密钥
