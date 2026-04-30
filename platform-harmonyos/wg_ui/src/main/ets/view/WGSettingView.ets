@@ -69,9 +69,9 @@ struct WGSettingView {
     List({ space: '16vp' }) {
       ListItem() {
         Row({ space: '16vp' }) {
-          Image(this.vm.icon)
+          Image($r('app.media.wg_icon'))
             .aspectRatio(1)
-            .width('55vp')
+            .width('85vp')
           Column({ space: '8vp' }) {
             Text(`WireGuard for HarmonyOs ${this.vm.appVersion}`)
               .fontSize('18fp')

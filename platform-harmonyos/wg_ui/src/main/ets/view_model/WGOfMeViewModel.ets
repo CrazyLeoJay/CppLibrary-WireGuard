@@ -17,6 +17,7 @@ import { bundleManager, common } from '@kit.AbilityKit';
 import { UIContext } from '@ohos.arkui.UIContext';
 import pasteboard from '@ohos.pasteboard';
 import { LLog } from 'wg_tunnel';
+import { JSON } from '@kit.ArkTS';
 
 const TAG = "设置界面"
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -35,7 +36,6 @@ const email = "crazyleojay@163.com"
 @ObservedV2
 export default class WGSettingViewModel {
   nav: NavPathStack;
-  @Trace icon?: Resource;
   @Trace appName: string = ""
   @Trace appVersion: string = ""
   email: string = email
@@ -46,7 +46,6 @@ export default class WGSettingViewModel {
 
   async loadData(context: UIContext) {
     const msg = await bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION)
-    this.icon = $r(`app.media.${msg.appInfo.icon.split(":")[1]}`)
     this.appName = msg.appInfo.name
     this.appVersion = msg.versionName
   }

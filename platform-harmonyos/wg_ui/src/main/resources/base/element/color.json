@@ -1,6 +1,10 @@
 {
   "color": [
     {
+      "name": "ic_launcher_background",
+      "value": "#871719"
+    },
+    {
       "name": "wg_new_card_background_color",
       "value": "#FFFAE8DB"
     },

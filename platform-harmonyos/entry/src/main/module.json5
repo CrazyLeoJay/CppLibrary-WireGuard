@@ -14,13 +14,13 @@
     "pages": "$profile:main_pages",
     "abilities": [
       {
+        "icon": "$media:layered_image",
         "name": "EntryAbility",
         "srcEntry": "./ets/entryability/EntryAbility.ets",
         "description": "$string:EntryAbility_desc",
-        "icon": "$media:wg_icon",
         "label": "$string:EntryAbility_label",
-        "startWindowIcon": "$media:wg_icon",
-        "startWindowBackground": "$color:start_window_background",
+        "startWindowIcon": "$media:wg_icon_foreground",
+        "startWindowBackground": "$color:ic_launcher_background",
         "exported": true,
         "skills": [
           {
