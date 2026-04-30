@@ -7,18 +7,31 @@
         "material": {
           "certpath": "C:/Users/Leojay/.ohos/config/default_platform-harmonyos_thSWZrpAD9ugR6ZGzvZnaeNv6cjyP4OVwQDuCuHxzJ8=.cer",
           "keyAlias": "debugKey",
-          "keyPassword": "0000001AAD9A5169003A4868978CA1A84B0D838FB95C1526AA452440B8817A2FAF346B675A3A3CCF913B",
+          "keyPassword": "0000001A8E354D59C8E27BC2C3E544D2745550C8A8FB46E5F8217F3D61E006261F25E6ACEBE9B667620A",
           "profile": "C:/Users/Leojay/.ohos/config/default_platform-harmonyos_thSWZrpAD9ugR6ZGzvZnaeNv6cjyP4OVwQDuCuHxzJ8=.p7b",
           "signAlg": "SHA256withECDSA",
           "storeFile": "C:/Users/Leojay/.ohos/config/default_platform-harmonyos_thSWZrpAD9ugR6ZGzvZnaeNv6cjyP4OVwQDuCuHxzJ8=.p12",
-          "storePassword": "0000001A82DD552311949693D446315352C1A0795493535659C830726A954094B8ADC8857C6088C321E5"
+          "storePassword": "0000001A64B95A0172C82B5F5037E67DB0F02E55ED38ACC9D3863CBC1E34D6AFF9DE109AB6161BEC8BA0"
+        }
+      },
+      {
+        "name": "release",
+        "type": "HarmonyOS",
+        "material": {
+          "storeFile": "C:/Users/Leojay/.crt/harmony-app-wireguard/harmony-app-wireguard.p12",
+          "storePassword": "00000020F9A9F500EF67E805AE3AB0D59F832877FFE9A52367CC1F152654BCE8C21ACFA62F865D8A6129E4969F6C3C9B",
+          "keyAlias": "release",
+          "keyPassword": "0000002012ECC3312F1D2D30F7D8A83263506453E15143D4951BFF948A1831A34FFB240A2FEBD2B3A6C4F4F9D9059390",
+          "signAlg": "SHA256withECDSA",
+          "profile": "C:/Users/Leojay/.crt/harmony-app-wireguard/harmony-app-wireguard.p7b",
+          "certpath": "C:/Users/Leojay/.crt/harmony-app-wireguard/harmony-app-wireguard.cer"
         }
       }
     ],
     "products": [
       {
         "name": "default",
-        "signingConfig": "default",
+        "signingConfig": "release",
         "targetSdkVersion": "6.0.2(22)",
         "compatibleSdkVersion": "6.0.0(20)",
         "runtimeOS": "HarmonyOS",
