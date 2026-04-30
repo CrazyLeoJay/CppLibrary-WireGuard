@@ -22,6 +22,8 @@
 // #define SHOW_DEBUG_LOGS true //Debug日志打印开关
 
 #include "nonce.h"
+
+#include <algorithm>
 #include <cassert>
 #include <netinet/in.h>
 #include <random>
@@ -30,6 +32,7 @@
 #include "crypto.h"
 #include "sodium.h"
 #include "blake2.h"
+#include "cookie.h"
 #include "../tools.h"
 
 
@@ -509,14 +512,20 @@ namespace WireGuard {
         if (state != NOISEState::send_created_handshake_initiation_msg) {
             throw WGException("必须在发起握手后才能解析cookie");
         }
-
+        if (Tools::isEmpty(msg.encryptedCookie, sizeof(msg.encryptedCookie))) {
+            throw WGException("数据为空");
+        }
+        const auto key = crypto::mixHash(crypto::LABEL_COOKIE, remote_public);
         const auto data = crypto::decodeXAEAD(
-            crypto::mixHash(crypto::LABEL_COOKIE, local_public).data(),
+            key.data(),
             msg.nonce,
             msg.encryptedCookie, sizeof(msg.encryptedCookie),
             initHandshakeMac1.data(), COOKIE_LEN
         );
+        Logs::print_space([&](){LOG_DEBUG("解析cookie:%{public}s", crypto::bin2B64(data.data(), data.size()).c_str());});
 
-        std::memcpy(last_received_cookie->data(), data.data(), COOKIE_LEN);
+        CookieData cookie;
+        std::memcpy(cookie.data(), data.data(), COOKIE_LEN);
+        last_received_cookie = std::make_shared<CookieData>(cookie);
     }
 } // namespace WireGuard

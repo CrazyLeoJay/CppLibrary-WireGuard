@@ -458,8 +458,9 @@ namespace WireGuard {
                 ciphertext, ciphertext_len, ad, ad_len, nonce, key
             );
 
-            if (ret != 0)
-                throw std::runtime_error("Decryption failed or tag mismatch");
+            if (ret != 0) {
+                throw std::runtime_error("解密失败");
+            }
             plaintext.resize(decrypted_len);
             return plaintext;
         }

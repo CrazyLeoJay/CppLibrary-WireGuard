@@ -22,6 +22,9 @@
 // please include "napi/native_api.h".
 
 #include "tools.h"
+
+#include <algorithm>
+
 #include "WGException.h"
 #include <arpa/inet.h>
 #include <cstddef>
@@ -178,6 +181,10 @@ namespace WireGuard {
             nonce[10] = static_cast<uint8_t>(counter >> 48);
             nonce[11] = static_cast<uint8_t>(counter >> 56);
             return nonce;
+        }
+
+        bool isEmpty(const uint8_t *str, size_t size) {
+            return size == 0 || std::all_of(str, str + size, [](const uint8_t c) { return c == 0; });
         }
 
         namespace IP {

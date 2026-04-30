@@ -37,7 +37,6 @@ namespace WireGuard {
 
     CookieData CookieChecker::getCookie(const Endpoint &endpoint) {
         std::lock_guard<std::mutex> lock(secret_lock_);
-
         // 验证 cookie密钥是否可用
         if (!verifySecretValid()) {
             // 无效就生成新cookie
@@ -98,26 +97,27 @@ namespace WireGuard {
     MessageCookie CookieChecker::createCookieReply(const MessageInitiation &msg, const Endpoint &endpoint,
                                                    const PublicKey &public_key) {
         verifyMac1(msg, public_key);
-        // 验证 cookie密钥是否可用
-        if (!verifySecretValid()) {
-            // 无效就生成新cookie
-            fillSecretHash2SecureRandom();
-        }
+        Logs::print_space([&]() { LOG_DEBUG("验证mac1"); });
+        // 计算 cookie
+        const CookieData cookie = getCookie(endpoint);
+        Logs::print_space([&]() {
+            LOG_DEBUG("获取Cookie:%{public}s", crypto::bin2B64(cookie.data(), cookie.size()).c_str());
+        });
+
         // 生成cookie消息
         MessageCookie cookieMsg{};
         cookieMsg.receiverIndex = msg.senderIndex;
         // cookieMsg.nonce
         crypto::randombytes(cookieMsg.nonce, NONCE_LEN);
-
-        // 计算 cookie
-        const CookieData cookie = getCookie(endpoint);
-
-        crypto::encodeXAEAD(
-            crypto::mixHash(crypto::LABEL_COOKIE, public_key).data(),
+        Logs::print_space([&]() { LOG_DEBUG("生成NONE，开始将Cookie加密入消息"); });
+        const auto key = crypto::mixHash(crypto::LABEL_COOKIE, public_key);
+        const auto data = crypto::encodeXAEAD(
+            key.data(),
             cookieMsg.nonce,
             cookie.data(), COOKIE_LEN,
             msg.mac1, COOKIE_LEN
         );
+        std::memcpy(cookieMsg.encryptedCookie, data.data(), data.size());
         return cookieMsg;
     }
 
@@ -198,7 +198,6 @@ namespace WireGuard {
     }
 
     void CookieChecker::fillSecretHash2SecureRandom() {
-        std::lock_guard<std::mutex> lock(secret_lock_);
         // 清空所有cookie
         cookieIndex.clear();
         crypto::randombytes(secret_.data(), HASH_LEN);
@@ -212,13 +211,13 @@ namespace WireGuard {
         if (endpoint.address.family == IPAddress::IPv4) {
             // 构造输入：peer_addr || port
             std::vector<uint8_t> input(4 + sizeof(endpoint.port));
-            memcpy(input.data(), reinterpret_cast<uint8_t *>(endpoint.address.ip.ipv4), 4);
+            memcpy(input.data(), &endpoint.address.ip.ipv4, 4);
             memcpy(input.data() + 4, &endpoint.port, sizeof(endpoint.port));
             cookie = crypto::MAC(secret_, input.data(), input.size());
         } else {
             std::vector<uint8_t> input(16 + sizeof(endpoint.port));
             memcpy(input.data(), endpoint.address.ip.ipv6, 16);
-            memcpy(input.data() + 4, &endpoint.port, sizeof(endpoint.port));
+            memcpy(input.data() + 16, &endpoint.port, sizeof(endpoint.port));
             cookie = crypto::MAC(secret_, input.data(), input.size());
         }
         return cookie;
