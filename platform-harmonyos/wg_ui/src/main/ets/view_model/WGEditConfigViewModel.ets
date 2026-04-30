@@ -21,7 +21,8 @@ import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddressArea, WGConfPeer, WGDBConf } from 'wg_tunnel';
+import { IPAddressArea, WGConfPeer, WGDBConf, } from 'wg_tunnel';
+import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 
@@ -36,6 +37,7 @@ export default class WGNewConfigViewModel {
   @Trace client: ClientEditConfig = new ClientEditConfig(); // 客户端配置
   @Trace peers: PeerEditConfig[] = []; // 对等端配置列表
   inputRegex = new InputRegex();
+  dbId?: number;
   /**
    * 记录下每次随机生成时的私钥
    * 用于检测私钥变化时，是否生成公钥进行计算
@@ -46,6 +48,30 @@ export default class WGNewConfigViewModel {
     if (nav) {
       this.nav = nav;
     }
+  }
+
+  async initEditData(params: WGEditConfigParams) {
+    LLog.info(TAG, "预填充数据")
+    const config = params.config;
+    this.dbId = params.id;
+
+    this.client.deviceName = config.name
+    this.client.privateKey = config.conf.inter.privateKey
+    this.client.publicKey = await WireGuard.genPublicKey(config.conf.inter.privateKey);
+    this.client.listenerPort = config.conf.inter.listenerPort
+    this.client.vpnAddress = `${config.conf.inter.ipArea.address.ip}/${config.conf.inter.ipArea.cidr}`
+    this.client.dnsIps = config.conf.inter.dns?.map((it) => it.ip)
+      .join(",")
+    this.client.mtu = config.conf.inter.mtu
+    this.peers = config.conf.peers.map((it) => {
+      const config = new PeerEditConfig();
+      config.publicKey = it.publicKey;
+      config.preSharedKey = it.preSharedKey;
+      config.address = `${it.endpoint.ipStrOrDomain}:${it.endpoint.port}`;
+      config.allowedIpsInput = it.allowedIPs.map((it) => `${it.address.ip}/${it.cidr}`).join(",");
+      config.keepaliveInterval = it.keepaliveInterval;
+      return config;
+    })
   }
 
   async makeKeyPair() {
@@ -110,7 +136,11 @@ export default class WGNewConfigViewModel {
     try {
       let db = await this.checkAndMakeDBConfig();
       LLog.info(TAG, `db Config : ${JSON.stringify(db)}`)
-      WireGuard.helper.config.insertNewConfig(db);
+      if (this.dbId) {
+        WireGuard.helper.config.updateConfig(this.dbId, db);
+      } else {
+        WireGuard.helper.config.insertNewConfig(db);
+      }
       this.nav.pop({});
     } catch (e) {
       LLog.warn(TAG, e);
@@ -189,6 +219,7 @@ export default class WGNewConfigViewModel {
           privateKey: this.client.privateKey,
           ipArea: ipAddress,
           listenerPort: this.client.listenerPort,
+          mtu: this.client.mtu,
           // dns:
         },
         peers: dbPeers,
@@ -204,12 +235,13 @@ export default class WGNewConfigViewModel {
       throw new WGAppException("Peer 目标地址为空")
     }
     // 远程端点
-    if (await WireGuard.Tools.isIpAddress(config.address) || await WireGuard.Tools.isValidDomain(config.address)) {
+    const ipPort = Tools.getIpPort(config.address!)
+    const ip = ipPort.ipOrDomain;
+    if (await WireGuard.Tools.isIpAddress(ip) || await WireGuard.Tools.isValidDomain(ip)) {
       // 是ip或者域名
     } else {
-      throw new WGAppException("地址格式异常，必须是合法的IP+端口")
+      throw new WGAppException(`地址格式异常，必须是合法的IP+端口或者域名+端口，value=${config.address}`)
     }
-    const ipPort = Tools.getIpPort(config.address!)
     if (ipPort.port < 0 || ipPort.port > 65535) {
       throw new WGAppException("端口取值范围为：0-65535")
     }

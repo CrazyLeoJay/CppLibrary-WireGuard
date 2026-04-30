@@ -19,6 +19,8 @@ import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import WGConfigPreViewModel from '../view_model/WGConfigPreViewModel';
+import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { WireGuardNav } from '../../../../Index';
 
 const TAG = "配置预览"
 
@@ -57,6 +59,17 @@ export struct WGConfigPreViewNavDest {
         return;
       }
     })
+    .menus([
+      {
+        value: "編輯",
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.pencil_waveform')),
+        action: () => {
+          WireGuardNav.navDescToNewWGConfigView(this.vm.nav, { id: this.vm.params!.id, config: this.vm.data },()=>{
+            this.vm.updateData()
+          })
+        }
+      }
+    ])
   }
 }
 

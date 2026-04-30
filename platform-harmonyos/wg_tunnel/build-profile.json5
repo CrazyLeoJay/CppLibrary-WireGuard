@@ -5,7 +5,7 @@
       "path": "./src/main/cpp/CMakeLists.txt",
       "arguments": "",
       // 开启ASan插桩
-      //      "arguments": "-DOHOS_ENABLE_ASAN=ON",
+//      "arguments": "-DOHOS_ENABLE_ASAN=ON",
       "cppFlags": "--std=c++14",
       "abiFilters": [
         "arm64-v8a",

@@ -7,8 +7,8 @@
     },
     {
       "name": "WGNewConfigView",
-      "pageSourceFile": "src/main/ets/view/WGNewConfigView.ets",
-      "buildFunction": "WGNewConfigViewBuilder"
+      "pageSourceFile": "src/main/ets/view/WGEditConfigView.ets",
+      "buildFunction": "WGEditConfigViewBuilder"
     },
     {
       "name": "WGConfigPreView",

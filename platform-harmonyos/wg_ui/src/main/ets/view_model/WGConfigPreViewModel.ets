@@ -51,9 +51,15 @@ export default class WGConfigPreViewModel {
 
 
   async loadData(params: WGConfigPreViewParams) {
+    this.params = params;
     this.data = WireGuard.helper.config.getConfigForId(params.id)
-
     LLog.info(TAG, `data ${JSON.stringify(this.data)}`);
+  }
+
+  async updateData() {
+    if (this.params) {
+      this.loadData(this.params);
+    }
   }
 
   async copy44KeyToSystem(context: UIContext, content: string) {

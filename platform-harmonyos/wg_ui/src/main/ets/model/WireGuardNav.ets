@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
+import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 /**
  * UI界面导航
@@ -38,11 +39,12 @@ export namespace WireGuardNav {
    * @param nav
    * @param onPop
    */
-  export function navDescToNewWGConfigView(nav: NavPathStack, onPop: () => void) {
+  export function navDescToNewWGConfigView(nav: NavPathStack, params?: WGEditConfigParams, onPop?: () => void) {
     nav.pushPath({
       name: "WGNewConfigView",
+      param: params,
       onPop: () => {
-        onPop();
+        onPop?.();
       }
     })
   }

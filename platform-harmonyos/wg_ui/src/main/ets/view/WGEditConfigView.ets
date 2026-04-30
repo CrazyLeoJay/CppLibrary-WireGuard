@@ -14,20 +14,22 @@
  * limitations under the License.
  *
  */
-import WGNewConfigViewModel from '../view_model/WGNewConfigViewModel';
+import WGEditConfigViewModel from '../view_model/WGEditConfigViewModel';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
-
+import WGEditConfigParams from '../entity/WGEditConfigParams';
+import { LLog } from 'wg_tunnel';
+const TAG = "编辑界面";
 @Builder
-export function WGNewConfigViewBuilder() {
-  WGNewConfigViewNavDest();
+export function WGEditConfigViewBuilder() {
+  WGEditConfigViewNavDest();
 }
 
 @Preview
 @ComponentV2
-export struct WGNewConfigViewNavDest {
-  vm: WGNewConfigViewModel = new WGNewConfigViewModel();
+export struct WGEditConfigViewNavDest {
+  vm: WGEditConfigViewModel = new WGEditConfigViewModel();
 
   build() {
     NavDestination() {
@@ -36,6 +38,14 @@ export struct WGNewConfigViewNavDest {
     .onReady((info) => {
       if (info.pathStack instanceof NavPathStack) {
         this.vm.nav = info.pathStack
+      }
+      const data = info.pathInfo.param as WGEditConfigParams | undefined
+      if (data) {
+        // 如果数据存在就去加载
+        this.vm.initEditData(data)
+          .catch((e:BusinessError)=>{
+            LLog.warn(TAG, e)
+          })
       }
     })
     .title("创建 WireGuard 隧道")
@@ -66,7 +76,7 @@ function cardBackgroundStyle() {
 
 @ComponentV2
 export struct WGNewConfigView {
-  @Param vm: WGNewConfigViewModel = new WGNewConfigViewModel();
+  @Param vm: WGEditConfigViewModel = new WGEditConfigViewModel();
   defaultCardBgColor = $r('app.color.wg_new_card_background_color');
 
   build() {
@@ -109,7 +119,7 @@ export struct WGNewConfigView {
  */
 @ComponentV2
 struct InterfaceEditCardView {
-  @Param @Require vm: WGNewConfigViewModel
+  @Param @Require vm: WGEditConfigViewModel
 
   build() {
     Column({ space: '16vp' }) {
@@ -130,7 +140,7 @@ struct InterfaceEditCardView {
           }
         },
         funBtnList: [{
-          type:"symbolBtn",
+          type: "symbolBtn",
           symbol: $r('sys.symbol.arrow_2_circlepath'),
           action: () => {
             this.vm.makeKeyPair();
@@ -203,9 +213,10 @@ struct InterfaceEditCardView {
  */
 @ComponentV2
 struct PeerEditCardView {
-  @Param @Require vm: WGNewConfigViewModel
+  @Param @Require vm: WGEditConfigViewModel
   @Param @Require index: number
   @Param @Require data: PeerEditConfig
+
   private TAG = "";
 
   build() {
@@ -234,7 +245,7 @@ struct PeerEditCardView {
         placeholder: "（可选，不建议设置）",
         inputFilter: this.vm.inputRegex.num,
         funBtnList: [{
-          type:"tag",
+          type: "tag",
           tag: "秒",
           action: () => {
             this.vm.makeKeyPair();

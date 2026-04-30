@@ -124,7 +124,7 @@ export namespace WireGuard {
     const packageName = bundleInfo.name
     const abilityName = 'WGVpnExtAbility'
 
-    vpnExtension.stopVpnExtensionAbility({
+    await vpnExtension.stopVpnExtensionAbility({
       deviceId: '',
       bundleName: packageName,
       abilityName: abilityName,
