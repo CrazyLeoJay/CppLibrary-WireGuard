@@ -97,14 +97,13 @@ namespace WireGuard {
             // if (log_handler != nullptr) {
             //     log_handler(level, file, line, fmt, std::forward<Args>(args)...);
             // } else {
-                default_log_handler(level, file, line, fmt, std::forward<Args>(args)...);
+            default_log_handler(level, file, line, fmt, std::forward<Args>(args)...);
             // }
         }
 
-        template<typename Func>
-        inline void print_space(Func &&func) {
+        inline void print_space(const std::function<void()> &func) {
             if (WG_PRINT_SPACE_ENABLE) {
-                std::forward<Func>(func)();
+                func();
             }
         }
     }; // namespace Logs
