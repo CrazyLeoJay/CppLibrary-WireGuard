@@ -34,18 +34,8 @@
 #include <regex>
 #include <mutex>
 
-// ANSI 颜色代码
-#define RESET       "\033[0m"
-#define BLACK       "\033[30m"
-#define RED         "\033[31m"
-#define GREEN       "\033[32m"
-#define YELLOW      "\033[33m"
-#define BLUE        "\033[34m"
-#define MAGENTA     "\033[35m"
-#define CYAN        "\033[36m"
-#define WHITE       "\033[37m"
-#define BOLD_RED    "\033[1;31m"
-#define BOLD_GREEN  "\033[1;32m"
+#include "fmt/format.h"
+
 
 // 可继续添加背景色等
 std::mutex printlogMutex;
@@ -56,7 +46,7 @@ void WireGuard::Logs::log_println(LogLevel level, const char *file, int line, co
     try {
         if (fmt) {
             message = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
-            auto maxLen = std::min(static_cast<std::int32_t>(message.size() * 3), 65535);
+            const auto maxLen = std::min(static_cast<std::int32_t>(message.size() * 3), 65535);
             std::vector<char> buffer(maxLen);
             va_list args;
             va_start(args, fmt);

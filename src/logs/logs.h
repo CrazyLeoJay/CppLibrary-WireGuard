@@ -29,14 +29,59 @@
 #define WG_PRINT_SPACE_ENABLE true
 #endif
 
+#include <functional>
+#include <iostream>
+#include <regex>
 #include <utility>
+
+#include "fmt/format.h"
+#include "fmt/printf.h"
+#include "fmt/xchar.h"
+
+
+// ANSI 颜色代码
+#define RESET       "\033[0m"
+#define BLACK       "\033[30m"
+#define RED         "\033[31m"
+#define GREEN       "\033[32m"
+#define YELLOW      "\033[33m"
+#define BLUE        "\033[34m"
+#define MAGENTA     "\033[35m"
+#define CYAN        "\033[36m"
+#define WHITE       "\033[37m"
+#define BOLD_RED    "\033[1;31m"
+#define BOLD_GREEN  "\033[1;32m"
 
 namespace WireGuard {
     namespace Logs {
         // 日志级别
         enum class LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 };
 
+        using LogHandler = std::function<void(
+            LogLevel level, const char *tag, const char *file, int line, const char *fmt, ...
+        )>;
+
         void log_println(LogLevel level, const char *file, int line, const char *fmt, ...);
+
+        template<typename... Args>
+        void log_temp(const LogLevel level, const char *file, int line, const char *fmt, Args &&... args) {
+            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
+            auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+            switch (level) {
+                case LogLevel::DEBUG:
+                    std::cout << GREEN << file << "(" << line << ")" << "\t" << message << RESET << std::endl;
+                    break;
+                case LogLevel::INFO:
+                    std::cout << BLUE << file << "(" << line << ")" << "\t" << message << RESET << std::endl;
+                    break;
+                case LogLevel::WARN:
+                    std::cout << YELLOW << file << "(" << line << ")" << "\t" << message << RESET << std::endl;
+                    break;
+                case LogLevel::ERROR:
+                    std::cout << RED << file << "(" << line << ")" << "\t" << message << RESET << std::endl;
+                    break;
+            }
+        }
 
         template<typename Func>
         inline void print_space(Func &&func) {
@@ -50,7 +95,7 @@ namespace WireGuard {
 // 编译期关闭 DEBUG 日志（Release 模式）
 
 #ifndef LOG_PRINT
-#define LOG_PRINT(level, fmt,...) ::WireGuard::Logs::log_println(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#define LOG_PRINT(level, fmt,...) ::WireGuard::Logs::log_temp(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 #endif
 
 #ifndef LOG_DEBUG
