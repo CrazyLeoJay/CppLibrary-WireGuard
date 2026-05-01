@@ -46,6 +46,10 @@ namespace WireGuard {
     }
 
     TEST(COOKIE, test_cookie) {
+        Logs::setLogHandler([](Logs::LogLevel level, const std::string &message) {
+            std::cout << GREEN << "覆盖log\t" << message << RESET << std::endl;
+        });
+
         CookieChecker
                 receiveCookieChecker{ContentKey{server_private}},
                 sendCookieChecker{ContentKey{client_private}};

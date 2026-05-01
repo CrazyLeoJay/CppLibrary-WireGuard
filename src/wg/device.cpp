@@ -38,15 +38,8 @@
 
 namespace WireGuard {
     ContentKey::ContentKey(const PrivateKey &private_key) {
+        local_private_key = private_key;
         crypto::generatePublicKey(local_public_key, private_key);
-        // message_mac1_key_ = crypto::mixHash(crypto::LABEL_MAC1, mac_public_key);
-        // cookie_encryption_key_ = crypto::mixHash(crypto::LABEL_COOKIE, mac_public_key);
-        // Logs::print_space([&]() {
-        //     LOG_INFO("初始化 \nmac1_key:%{Public}s\ncookie_key:%{public}s",
-        //              crypto::bin2B64(message_mac1_key_.data(), cookie_encryption_key_.size()).c_str(),
-        //              crypto::bin2B64(cookie_encryption_key_.data(), cookie_encryption_key_.size()).c_str()
-        //     );
-        // });
     }
 
     Device::Device(const DeviceRegisterConfig &config)
