@@ -67,6 +67,7 @@ namespace WireGuard {
         receive.init(server_private);
 
 
+        LOG_DEBUG("%s： %d","数值测试", 12);
         LOG_DEBUG("=============== 发送端：第一次握手！ =================\n");
         MessageInitiation msg;
         try {
