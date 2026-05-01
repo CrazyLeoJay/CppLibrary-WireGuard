@@ -29,14 +29,77 @@
 #define WG_PRINT_SPACE_ENABLE true
 #endif
 
-#include <utility>
+#include <functional>
+#include <iostream>
+#include <regex>
+#include <mutex>
+
+#include "fmt/format.h"
+#include "fmt/printf.h"
+#include "fmt/xchar.h"
+
+
+// ANSI 颜色代码
+#define RESET       "\033[0m"
+#define BLACK       "\033[30m"
+#define RED         "\033[31m"
+#define GREEN       "\033[32m"
+#define YELLOW      "\033[33m"
+#define BLUE        "\033[34m"
+#define MAGENTA     "\033[35m"
+#define CYAN        "\033[36m"
+#define WHITE       "\033[37m"
+#define BOLD_RED    "\033[1;31m"
+#define BOLD_GREEN  "\033[1;32m"
 
 namespace WireGuard {
     namespace Logs {
         // 日志级别
         enum class LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 };
 
-        void log_println(LogLevel level, const char *file, int line, const char *fmt, ...);
+        template<typename... Args>
+        inline void default_log_handler(
+            const LogLevel level, const char *file, int line, const char *fmt, Args &&... args
+        ) {
+            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
+            auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+            auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
+            switch (level) {
+                case LogLevel::DEBUG:
+                    std::cout << GREEN << outMessage << RESET << std::endl;
+                    break;
+                case LogLevel::INFO:
+                    std::cout << BLUE << outMessage << RESET << std::endl;
+                    break;
+                case LogLevel::WARN:
+                    std::cout << YELLOW << outMessage << RESET << std::endl;
+                    break;
+                case LogLevel::ERROR:
+                    std::cout << RED << outMessage << RESET << std::endl;
+                    break;
+            }
+        }
+
+        template<typename... Args>
+        using LogHandler = std::function<void(
+            LogLevel level, const char *file, int line, const char *fmt, Args &&... args
+        )>;
+
+        static std::mutex printlogMutex;
+        // static std::unique_ptr<LogHandler<> > log_handler = nullptr;
+        //
+        // inline void setLogHandler(const LogHandler<> &handler) {
+        //     log_handler = std::make_unique<LogHandler<> >(handler);
+        // }
+
+        template<typename... Args>
+        inline void log_println(LogLevel level, const char *file, int line, const char *fmt, Args &&... args) {
+            // if (log_handler != nullptr) {
+            //     log_handler(level, file, line, fmt, std::forward<Args>(args)...);
+            // } else {
+                default_log_handler(level, file, line, fmt, std::forward<Args>(args)...);
+            // }
+        }
 
         template<typename Func>
         inline void print_space(Func &&func) {

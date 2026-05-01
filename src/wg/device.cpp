@@ -22,15 +22,38 @@
 // please include "napi/native_api.h".
 
 #include "device.h"
+
+#include <algorithm>
+
 #include "WGException.h"
 #include "pipwait.h"
 #include "tools.h"
 #include <cerrno>
 #include <cstddef>
+#include <utility>
 #include <unistd.h>
+#include <sys/socket.h>
+
+#include "cookie.h"
 
 namespace WireGuard {
-    Device::Device(const DeviceRegisterConfig &config) : config(config.client) { initPeers(config.peers); }
+    ContentKey::ContentKey(const PrivateKey &private_key) {
+        crypto::generatePublicKey(local_public_key, private_key);
+        // message_mac1_key_ = crypto::mixHash(crypto::LABEL_MAC1, mac_public_key);
+        // cookie_encryption_key_ = crypto::mixHash(crypto::LABEL_COOKIE, mac_public_key);
+        // Logs::print_space([&]() {
+        //     LOG_INFO("初始化 \nmac1_key:%{Public}s\ncookie_key:%{public}s",
+        //              crypto::bin2B64(message_mac1_key_.data(), cookie_encryption_key_.size()).c_str(),
+        //              crypto::bin2B64(cookie_encryption_key_.data(), cookie_encryption_key_.size()).c_str()
+        //     );
+        // });
+    }
+
+    Device::Device(const DeviceRegisterConfig &config)
+        : content_key_(config.client.private_key),
+          config(config.client) {
+        initPeers(config.peers);
+    }
 
     Device::~Device() {
         try {
@@ -40,7 +63,7 @@ namespace WireGuard {
         }
     }
 
-    uint32_t WireGuard::Device::initSocket(const std::function<void(int &)> &onSocketFDChange) {
+    uint32_t Device::initSocket(const std::function<void(int &)> &onSocketFDChange) {
         LOG_INFO("初始化 socket");
         if (config.listener_port) {
             LOG_INFO("监听端口：%{public}d", *config.listener_port);
@@ -113,7 +136,7 @@ namespace WireGuard {
         // 添加新配置
         _peers.reserve(peers.size());
         for (const PeerConfig &pc: peers) {
-            std::shared_ptr<Peer> peer = std::make_shared<Peer>(this->config, pc);
+            auto peer = std::make_shared<Peer>(content_key_, pc);
             peer->init();
             // 配置Ip树查询
             this->allowedIps.addPeer(peer);
@@ -126,11 +149,10 @@ namespace WireGuard {
     void Device::loopSocketHeartbeatTask() {
         LOG_INFO("开启心跳任务");
         std::vector<std::shared_ptr<Peer> > peers{};
-        std::chrono::milliseconds nextSleepDuration;
         while (isRunning.load(std::memory_order_acquire)) {
             // 睡眠等待任务由 Tools::PipeWait 实现，
             // 当需要结束时，会由通道唤醒，所以这里正常25s睡眠即可
-            nextSleepDuration = std::chrono::seconds(25);
+            std::chrono::milliseconds nextSleepDuration = std::chrono::seconds(25);
             {
                 std::lock_guard<std::mutex> lock(_peerMutex);
                 peers.clear();
@@ -195,7 +217,7 @@ namespace WireGuard {
         while (isRunning.load(std::memory_order_acquire) && isSocketRunning.load(std::memory_order_acquire) &&
                socket.fd() != -1) {
             try {
-                ssize_t received = socket.read(buffer.data(), buffer.size(), endpoint);
+                const ssize_t received = socket.read(buffer.data(), buffer.size(), endpoint);
                 if (received < 0) {
                     if (!isRunning.load(std::memory_order_acquire) ||
                         !isSocketRunning.load(std::memory_order_acquire)) {
@@ -388,59 +410,70 @@ namespace WireGuard {
         // 如果接收到握手请求，则表示当前设备为接收端
         // 如果发送握手协议，则需要设置为true
         iAmInitiator = false;
-
         auto *msg = reinterpret_cast<const MessageInitiation *>(data);
+
+        // 特殊情况，当CPU使用率比较高时，接收端可以选择开启cookie挑战
+        // 比如：疑似Dos攻击，需要强制执行判断
+        if (enableCookie) {
+            // 检查是否发起cookie或者检查mac2是否合规
+            if (!checkCookieForMac2(endpoint, *msg)) {
+                // 如果挑战失败，或者需要发起挑战，直接返回，不做任何处理
+                return;
+            }
+        }
+
         // 查找对应的 Peer（需要解密静态公钥）
-        PublicKey pk = crypto::getPublicKey(*msg, config.private_key);
+        const PublicKey pk = crypto::getPublicKey(*msg, config.private_key);
         if (_peers.find(pk) == _peers.end()) {
-            LOG_WARN("地址（%{public}s）未找到注册设备", WireGuard::Tools::printStr(endpoint.address).c_str());
+            Logs::print_space([&]() {
+                LOG_WARN("地址（%{public}s）未找到注册设备", WireGuard::Tools::printStr(endpoint.address).c_str());
+            });
             return;
         }
-        auto currentPeer = _peers[pk];
-
-        //        // 验证 MAC
-        //        // todo 特殊情况：如果接收端判断疑似Dos攻击，需要强制执行判断，如果这里为空，则恢复带有mac1 的response，
-        //        // 要求客户端携带Cookie 只有在 mac1 和mac2 都不为空时判断
-        //        if (!cookie::isEmpty(msg->mac1) && !cookie::isEmpty(msg->mac2)) {
-        //            try {
-        //                currentPeer->verifyHandshakeInitiationCookie(msg);
-        //            } catch (const std::exception &e) {
-        //                LOG_WARN("IP(%{public}s):cookie 验证不通过: %{public}s", Tools::printStr(endpoint.address).c_str(),
-        //                         e.what());
-        //                return;
-        //            }
-        //        }
-
+        const auto currentPeer = _peers[pk];
         try {
             currentPeer->handleHandshakeInitiation(*msg);
         } catch (const std::exception &e) {
-            LOG_WARN(
-                "地址（%{public}s）握手失败: %{public}s", WireGuard::Tools::printStr(endpoint.address).c_str(), e.what()
-            );
+            Logs::print_space([&]() {
+                LOG_WARN(
+                    "地址（%{public}s）握手失败: %{public}s",
+                    WireGuard::Tools::printStr(endpoint.address).c_str(),
+                    e.what()
+                );
+            });
             return;
         }
 
         // 记录客户端索引
         _receiverIndexPeers[msg->senderIndex] = currentPeer;
         // 创建新索引
-        auto newIndex = createNewIndex(currentPeer);
+        const auto newIndex = createNewIndex(currentPeer);
 
         // 创建 Response
         MessageResponse response = currentPeer->createHandshakeResponse(newIndex);
-
+        if (enableCookie) {
+            cookieChecker.messageAddMac2(endpoint, response);
+        }
         // 开始会话
-        auto keypair = currentPeer->beginSession(false);
+        const auto keypair = currentPeer->beginSession(false);
         if (keypair) {
             _keypairIndexPeers[newIndex] = keypair;
             currentPeer->setCurrentKeypair(keypair);
             // 发送 Response
-            socket.write(&response, sizeof(response), endpoint);
+            const auto wl = socket.write(&response, sizeof(response), endpoint);
+            if (wl < 0) {
+                throw WGException("发送失败");
+            }
             // 发送等待的数据包
             // 服务端在被攻击或者解密失败时，会等待客户端重新握手，或者cookie访问后，继续服务，所以也是有积压的数据的。
             sendStagedPackets(currentPeer);
-            LOG_INFO("发送握手响应返回发起端，并释放缓存数据包");
+            Logs::print_space([&]() {
+                LOG_INFO("发送握手响应返回发起端，并释放缓存数据包");
+            });
         } else {
-            LOG_WARN("握手响应失败：服务（%{public}s）：KeyPair 生成异常", Tools::printStr(endpoint.address).c_str());
+            Logs::print_space([&]() {
+                LOG_WARN("握手响应失败：服务（%{public}s）：KeyPair 生成异常", Tools::printStr(endpoint.address).c_str());
+            });
         }
     }
 
@@ -458,7 +491,7 @@ namespace WireGuard {
             throw WGException("未找到远端Peer");
         }
         // 获取到当前 peer
-        auto currentPeer = _receiverIndexPeers[msg->receiverIndex];
+        const auto currentPeer = _receiverIndexPeers[msg->receiverIndex];
 
         // 更新端点 (PS:其实我觉得没啥更新必要，按道理，返回的ip地址和端口，应该和请求的一致)
         currentPeer->updateEndpoint(endpoint);
@@ -472,7 +505,7 @@ namespace WireGuard {
         }
 
         // 开始会话
-        auto keypair = currentPeer->beginSession(true);
+        const auto keypair = currentPeer->beginSession(true);
         if (keypair) {
             // keypair 建立索引
             _keypairIndexPeers[msg->receiverIndex] = keypair;
@@ -486,22 +519,27 @@ namespace WireGuard {
         }
     }
 
-    void Device::handleCookie(const char *data, size_t len, const Endpoint &endpoint) {
-        // todo 还未开发 Cookie 挑战相关
-
+    void Device::handleCookie(const char *data, const size_t len, const Endpoint &endpoint) {
+        // 发起端，接收cookie消息，解析cookie
         if (len < sizeof(MessageCookie)) {
             return;
         }
-        //        auto *msg = reinterpret_cast<const MessageCookie *>(data);
-        auto *msg = reinterpret_cast<const MessageCookieRequest *>(data);
+        auto *msg = reinterpret_cast<const MessageCookie *>(data);
 
         // 根据 receiver_index 查找发起方 Peer
         if (_receiverIndexPeers.find(msg->receiverIndex) == _receiverIndexPeers.end()) {
             throw WGException("未找到远端Peer");
         }
         // 获取到当前 peer
-        std::shared_ptr<Peer> currentPeer = _receiverIndexPeers[msg->receiverIndex];
-        // todo 通过 MessageCookieRequest 计算mac2加密返回一个 MessageCookieReply
+        const std::shared_ptr<Peer> currentPeer = _receiverIndexPeers[msg->receiverIndex];
+
+        // 处理cookie消息，并且保存cookie到peer中，再次发送握手时，会携带cookie加密后的mac2
+        // 由于解密时用到了握手时的mac1，所以只有发送了握手消息才能获取到正确cookie
+        currentPeer->handleCookie(*msg);
+
+        // 然后重新发送握手请求
+        // 不需要检查间隔，直接再次握手
+        sendInitiation(currentPeer, true);
     }
 
     void Device::handleData(const char *data, const size_t &len, const Endpoint &endpoint) {
@@ -509,7 +547,7 @@ namespace WireGuard {
             return;
         }
         LOG_DEBUG("接收到数据");
-        size_t cipherLen = len - sizeof(MessageData);
+        const size_t cipherLen = len - sizeof(MessageData);
         //        if (cipherLen < 16 || cipherLen % 16 != 0) {
         //            throw WGException("接收到的加密消息长度不是16倍数len=%d", cipherLen);
         //        }
@@ -543,14 +581,14 @@ namespace WireGuard {
         sendToLocal(result.data(), result.size());
     }
 
-    void Device::sendInitiation(const std::shared_ptr<Peer> &peer) {
+    void Device::sendInitiation(const std::shared_ptr<Peer> &peer, const bool &force) {
         // 先设置当前设备为发起端
         // 如果发送握手协议，则需要设置为true
         iAmInitiator = true;
 
         // 配置 peer 索引
         const auto index = createNewIndex(peer);
-        const auto msg = peer->createHandshakeInitiation(index);
+        const auto msg = peer->createHandshakeInitiation(index, force);
         const auto endpoint = peer->getEndpoint();
 
         LOG_INFO(
@@ -563,11 +601,47 @@ namespace WireGuard {
         }
     }
 
-    void Device::sendCookieReply(std::shared_ptr<Peer> &peer) {
-        // todo 处理 cookie 挑战
+    bool Device::checkCookieForMac2(const Endpoint &endpoint, const MessageInitiation &msg) {
+        // 处理 cookie 挑战
+        // 判断 该站点的cookie是否生成过
+        const auto cookie = cookieChecker.getCookieNoMake(endpoint);
+        if (!cookie) {
+            // 如果cookie还未生成，就发送cookie到端
+            sendCookieReply(msg, endpoint);
+            return false;
+        }
+        // 如果cookie为空、或者cookie失效，不验证mac2，直接cookie挑战。
+        if (!cookieChecker.verifySecretValid()) {
+            sendCookieReply(msg, endpoint);
+            return false;
+        }
+        // 验证mac2
+        if (cookie::isEmpty(msg.mac2)) {
+            // mac2 没有，需要发送到客户端需要 cookie 挑战
+            sendCookieReply(msg, endpoint);
+            return false;
+        }
+
+        // 如果mac2 不为空，则验证mac2是否正确，抛出异常则直接返回false表示不合格
+        try {
+            CookieChecker::verifyMac2(msg, *cookie);
+        } catch (const std::exception &e) {
+            return false;
+        }
+        return true;
     }
 
-    void Device::encryptPacketAndSendSocket(const std::shared_ptr<Peer> &peer, const uint8_t *data, const size_t len) {
+    void Device::sendCookieReply(const MessageInitiation &msg, const Endpoint &endpoint) {
+        // 接收端行为，使用本地公钥
+        const auto cookieMsg = cookieChecker.createCookieReply(msg, endpoint, content_key_.local_public_key);
+        const auto let = socket.write(&cookieMsg, sizeof(cookieMsg), endpoint);
+        if (let < 0) {
+            throw WGException("发送cookie挑战失败");
+        }
+    }
+
+    void Device::encryptPacketAndSendSocket(const std::shared_ptr<Peer> &peer, const uint8_t *data,
+                                            const size_t len) const {
         std::lock_guard<std::mutex> lock(_indexMutex);
         // 发送消息到 Peer 使用Peer的ip和端口，接收端会解密包，然后按照实际请求发出
         const Endpoint &endpoint = peer->getEndpoint();
@@ -592,7 +666,7 @@ namespace WireGuard {
     }
 
 
-    void Device::sendStagedPackets(const std::shared_ptr<Peer> &peer) {
+    void Device::sendStagedPackets(const std::shared_ptr<Peer> &peer) const {
         try {
             // 消费所有 待发送的数据包
             auto packets = peer->consumeStagedPackets();
@@ -646,19 +720,19 @@ namespace WireGuard {
             // 理论上几乎不可能发生（2^32 的空间）
             throw std::runtime_error("Failed to generate unique index");
         }
-        _receiverIndexPeers[index] = peer;
+        _receiverIndexPeers[index] = std::move(peer);
         return index;
     }
 
-    void Device::removeIndex(uint32_t index) {
+    void Device::removeIndex(const uint32_t index) {
         std::lock_guard<std::mutex> guard(_indexMutex);
         _receiverIndexPeers.erase(index);
         _keypairIndexPeers.erase(index);
     }
 
 
-    void Device::sendToLocal(const uint8_t *data, size_t len) const {
-        LOG_DEBUG("写入网卡数据 len=%{public}zu", len);
+    void Device::sendToLocal(const uint8_t *data, const size_t len) const {
+        Logs::print_space([&]() { LOG_DEBUG("写入网卡数据 len=%{public}zu", len); });
         write(tunFd, data, len);
     }
 }; // namespace WireGuard

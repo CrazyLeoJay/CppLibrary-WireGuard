@@ -25,7 +25,6 @@
 #define WIREGUARD_PEER_H
 
 #include "WGException.h"
-#include "cookie.h"
 #include "crypto/nonce.h"
 #include "keypair.h"
 #include "entity.h"
@@ -44,14 +43,14 @@ namespace WireGuard {
      * 4. 维护连接状态（端点、保活、超时）
      * 5. 管理待发送的数据包队列
      */
-    class Peer {
+    class Peer final {
     public:
-        Peer(const DeviceConfig &clientConfig, const PeerConfig &config);
+        Peer(const ContentKey &content_key, const PeerConfig &config);
 
-        virtual ~Peer();
+        ~Peer();
 
     protected:
-        const DeviceConfig &clientConfig;
+        const ContentKey &content_key;
         const PeerConfig &config;
 
         bool initialized = false;
@@ -85,9 +84,6 @@ namespace WireGuard {
         // ========== 数据包队列 ==========
         std::queue<std::vector<uint8_t> > stagedPackets_; // 等待握手完成后发送的数据包队列
 
-        // ========== Cookie管理 ==========
-        CookieManager cookieManager;
-
     public:
         void init();
 
@@ -101,7 +97,7 @@ namespace WireGuard {
          * 使用clientConfig 获取本地公钥和私钥
          * @return bool 成功返回 true，失败返回 false
          */
-        MessageInitiation createHandshakeInitiation(const uint32_t &senderIndex);
+        MessageInitiation createHandshakeInitiation(const uint32_t &senderIndex, const bool &force = false);
 
         /**
          * 验证握手响应是否合法 不合法会抛出异常需要处理
@@ -129,6 +125,11 @@ namespace WireGuard {
          * @return bool 成功返回 true，失败返回 false
          */
         MessageResponse createHandshakeResponse(const uint32_t &senderIndex);
+
+        /**
+         * @param msg cookie 消息
+         */
+        void handleCookie(const MessageCookie &msg) const;
 
     public:
         PublicKey getPublicKey() const { return config.public_key; }
@@ -312,20 +313,6 @@ namespace WireGuard {
          * - 返回的队列包含所有等待的数据包
          */
         std::queue<std::vector<uint8_t> > consumeStagedPackets();
-
-        /**
-         * 验证握手消息的cookie
-         * @param msg
-         * @return
-         * @Throw
-         */
-        void verifyHandshakeInitiationCookie(const MessageInitiation *msg);
-
-        /**
-         * 解密Cookie
-         * @param cookie
-         */
-        void decryptCookie(const MessageCookie *cookie);
 
         void clear();
     };
