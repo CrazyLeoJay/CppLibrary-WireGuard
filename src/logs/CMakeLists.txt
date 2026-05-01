@@ -12,5 +12,5 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(fmt)
 
 add_library(${PROJECT_NAME} STATIC logs.h)
-#target_include_directories(${PROJECT_NAME} PUBLIC .)
+target_include_directories(${PROJECT_NAME} PUBLIC .)
 target_link_libraries(${PROJECT_NAME} PUBLIC fmt::fmt)
