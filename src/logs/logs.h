@@ -103,9 +103,9 @@ namespace WireGuard {
         }
 
         inline void print_space(const std::function<void()> &func) {
-            //            if (WG_PRINT_SPACE_ENABLE) {
-            func();
-            //            }
+            if (WG_PRINT_SPACE_ENABLE) {
+                func();
+            }
         }
     }; // namespace Logs
 }; // namespace WireGuard
@@ -135,6 +135,11 @@ namespace WireGuard {
 #ifndef LOG_ERROR
 #define LOG_ERROR(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::ERROR, fmt, ##__VA_ARGS__)
 #endif
+
+#ifndef LOG_SOCKET
+#define LOG_SOCKET(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
+#endif
+
 
 // ((void)OH_LOG_Print((type), LOG_DEBUG, LOG_DOMAIN, LOG_TAG, __VA_ARGS__))
 
