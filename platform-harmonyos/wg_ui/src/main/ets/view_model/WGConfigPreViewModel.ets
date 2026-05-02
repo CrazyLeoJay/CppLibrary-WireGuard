@@ -17,8 +17,9 @@
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import {
-  ConnectState, LLog, Tools, WGConfPeer, WGDBConf, WireGuard
+  ConnectState, LLog, Tools, VpnConnHelper, WGConfPeer, WGDBConf, WireGuard
 } from 'wg_tunnel';
+import { JSON } from '@kit.ArkTS';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
@@ -51,9 +52,15 @@ export default class WGConfigPreViewModel {
 
 
   async loadData(params: WGConfigPreViewParams) {
+    this.params = params;
     this.data = WireGuard.helper.config.getConfigForId(params.id)
-
     LLog.info(TAG, `data ${JSON.stringify(this.data)}`);
+  }
+
+  async updateData() {
+    if (this.params) {
+      this.loadData(this.params);
+    }
   }
 
   async copy44KeyToSystem(context: UIContext, content: string) {
@@ -72,6 +79,8 @@ export default class WGConfigPreViewModel {
     }
   }
 
+  helper?: VpnConnHelper;
+
   /**
    * 改变Vpn配置，启动或停止
    */
@@ -81,11 +90,13 @@ export default class WGConfigPreViewModel {
       const config = this.data!;
       // 转化实体
       const vpnConf = await WireGuard.toVpnStartConfig(config);
+      LLog.info(TAG, `创建VPN配置：${JSON.stringify(vpnConf)}`)
+
       WireGuard.runWGConfig(context.getHostContext()!, id, vpnConf, isOn)
         .catch((e: BusinessError) => {
           LLog.error(TAG, e);
         })
-
+      //
       // if (!this.helper) {
       //   this.helper = WireGuard.makeVpnConnection(context);
       // }
@@ -98,7 +109,7 @@ export default class WGConfigPreViewModel {
       // }
       // if (isOn) {
       //   LLog.info(TAG, `启动VPN服务 ${id}`);
-      //   await this.helper!.startServer(config)
+      //   await this.helper!.startServer(vpnConf)
       //     .finally(() => {
       //       WireGuard.setRunningServer(id)
       //     })

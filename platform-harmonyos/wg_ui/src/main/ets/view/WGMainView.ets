@@ -123,7 +123,7 @@ export struct WGMainView {
     {
       value: "手动添加",
       action: () => {
-        WireGuardNav.navDescToNewWGConfigView(this.vm.nav, () => {
+        WireGuardNav.navDescToNewWGConfigView(this.vm.nav, undefined, () => {
           this.vm.loadConfigs();
         });
       }

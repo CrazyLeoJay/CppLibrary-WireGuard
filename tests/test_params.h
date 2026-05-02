@@ -25,8 +25,8 @@
 #ifndef WG_MAIN_TEST_PARAMS_H
 #define WG_MAIN_TEST_PARAMS_H
 #include <array>
-#include <cstdint>
 #include <stdexcept>
+#include "logs/logs.h"
 
 #include "../src/wg/crypto/crypto.h"
 

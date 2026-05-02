@@ -69,13 +69,14 @@ export interface WGConfInterface {
   ipArea: IPAddressArea;
   listenerPort?: number,
   dns: IPAddress[];
+  mtu?:number;
 }
 
 export interface WGConfPeer {
   publicKey: string;
   endpoint: WebSitePoint; // 要建立链接的站点地址
   allowedIPs: IPAddressArea[]; // 需要路由的ip地址域
-  keepaliveInterval: Number; // 保活间隔
+  keepaliveInterval: number; // 保活间隔
   preSharedKey?: string; // 共享密钥，可能为null
 }
 

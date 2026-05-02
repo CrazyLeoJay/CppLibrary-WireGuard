@@ -25,8 +25,8 @@
 namespace WireGuard {
     namespace Tools {
         std::string trim(const std::string &str) {
-            auto start = str.find_first_not_of(" \t\n\r");
-            auto end = str.find_last_not_of(" \t\n\r");
+            const auto start = str.find_first_not_of(" \t\n\r");
+            const auto end = str.find_last_not_of(" \t\n\r");
             if (start == std::string::npos || end == std::string::npos) {
                 return "";
             }

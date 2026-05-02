@@ -13,15 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
-/**
- * ${description}
- *
- * Created on 2026/5/2.
- * @author leojay`fu
- *///
-// Created on 2026/5/2.
-//
-// Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
-// please include "napi/native_api.h".
+import { WGDBConf } from 'wg_tunnel';
 
+/**
+ *
+ *
+ * Created on 2026/4/22.
+ * @author leojay`fu
+ */
+
+export default interface WGEditConfigParams {
+  id: number;
+  config: WGDBConf;
+}

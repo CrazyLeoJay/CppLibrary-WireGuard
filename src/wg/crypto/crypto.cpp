@@ -33,6 +33,8 @@
 #include "WGException.h"
 #include "blake2.h"
 #include "../tools.h"
+#include <sys/syscall.h>
+#include "sodium/randombytes.h"
 
 namespace WireGuard {
     namespace crypto {
@@ -121,6 +123,18 @@ namespace WireGuard {
             return crypto_scalarmult_curve25519_base(pub.data(), priv.data()) == 0;
         }
 
+        PublicKey generatePublicKey(const PrivateKey &priv) {
+            PublicKey pub{};
+            // 计算公钥：pub = base × priv（Curve25519 标量基乘法）
+            // 使用 libsodium 标准 API：crypto_scalarmult_curve25519_base
+            // 返回值：0 表示成功，-1 表示失败
+            const auto let = crypto_scalarmult_curve25519_base(pub.data(), priv.data()) == 0;
+            if (let != 0) {
+                throw std::runtime_error("Failed to generate public key");
+            }
+            return pub;
+        }
+
         SymmetricKey dh(const PrivateKey &private_key, const PublicKey &public_key) {
             SymmetricKey shared;
             if (crypto_scalarmult_curve25519(shared.data(), private_key.data(), public_key.data()) != 0) {
@@ -183,7 +197,7 @@ namespace WireGuard {
 
         void decodeAEAD(
             std::vector<uint8_t> &plaintext, const SymmetricKey &key, uint64_t counter, const uint8_t *ciphertext,
-            size_t ciphertext_len, const Hash *auth
+            const size_t ciphertext_len, const Hash *auth
         ) {
             if (sodium_init() < 0)
                 throw std::runtime_error("sodium_init failed");
@@ -438,14 +452,15 @@ namespace WireGuard {
             std::vector<uint8_t> plaintext(plaintext_len);
 
             unsigned long long decrypted_len;
-            int ret = crypto_aead_xchacha20poly1305_ietf_decrypt(
+            const int ret = crypto_aead_xchacha20poly1305_ietf_decrypt(
                 plaintext.data(), &decrypted_len,
                 nullptr, // nsec
                 ciphertext, ciphertext_len, ad, ad_len, nonce, key
             );
 
-            if (ret != 0)
-                throw std::runtime_error("Decryption failed or tag mismatch");
+            if (ret != 0) {
+                throw std::runtime_error("解密失败");
+            }
             plaintext.resize(decrypted_len);
             return plaintext;
         }
@@ -486,10 +501,9 @@ namespace WireGuard {
         }
 
         PublicKey getPublicKey(const MessageInitiation &msg, const PrivateKey &local_private_key) {
-            Noise::NOISEReceive receive{};
+            const Noise::NOISEReceive receive{};
             receive.init(local_private_key);
-            receive.decodeCheckHandshakeInitiation(msg);
-            return receive.remote_public;
+            return receive.onlyDecodeHandshakePublicKey(msg);
         }
 
 
@@ -524,8 +538,30 @@ namespace WireGuard {
             return mac;
         }
 
-        const uint64_t get_current_time_ns() {
-            auto now = std::chrono::steady_clock::now();
+        void randombytes(uint8_t *buf, const size_t len) {
+            // Linux 环境：使用 getrandom() 系统调用，这是 WireGuard 原作者最推崇的方式，它比直接读 /dev/urandom 更能防御文件描述符耗尽攻击。
+            // OpenBSD/FreeBSD 环境：使用 arc4random_buf()，其内核实现同样用它来替代 OpenSSL 的 RAND_bytes。
+            // 用户态通用方案 (C/C++)：如果你的代码需要跨平台，可以用 OpenSSL 的 RAND_bytes 或 libsodium 的 randombytes_buf
+            // randombytes_buf(buf, len);
+
+            size_t offset = 0;
+            // 使用库 #include <sys/syscall.h> 的 SYS_getrandom 实现
+            // getrandom() 能防御文件描述符耗尽攻击，而且是 WireGuard 作者明确推荐的实践。flags=0 会阻塞等待内核熵池初始化完毕，保证安全。
+            while (offset < len) {
+                const ssize_t ret = syscall(SYS_getrandom,
+                                            buf + offset,
+                                            len - offset,
+                                            0); // flags = 0，阻塞直到有足够熵
+                if (ret < 0) {
+                    if (errno == EINTR) continue;
+                    throw std::runtime_error("getrandom() failed");
+                }
+                offset += static_cast<size_t>(ret);
+            }
+        }
+
+        uint64_t get_current_time_ns() {
+            const auto now = std::chrono::steady_clock::now();
             return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
         }
     } // namespace crypto_static

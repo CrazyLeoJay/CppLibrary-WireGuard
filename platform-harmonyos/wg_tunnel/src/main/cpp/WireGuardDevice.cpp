@@ -21,16 +21,15 @@
 // Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
 // please include "napi/native_api.h".
 
-#include "logs/logs.h"
 #include "napi_tools.h"
 #include <mutex>
 #include <napi/native_api.h>
 
 #include "WireGuardDevice.h"
+#include "logs.h"
 
 #include <cstdint>
 #include <cstdio>
-#include <hilog/log.h>
 #include <iostream>
 #include <memory>
 #include <netinet/in.h>
@@ -239,7 +238,6 @@ namespace wg_napi {
                         napi_delete_reference(env, ctx->callbackRef);
                         LOG_DEBUG("回收Ref");
                         ctx->callbackRef = nullptr;
-                        delete ctx;
                     }
                 },                                                       // 最终化回调
                 nullptr,                                                 // 最终化hint
@@ -408,9 +406,9 @@ namespace wg_napi {
         size_t len = 0;
         napi_get_value_string_utf8(env, nValue, nullptr, 0, &len);
         // 3. 分配内存并读取内容
-        char *buf = new char[len + 1];
-        napi_get_value_string_utf8(env, nValue, buf, len + 1, &len);
-        return std::string(buf, len);
+        std::unique_ptr<char[]> buf(new char[len + 1]);
+        napi_get_value_string_utf8(env, nValue, buf.get(), len + 1, &len);
+        return std::string(buf.get(), len);
     }
 
     bool getPropBool(napi_env env, napi_value obj, const std::string propertyName) {
@@ -482,8 +480,12 @@ namespace wg_napi {
 
         // preSharedKey
         if (isHasProp(env, arg, "preSharedKey")) {
-            auto result = getPropToDecodeBase64WGKey(env, arg, "preSharedKey");
-            peer.pre_share_key = std::make_shared<WireGuard::SymmetricKey>(result);
+            try {
+                auto result = getPropToDecodeBase64WGKey(env, arg, "preSharedKey");
+                peer.pre_share_key = std::make_shared<WireGuard::SymmetricKey>(result);
+            } catch (const std::exception &e) {
+                LOG_DEBUG("preSharedKey 未获取到");
+            }
         } else {
             LOG_DEBUG("preSharedKey 未获取到");
         }
@@ -567,7 +569,6 @@ namespace wg_napi {
         if (ip.empty()) {
             throw std::invalid_argument("ip地址不能为空");
         }
-
 
         LOG_DEBUG("设置ip： %{public}s", ip.c_str());
         setIp(ipAddress, isIpv4, ip);

@@ -24,7 +24,6 @@
 #include "test_params.h"
 #include "../src/wg/tools.h"
 #include "udp_socket.h"
-#include "crypto/nonce.h"
 #include "gtest/gtest.h"
 /*
  * 记录测试
@@ -96,7 +95,7 @@ namespace WireGuard {
         send.ephemeral_private_key = ephemeral_private;
         try {
             // auto index = crypto::createIndex();
-            auto index = 0;
+            const auto index = 0;
             msg = send.encodeHandshakeInitiation(index);
         } catch (const std::exception &e) {
             printf("exception client 加密失败: %s\n", e.what());
@@ -119,7 +118,7 @@ namespace WireGuard {
 
 
         LOG_DEBUG("=============== 接收端：响应结果 =================\n");
-        auto receiveIndex = crypto::createIndex();
+        const auto receiveIndex = crypto::createIndex();
         MessageResponse respMsg;
         try {
             respMsg = receive.createHandshakeResponse(receiveIndex);

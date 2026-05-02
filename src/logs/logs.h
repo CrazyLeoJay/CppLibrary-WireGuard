@@ -25,23 +25,86 @@
 #ifndef WIREGUARD_LOGS_H
 #define WIREGUARD_LOGS_H
 
-#ifndef  WG_PRINT_SPACE_ENABLE // 定义打印空间是否执行打印，放在打印空间的函数，可以省略参数传入时构造
+#ifndef WG_PRINT_SPACE_ENABLE // 定义打印空间是否执行打印，放在打印空间的函数，可以省略参数传入时构造
 #define WG_PRINT_SPACE_ENABLE true
 #endif
 
-#include <utility>
+#include <functional>
+#include <iostream>
+#include <regex>
+#include <mutex>
+
+#include "fmt/format.h"
+#include "fmt/printf.h"
+#include "fmt/xchar.h"
+
+
+// ANSI 颜色代码
+#define RESET      "\033[0m"
+#define BLACK      "\033[30m"
+#define RED        "\033[31m"
+#define GREEN      "\033[32m"
+#define YELLOW     "\033[33m"
+#define BLUE       "\033[34m"
+#define MAGENTA    "\033[35m"
+#define CYAN       "\033[36m"
+#define WHITE      "\033[37m"
+#define BOLD_RED   "\033[1;31m"
+#define BOLD_GREEN "\033[1;32m"
 
 namespace WireGuard {
     namespace Logs {
         // 日志级别
         enum class LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 };
 
-        void log_println(LogLevel level, const char *file, int line, const char *fmt, ...);
+        inline void printLog(LogLevel level, const std::string &message) {
+            switch (level) {
+                case LogLevel::DEBUG:
+                    std::cout << GREEN << message << RESET << std::endl;
+                    break;
+                case LogLevel::INFO:
+                    std::cout << BLUE << message << RESET << std::endl;
+                    break;
+                case LogLevel::WARN:
+                    std::cout << YELLOW << message << RESET << std::endl;
+                    break;
+                case LogLevel::ERROR:
+                    std::cout << RED << message << RESET << std::endl;
+                    break;
+            }
+        }
 
-        template<typename Func>
-        inline void print_space(Func &&func) {
+        template<typename... Args>
+        inline void
+        default_log_handler(const LogLevel level, const char *file, int line, const char *fmt, Args &&... args) {
+            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
+            auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+            auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
+            printLog(level, outMessage);
+        }
+
+        template<typename... Args>
+        inline std::string log_to_string(const char *fmt, Args &&... args) {
+            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
+            return fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+        }
+
+        using LogHandler = std::function<void(LogLevel level, const char *file, int line, const std::string &message)>;
+
+        void setLogHandler(const LogHandler &handler);
+
+        LogHandler getLogHandler();
+
+        template<typename... Args>
+        inline void log_println(LogLevel level, const char *file, int line, const char *fmt, Args &&... args) {
+            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
+            auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+            getLogHandler()(level, file, line, message);
+        }
+
+        inline void print_space(const std::function<void()> &func) {
             if (WG_PRINT_SPACE_ENABLE) {
-                std::forward<Func>(func)();
+                func();
             }
         }
     }; // namespace Logs
@@ -50,7 +113,7 @@ namespace WireGuard {
 // 编译期关闭 DEBUG 日志（Release 模式）
 
 #ifndef LOG_PRINT
-#define LOG_PRINT(level, fmt,...) ::WireGuard::Logs::log_println(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+#define LOG_PRINT(level, fmt, ...) ::WireGuard::Logs::log_println(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 #endif
 
 #ifndef LOG_DEBUG
@@ -72,6 +135,11 @@ namespace WireGuard {
 #ifndef LOG_ERROR
 #define LOG_ERROR(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::ERROR, fmt, ##__VA_ARGS__)
 #endif
+
+#ifndef LOG_SOCKET
+#define LOG_SOCKET(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
+#endif
+
 
 // ((void)OH_LOG_Print((type), LOG_DEBUG, LOG_DOMAIN, LOG_TAG, __VA_ARGS__))
 

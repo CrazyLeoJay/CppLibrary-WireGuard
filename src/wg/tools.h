@@ -93,6 +93,7 @@ namespace WireGuard {
 
             Endpoint makeEndpointIpv4(const std::string &ip, const uint16_t &port);
         }; // namespace IP
+        bool isEmpty(const uint8_t * str, size_t size);
     }; // namespace Tools
 }; // namespace WireGuard
 
