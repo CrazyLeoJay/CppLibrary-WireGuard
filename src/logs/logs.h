@@ -80,18 +80,16 @@ namespace WireGuard {
             auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
             auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
             auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
-            printLog(outMessage);
+            printLog(level, outMessage);
         }
 
         template<typename... Args>
-        inline std::string log_to_string(const char *file, int line, const char *fmt, Args &&... args) {
+        inline std::string log_to_string(const char *fmt, Args &&... args) {
             auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
-            auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
-            auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
-            return outMessage;
+            return fmt::sprintf(regexFmt, std::forward<Args>(args)...);
         }
 
-        using LogHandler = std::function<void(LogLevel level, const std::string &message)>;
+        using LogHandler = std::function<void(LogLevel level, const char *file, int line, const std::string &message)>;
 
         void setLogHandler(const LogHandler &handler);
 
@@ -101,8 +99,7 @@ namespace WireGuard {
         inline void log_println(LogLevel level, const char *file, int line, const char *fmt, Args &&... args) {
             auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
             auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
-            auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
-            getLogHandler()(level, outMessage);
+            getLogHandler()(level, file, line, message);
         }
 
         inline void print_space(const std::function<void()> &func) {

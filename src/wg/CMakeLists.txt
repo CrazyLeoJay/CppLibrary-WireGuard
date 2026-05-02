@@ -1,8 +1,5 @@
 cmake_minimum_required(VERSION 3.22.1)
 project(wg)
-# file(GLOB_RECURSE SOURCES_CPP "*.cpp")
-# add_library(wg ${SOURCES_CPP} ${SOURCES_C} peer.h peer.cpp allowedips.h allowedips.cpp cookie.h cookie.cpp device.h device.cpp noise.h noise.cpp messages.h messages.cpp queueing.h queueing.cpp ratelimiter.h ratelimiter.cpp socket.h socket.cpp timers.h timers.cpp version.h client.h client.cpp)
-# add_library(wg SHARED ${SOURCES_CPP})
 
 add_library(${PROJECT_NAME} STATIC
         entity.h entity.cpp

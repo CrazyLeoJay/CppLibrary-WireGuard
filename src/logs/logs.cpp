@@ -1,5 +1,5 @@
 /*
- * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -25,11 +25,14 @@
 
 namespace WireGuard {
     namespace Logs {
-        static LogHandler log_handler{[](const LogLevel level, const std::string &message) { printLog(level, message); }};
+        static LogHandler log_handler{
+            [](const LogLevel level, const char *file, int line, const std::string &message) {
+                const auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
+                printLog(level, outMessage);
+            }
+        };
         void setLogHandler(const LogHandler &handler) { log_handler = handler; }
 
-        LogHandler getLogHandler() {
-            return log_handler;
-        }
-    }
-}
+        LogHandler getLogHandler() { return log_handler; }
+    } // namespace Logs
+} // namespace WireGuard

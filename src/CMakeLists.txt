@@ -8,17 +8,19 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 # === 第二步：添加被测库 ===
 add_subdirectory(clib)
-add_subdirectory(logs)
+# src/logs/CMakeLists.txt
+if(NOT TARGET logs)
+    add_subdirectory(logs)
+    # 其他设置...
+endif()
 add_subdirectory(wg)
 
-include_directories(.)
-
-# 移动手机端引入，需要手机端实现各自系统的logs
-add_library(${PROJECT_NAME}_interface INTERFACE)
-target_link_libraries(${PROJECT_NAME}_interface INTERFACE wg_clib wg logs)
+## 移动手机端引入，需要手机端实现各自系统的logs
+add_library(${PROJECT_NAME}_a INTERFACE main.cpp)
+target_link_libraries(${PROJECT_NAME}_a INTERFACE wg_clib wg logs)
 
 add_library(${PROJECT_NAME} SHARED main.cpp)
 target_link_libraries(${PROJECT_NAME}
-        PUBLIC wg logs
-        PRIVATE wg_clib
+        PUBLIC wg
+        PRIVATE wg_clib logs
 )
