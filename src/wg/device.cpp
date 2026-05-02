@@ -229,13 +229,15 @@ namespace WireGuard {
                     // 由于socket创建fd后需要系统标记保护，需要外部触发。或者创建回调
                     //                    break; // 套接字错误
                     auto fd = socket.createSocket(); // 重新创建套接字然后去通信，需要重新握手 并且需要通知客户端
-                    LOG_DEBUG("更换Socket fd=%{public}d", fd);
+                    LOG_SOCKET("更换Socket fd=%{public}d", fd);
                     socketNewFd(fd); // 通知fd更换
                     continue;
                 }
-                LOG_DEBUG(
-                    "数据流:Socket接收目标 %{public}s len: %{public}zd", endpoint.address.toIpStr().c_str(), received
-                );
+                Logs::print_space([&]() {
+                    LOG_SOCKET(
+                        "数据流:Socket接收目标 %{public}s len: %{public}zd", endpoint.address.toIpStr().c_str(), received
+                    );
+                });
                 // 将读取的数据写出
                 processSocketPacket(buffer.data(), static_cast<size_t>(received), endpoint);
             } catch (const WGException &e) {
@@ -275,12 +277,14 @@ namespace WireGuard {
     void Device::loopReceiveForTun() {
         LOG_INFO("开始VPN Tun读取任务");
         std::vector<uint8_t> buffer(TUN_READ_BUFFER_SIZE);
-        ssize_t readLen;
-        while (isRunning.load(std::memory_order_acquire) && isLoopTunRunning.load(std::memory_order_acquire) &&
-               tunFd.load(std::memory_order_acquire) > 0) {
+        while (
+            isRunning.load(std::memory_order_acquire)
+            && isLoopTunRunning.load(std::memory_order_acquire)
+            && tunFd.load(std::memory_order_acquire) > 0
+        ) {
             try {
                 // 读取网卡数据
-                readLen = readFromLocal(buffer.data(), TUN_READ_BUFFER_SIZE);
+                ssize_t readLen = readFromLocal(buffer.data(), TUN_READ_BUFFER_SIZE);
                 if (readLen <= 0) {
                     if (errno != EAGAIN) {
                         if (tunFd < 0 || !isLoopTunRunning.load(std::memory_order_acquire)) {
@@ -293,7 +297,7 @@ namespace WireGuard {
                 //                LOG_WARN("读取到数据：%{public}zd", readLen);
                 consumeTunData(buffer.data(), readLen);
             } catch (const std::exception &e) {
-                LOG_WARN("读取异常：%{public}s", e.what());
+                LOG_SOCKET("读取异常：%{public}s", e.what());
                 continue;
             }
         }
@@ -305,9 +309,11 @@ namespace WireGuard {
         // 解析读取的数据头
         Endpoint endpoint;
         try {
-            auto ph = Tools::readPacketEndpoint(data, readLen);
+            const auto ph = Tools::readPacketEndpoint(data, readLen);
             endpoint = ph.dst; // 设置目标
-            LOG_DEBUG("Tun接收 : %{public}s len: %{public}zd", ph.toIpLog().c_str(), readLen);
+            Logs::print_space([&]() {
+                LOG_SOCKET("Tun接收 : %{public}s len: %{public}zd", ph.toIpLog().c_str(), readLen);
+            });
         } catch (const std::exception &e) {
             LOG_WARN("获取包目标地址失败 %{public}s", e.what());
             return;
@@ -461,7 +467,7 @@ namespace WireGuard {
             // 服务端在被攻击或者解密失败时，会等待客户端重新握手，或者cookie访问后，继续服务，所以也是有积压的数据的。
             sendStagedPackets(currentPeer);
             Logs::print_space([&]() {
-                LOG_INFO("发送握手响应返回发起端，并释放缓存数据包");
+                LOG_SOCKET("发送握手响应返回发起端，并释放缓存数据包");
             });
         } else {
             Logs::print_space([&]() {
@@ -539,7 +545,7 @@ namespace WireGuard {
         if (len < sizeof(MessageData)) {
             return;
         }
-        LOG_DEBUG("接收到数据");
+        LOG_SOCKET("接收到数据");
         const size_t cipherLen = len - sizeof(MessageData);
         //        if (cipherLen < 16 || cipherLen % 16 != 0) {
         //            throw WGException("接收到的加密消息长度不是16倍数len=%d", cipherLen);
@@ -565,7 +571,7 @@ namespace WireGuard {
         // 解密数据
         const std::vector<uint8_t> result = kp.lock()->decrypt(msg, len);
         if (result.empty()) {
-            LOG_DEBUG("接收到心跳包");
+            LOG_SOCKET("接收到心跳包");
             return;
         }
         // 记录接收的数据
@@ -584,8 +590,10 @@ namespace WireGuard {
         const auto msg = peer->createHandshakeInitiation(index, force);
         const auto endpoint = peer->getEndpoint();
 
-        LOG_INFO(
-            "发送握手请求到：%{public}s:%{public}d  %{public}s", endpoint.address.toIpStr().c_str(), endpoint.port,
+        LOG_SOCKET(
+            "发送握手请求到：%{public}s:%{public}d  %{public}s",
+            endpoint.address.toIpStr().c_str(),
+            endpoint.port,
             endpoint.address.toIpHex().c_str()
         );
         const auto result = socket.write(&msg, sizeof(msg), endpoint);
@@ -638,18 +646,17 @@ namespace WireGuard {
         std::lock_guard<std::mutex> lock(_indexMutex);
         // 发送消息到 Peer 使用Peer的ip和端口，接收端会解密包，然后按照实际请求发出
         const Endpoint &endpoint = peer->getEndpoint();
-        LOG_DEBUG(
-            "send to socket 发送 : %{public}s:%{public}d len: %{public}zd", endpoint.address.toIpStr().c_str(),
-            endpoint.port, len
-        );
         // 发送数据包到peer
         std::vector<uint8_t> message = peer->encryptPacketToMessageData(data, len);
-
         try {
-            LOG_DEBUG(
-                "数据流:写出到Socket(ip:%{public}s) size=%{public}zu", endpoint.address.toIpStr().c_str(),
-                message.size()
-            );
+            Logs::print_space([&]() {
+                LOG_SOCKET(
+                    "数据流:写出到Socket(address:%{public}s:%{public}d) size=%{public}zu",
+                    endpoint.address.toIpStr().c_str(),
+                    endpoint.port,
+                    message.size()
+                );
+            });
             // 加密数据，并且通过 socket 发送
             socket.write(message.data(), message.size(), endpoint);
         } catch (const std::exception &e) {
@@ -725,7 +732,7 @@ namespace WireGuard {
 
 
     void Device::sendToLocal(const uint8_t *data, const size_t len) const {
-        Logs::print_space([&]() { LOG_DEBUG("写入网卡数据 len=%{public}zu", len); });
+        Logs::print_space([&]() { LOG_SOCKET("写入网卡数据 len=%{public}zu", len); });
         write(tunFd, data, len);
     }
 }; // namespace WireGuard
