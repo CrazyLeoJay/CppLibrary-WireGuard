@@ -19,6 +19,7 @@ import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import {
   ConnectState, LLog, Tools, VpnConnHelper, WGConfPeer, WGDBConf, WireGuard
 } from 'wg_tunnel';
+import { JSON } from '@kit.ArkTS';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
@@ -78,7 +79,7 @@ export default class WGConfigPreViewModel {
     }
   }
 
-   helper?:VpnConnHelper;
+  helper?: VpnConnHelper;
 
   /**
    * 改变Vpn配置，启动或停止
@@ -89,28 +90,30 @@ export default class WGConfigPreViewModel {
       const config = this.data!;
       // 转化实体
       const vpnConf = await WireGuard.toVpnStartConfig(config);
-      // WireGuard.runWGConfig(context.getHostContext()!, id, vpnConf, isOn)
-      //   .catch((e: BusinessError) => {
-      //     LLog.error(TAG, e);
-      //   })
+      LLog.info(TAG, `创建VPN配置：${JSON.stringify(vpnConf)}`)
 
-      if (!this.helper) {
-        this.helper = WireGuard.makeVpnConnection(context);
-      }
-
-      if (WireGuard.getRunningServer().runningConfigId) {
-        LLog.info(TAG, `销毁VPN服务 ${id}`);
-        await this.helper.stopServer().finally(() => {
-          WireGuard.setRunningServer()
+      WireGuard.runWGConfig(context.getHostContext()!, id, vpnConf, isOn)
+        .catch((e: BusinessError) => {
+          LLog.error(TAG, e);
         })
-      }
-      if (isOn) {
-        LLog.info(TAG, `启动VPN服务 ${id}`);
-        await this.helper!.startServer(vpnConf)
-          .finally(() => {
-            WireGuard.setRunningServer(id)
-          })
-      }
+      //
+      // if (!this.helper) {
+      //   this.helper = WireGuard.makeVpnConnection(context);
+      // }
+      //
+      // if (WireGuard.getRunningServer().runningConfigId) {
+      //   LLog.info(TAG, `销毁VPN服务 ${id}`);
+      //   await this.helper.stopServer().finally(() => {
+      //     WireGuard.setRunningServer()
+      //   })
+      // }
+      // if (isOn) {
+      //   LLog.info(TAG, `启动VPN服务 ${id}`);
+      //   await this.helper!.startServer(vpnConf)
+      //     .finally(() => {
+      //       WireGuard.setRunningServer(id)
+      //     })
+      // }
     } catch (e) {
       this.isVpnOpen = false;
       context.getPromptAction().showToast({

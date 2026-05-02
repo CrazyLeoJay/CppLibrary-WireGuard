@@ -238,7 +238,6 @@ namespace wg_napi {
                         napi_delete_reference(env, ctx->callbackRef);
                         LOG_DEBUG("回收Ref");
                         ctx->callbackRef = nullptr;
-                        delete ctx;
                     }
                 },                                                       // 最终化回调
                 nullptr,                                                 // 最终化hint
@@ -407,9 +406,9 @@ namespace wg_napi {
         size_t len = 0;
         napi_get_value_string_utf8(env, nValue, nullptr, 0, &len);
         // 3. 分配内存并读取内容
-        char *buf = new char[len + 1];
-        napi_get_value_string_utf8(env, nValue, buf, len + 1, &len);
-        return std::string(buf, len);
+        std::unique_ptr<char[]> buf(new char[len + 1]);
+        napi_get_value_string_utf8(env, nValue, buf.get(), len + 1, &len);
+        return std::string(buf.get(), len);
     }
 
     bool getPropBool(napi_env env, napi_value obj, const std::string propertyName) {

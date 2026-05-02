@@ -67,8 +67,8 @@ export default class Tools {
       const ip = result[0]
       const str = result[1]
       const cidr = Number.parseInt(str);
-      if (!cidr) {
-        throw new WGAppException("cidr 转换失败")
+      if (cidr < 0) {
+        throw new WGAppException(`cidr 转换失败：${cidr}`)
       }
       return {
         ip: ip,

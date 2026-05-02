@@ -35,9 +35,9 @@
 namespace WireGuard {
     namespace Logs {
         inline void print_space(const std::function<void()> &func) {
-            //            if (WG_PRINT_SPACE_ENABLE) {
-            func();
-            //            }
+            if (WG_PRINT_SPACE_ENABLE) {
+                func();
+            }
         }
     }; // namespace Logs
 };     // namespace WireGuard
@@ -45,7 +45,11 @@ namespace WireGuard {
 
 //    #define LOG_PRINT(level, fmt, ...) ::WireGuard::Logs::log_println(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 
-    #define LOG_DEBUG(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)
+    #ifdef SHOW_DEBUG_LOGS
+        #define LOG_DEBUG(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)
+    #else
+        #define LOG_DEBUG(fmt, ...)
+    #endif
 
     #define LOG_INFO(fmt, ...) OH_LOG_INFO(LOG_APP, fmt, ##__VA_ARGS__)
 
@@ -53,5 +57,6 @@ namespace WireGuard {
 
     #define LOG_ERROR(fmt, ...) OH_LOG_ERROR(LOG_APP, fmt, ##__VA_ARGS__)
 
+    #define LOG_SOCKET(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)
 
 #endif

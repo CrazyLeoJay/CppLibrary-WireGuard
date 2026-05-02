@@ -21,7 +21,7 @@ import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddressArea, WGConfPeer, WGDBConf, } from 'wg_tunnel';
+import { IPAddress, IPAddressArea, WGConfPeer, WGDBConf, } from 'wg_tunnel';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -208,6 +208,25 @@ export default class WGNewConfigViewModel {
       throw new WGAppException(`局域网Ip地址（${this.client.vpnAddress}）不合法`)
     }
 
+    let dns: IPAddress[] = []
+    if (this.client.dnsIps?.length ?? 0 > 0) {
+      const dnsIps = this.client.dnsIps!;
+      if (dnsIps.includes(",")) {
+        dns = await Promise.all(dnsIps.split(",").map(async (it) => {
+          return {
+            ip: dnsIps,
+            isIpv4: await WireGuard.Tools.isIpv4(dnsIps)
+          } as IPAddress
+        })
+        )
+      } else {
+        dns.push({
+          ip: dnsIps,
+          isIpv4: await WireGuard.Tools.isIpv4(dnsIps)
+        })
+      }
+    }
+
     if (this.peers.length == 0) {
       throw new WGAppException("至少包含一个 Peer")
     }
@@ -220,7 +239,7 @@ export default class WGNewConfigViewModel {
           ipArea: ipAddress,
           listenerPort: this.client.listenerPort,
           mtu: this.client.mtu,
-          // dns:
+          dns: dns
         },
         peers: dbPeers,
       }

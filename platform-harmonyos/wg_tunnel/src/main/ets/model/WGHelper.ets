@@ -124,12 +124,6 @@ export namespace WireGuard {
     const packageName = bundleInfo.name
     const abilityName = 'WGVpnExtAbility'
 
-    await vpnExtension.stopVpnExtensionAbility({
-      deviceId: '',
-      bundleName: packageName,
-      abilityName: abilityName,
-    })
-
     if (isOne) {
       const TAG = "run wg"
       LLog.info(TAG, "启动 vpn")
@@ -158,6 +152,12 @@ export namespace WireGuard {
               break;
           }
         })
+    }else{
+      await vpnExtension.stopVpnExtensionAbility({
+        deviceId: '',
+        bundleName: packageName,
+        abilityName: abilityName,
+      })
     }
   }
 
@@ -233,61 +233,53 @@ export class VpnConnHelper {
     this.vpnConnection = vpnConnection;
   }
 
+  /**
+   * @throws
+   */
   async startServer(config: WGDeviceConfig) {
-    try {
-      LLog.info(TAG, "start server")
-      const vpnConfig = makeVpnConfig(config)
-      LLog.info(TAG, `vpnConfig: ${JSON.stringify(vpnConfig)}`)
+    LLog.info(TAG, "start server")
+    const vpnConfig = makeVpnConfig(config)
+    LLog.info(TAG, `vpnConfig: ${JSON.stringify(vpnConfig)}`)
 
-      // 启动并创建一个 socketFd
-      LLog.info(TAG, "client initVpn")
-      const socketFd = await this.client.initVpn(config, async (fd: number) => {
-        LLog.info(TAG, `Socket FD更新: ${fd}`)
-        this.vpnConnection.protect(fd).catch((e: BusinessError) => {
-          LLog.error(TAG, e)
-        });
+    // 启动并创建一个 socketFd
+    LLog.info(TAG, "client initVpn")
+    const socketFd = await this.client.initVpn(config, async (fd: number) => {
+      LLog.info(TAG, `Socket FD更新: ${fd}`)
+      this.vpnConnection.protect(fd).catch((e: BusinessError) => {
+        LLog.error(TAG, e)
       });
-      if (socketFd < 0) {
-        throw new WGAppException(`Socket 通道建立异常：${socketFd}`);
-      }
-      // LLog.info(TAG, "socket 创建")
-      // 保护 socket
-      await this.vpnConnection.protect(socketFd);
-      // LLog.info(TAG, "socket 保护")
-
-      // 生成VPN ID 多VPN服务时使用 配置到vpnConfig 中
-      // const vpnId = await this.vpnConnection.generateVpnId();
-      // vpnConfig.vpnId = vpnId;
-
-      // 启动 VPN
-      // LLog.info(TAG, "tun create")
-      const tunFd = await this.vpnConnection.create(vpnConfig)
-      // 启动VPN双读取线程（socket和VPN读取）
-      LLog.info(TAG, "client start fd=%d", tunFd)
-      await this.client.start(tunFd);
-      LLog.info(TAG, "VPN 启动成功")
-    } catch (error) {
-      LLog.error(TAG, {
-        error: error,
-        message: "Vpn启动失败"
-      })
+    });
+    if (socketFd < 0) {
+      throw new WGAppException(`Socket 通道建立异常：${socketFd}`);
     }
+    LLog.info(TAG, "socket 创建")
+    // 保护 socket
+    await this.vpnConnection.protect(socketFd);
+    LLog.info(TAG, "socket 保护")
+
+    // 生成VPN ID 多VPN服务时使用 配置到vpnConfig 中
+    // const vpnId = await this.vpnConnection.generateVpnId();
+    // vpnConfig.vpnId = vpnId;
+
+    // 启动 VPN
+    LLog.info(TAG, "tun create")
+    const tunFd = await this.vpnConnection.create(vpnConfig)
+    // 启动VPN双读取线程（socket和VPN读取）
+    LLog.info(TAG, "client start fd=%d", tunFd)
+    await this.client.start(tunFd);
+    LLog.info(TAG, "VPN 启动成功")
   }
 
+  /**
+   * @throws
+   */
   async stopServer() {
-    try {
-      await this.vpnConnection.destroy()
-      LLog.info(TAG, "关闭VPN")
-      // const client = WireGuard.device;
-      // 关闭并释放资源
-      await this.client.close()
-      LLog.info(TAG, "关闭通道")
-    } catch (error) {
-      LLog.info(TAG, {
-        error: error,
-        message: "停止VPN服务失败",
-      })
-    }
+    await this.vpnConnection.destroy()
+    LLog.info(TAG, "关闭VPN")
+    // const client = WireGuard.device;
+    // 关闭并释放资源
+    await this.client.close()
+    LLog.info(TAG, "关闭通道")
 
   }
 }
@@ -302,13 +294,13 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
   const vpnIp = config.vpn.vpnIp!;
   const vpnAddress = vpnIp.address.ip!;
   const vpnAddressFamily = vpnIp.address.isIpv4 ? 1 : 2;
-  const vpnAddressPrefixLen = config.vpn.vpnIp?.cidr ?? 32
+  const vpnAddressPrefixLen = vpnIp?.cidr ?? 32
   const dns = config.vpn.dns ?? []
   if (config.peers.length == 0) {
     throw new WGAppException("未配置Peer");
   }
   const routes: vpnExtension.RouteInfo[] = config.peers.map((peer) => {
-    const remoteIp = peer.endpoint.address.ip;
+    const remoteIp = peer.endpoint;
     return peer.allowedIps.map((allowed: IPAddressArea) => {
       return {
         interface: "vpn-tun",
@@ -317,11 +309,11 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
           prefixLength: allowed.cidr ?? (allowed.address.isIpv4 ? 32 : 128),
         },
         gateway: {
-          address: remoteIp,
-          family: 1
+          address: vpnAddress,
+          family: vpnAddressFamily,
         },
         hasGateway: true,
-        isDefaultRoute: false,
+        isDefaultRoute: true,
       } as vpnExtension.RouteInfo
     })
   }).flat()

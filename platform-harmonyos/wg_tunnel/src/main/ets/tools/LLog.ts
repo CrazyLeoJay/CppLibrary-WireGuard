@@ -27,8 +27,8 @@ class LogImpl {
       return msg
     } else if ('error' in msg && 'message' in msg) {
       if (msg.message) {
-        if (msg.error instanceof Error) {
-          return `ERROR(group):${msg.message}\nERROR:${msg.error.message}\n${msg.error.stack}`
+        if ('message' in msg.error || `code` in msg.error || 'stack' in msg.error) {
+          return `ERROR(group):${msg.message}\nERROR(${msg.error.code}):${msg.error.message}\n${msg.error.stack}`
         } else {
           return `ERROR(group):${msg.message}\nERROR:${msg.error}}`
         }

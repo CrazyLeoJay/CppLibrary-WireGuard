@@ -9,7 +9,10 @@ if(DEFINED PACKAGE_FIND_FILE)
     include(${PACKAGE_FIND_FILE})
 endif()
 
-add_compile_definitions(WG_PRINT_SPACE_ENABLE SHOW_DEBUG_LOGS)
+add_compile_definitions(
+WG_PRINT_SPACE_ENABLE
+#SHOW_DEBUG_LOGS
+)
 
 include_directories(
     ${NATIVERENDER_ROOT_PATH}
@@ -21,8 +24,6 @@ include_directories(logs)
 
 FetchContent_Declare(wg_mobile SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR}/../../../../../src)
 FetchContent_MakeAvailable(wg_mobile)
-
-
 
 add_library(${PROJECT_NAME} SHARED
     napi_init.cpp
