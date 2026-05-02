@@ -13,14 +13,14 @@ add_library(${PROJECT_NAME} STATIC
 
         blake2s-ref.c
 
-        blake2b-ref.c
-        blake2bp-ref.c
-        blake2sp-ref.c
-        blake2xb-ref.c
-
-        blake2xs-ref.c
-
-        genkat-c.c
-        genkat-json.c
+#        blake2b-ref.c
+#        blake2bp-ref.c
+#        blake2sp-ref.c
+#        blake2xb-ref.c
+#
+#        blake2xs-ref.c
+#
+#        genkat-c.c
+#        genkat-json.c
 )
 target_include_directories(${PROJECT_NAME} PUBLIC .)
