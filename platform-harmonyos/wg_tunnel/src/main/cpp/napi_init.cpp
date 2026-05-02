@@ -1,8 +1,8 @@
+#include "logs.h"
 #include "napi/native_api.h"
 #include "WireGuardDevice.h"
 #include "tools/conf_file.h"
 #include "tools/wg_dns.h"
-#include <cstdint>
 #include <hilog/log.h>
 
 static napi_value NAPI_Global_makeKeyPair(napi_env env, napi_callback_info info) {

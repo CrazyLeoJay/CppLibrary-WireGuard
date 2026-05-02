@@ -19,52 +19,39 @@
 // Created on 2026/4/7.
 // @author leojay`fu
 //
-// Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
-// please include "napi/native_api.h".
 #pragma once
 
-
+#include <functional>
 #include <utility>
-#ifndef WIREGUARD_LOGS_H
-    #define WIREGUARD_LOGS_H
-
+#ifndef WIREGUARD_LOGS_HARMONYOS_H
+    #define WIREGUARD_LOGS_HARMONYOS_H
+    #include <hilog/log.h>
+// 定义日志域和标签（需全局唯一）
     #undef LOG_DOMAIN
     #undef LOG_TAG
-    #define LOG_DOMAIN 0x3200               // 全局domain宏，标识业务领域
-    #define LOG_TAG    "wireguard_c14_napi" // 全局tag宏，标识模块日志tag
-
-//    #define WG_PRINT_SPACE_ENABLE // 定义这个参数就生效，无需配置值
-//    #define SHOW_DEBUG_LOGS // 也是定义就生效
-
-    #include <hilog/log.h>
+    #define LOG_DOMAIN 0x0002 // 自定义业务域（0x0000~0xFFFF）
+    #define LOG_TAG    "wg_c14_harmony"
 
 namespace WireGuard {
     namespace Logs {
-// 日志级别
-        enum class LogLevel { DEBUG = 0, INFO = 1, WARN = 2, ERROR = 3 };
-
-        template <typename Func>
-        inline void print_space(Func &&func) {
-    #ifdef WG_PRINT_SPACE_ENABLE // 定义这个参数就生效，无需配置值
-            std::forward<Func>(func)();
-    #endif
+        inline void print_space(const std::function<void()> &func) {
+            //            if (WG_PRINT_SPACE_ENABLE) {
+            func();
+            //            }
         }
-
     }; // namespace Logs
+};     // namespace WireGuard
 
-}; // namespace WireGuard
 
-// ((void)OH_LOG_Print((type), LOG_DEBUG, LOG_DOMAIN, LOG_TAG, __VA_ARGS__))
-    #define LOG_DEBUG(fmt, ...)
-    #ifdef SHOW_DEBUG_LOGS
-        #ifdef LOG_DEBUG
-            #undef LOG_DEBUG
-        #endif
-        #define LOG_DEBUG(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)
-    #endif
+//    #define LOG_PRINT(level, fmt, ...) ::WireGuard::Logs::log_println(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
 
-    #define LOG_INFO(fmt, ...)  OH_LOG_INFO(LOG_APP, fmt, ##__VA_ARGS__)
-    #define LOG_WARN(fmt, ...)  OH_LOG_WARN(LOG_APP, fmt, ##__VA_ARGS__)
+    #define LOG_DEBUG(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)
+
+    #define LOG_INFO(fmt, ...) OH_LOG_INFO(LOG_APP, fmt, ##__VA_ARGS__)
+
+    #define LOG_WARN(fmt, ...) OH_LOG_WARN(LOG_APP, fmt, ##__VA_ARGS__)
+
     #define LOG_ERROR(fmt, ...) OH_LOG_ERROR(LOG_APP, fmt, ##__VA_ARGS__)
 
-#endif // WIREGUARD_LOGS_H
+
+#endif

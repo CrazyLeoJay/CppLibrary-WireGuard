@@ -21,16 +21,15 @@
 // Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
 // please include "napi/native_api.h".
 
-#include "logs/logs.h"
 #include "napi_tools.h"
 #include <mutex>
 #include <napi/native_api.h>
 
 #include "WireGuardDevice.h"
+#include "logs.h"
 
 #include <cstdint>
 #include <cstdio>
-#include <hilog/log.h>
 #include <iostream>
 #include <memory>
 #include <netinet/in.h>
@@ -482,8 +481,12 @@ namespace wg_napi {
 
         // preSharedKey
         if (isHasProp(env, arg, "preSharedKey")) {
-            auto result = getPropToDecodeBase64WGKey(env, arg, "preSharedKey");
-            peer.pre_share_key = std::make_shared<WireGuard::SymmetricKey>(result);
+            try {
+                auto result = getPropToDecodeBase64WGKey(env, arg, "preSharedKey");
+                peer.pre_share_key = std::make_shared<WireGuard::SymmetricKey>(result);
+            } catch (const std::exception &e) {
+                LOG_DEBUG("preSharedKey 未获取到");
+            }
         } else {
             LOG_DEBUG("preSharedKey 未获取到");
         }
@@ -567,7 +570,6 @@ namespace wg_napi {
         if (ip.empty()) {
             throw std::invalid_argument("ip地址不能为空");
         }
-
 
         LOG_DEBUG("设置ip： %{public}s", ip.c_str());
         setIp(ipAddress, isIpv4, ip);
