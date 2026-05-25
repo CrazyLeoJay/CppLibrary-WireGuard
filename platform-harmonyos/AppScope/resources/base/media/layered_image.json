@@ -1,7 +1,0 @@
-{
-  "layered-image":
-  {
-    "background" : "$media:wg_icon_background",
-    "foreground" : "$media:wg_icon_foreground"
-  }
-}
