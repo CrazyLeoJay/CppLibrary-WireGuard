@@ -1,7 +1,0 @@
-{
-  "layered-icon":
-  {
-    "background" : "{ic_launcher_background}",
-    "foreground" : "$media:wg_icon"
-  }
-}
