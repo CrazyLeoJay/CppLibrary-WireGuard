@@ -24,11 +24,13 @@ namespace WireGuard {
     namespace Base64 {
         // Base64 编码表（常量表达式）
         std::array<char, 64> make_base64_table() {
-            std::array < char, 64 > table{};
+            std::array<char, 64> table{};
             for (std::size_t i = 0; i < 26; ++i) {
-                table[i] = 'A' + static_cast<char>(i);
-                table[i + 26] = 'a' + static_cast<char>(i);
-                table[i + 52] = '0' + static_cast<char>(i);
+                table[i] = 'A' + static_cast<char>(i); // A-Z
+                table[i + 26] = 'a' + static_cast<char>(i); // a-z
+            }
+            for (std::size_t i = 0; i < 10; ++i) {
+                table[i + 52] = '0' + static_cast<char>(i); // 0-9
             }
             table[62] = '+';
             table[63] = '/';
@@ -78,13 +80,13 @@ namespace WireGuard {
 
             std::size_t i = 0;
             for (i = 0; i < WG_KEY_LEN / 3; ++i) {
-                std::array < char, 4 > encoded{};
+                std::array<char, 4> encoded{};
                 encode_base64(encoded, {key[i * 3 + 0], key[i * 3 + 1], key[i * 3 + 2]});
                 result.append(encoded.begin(), encoded.end());
             }
 
             // 处理剩余的字节（填充）
-            std::array < char, 4 > encoded{};
+            std::array<char, 4> encoded{};
             encode_base64(encoded, {key[i * 3 + 0], key[i * 3 + 1], 0});
             result.push_back(encoded[0]);
             result.push_back(encoded[1]);
@@ -107,7 +109,7 @@ namespace WireGuard {
             unsigned int i = 0;
 
             for (i = 0; i < WG_KEY_LEN / 3; ++i) {
-                std::array < char, 4 > src{};
+                std::array<char, 4> src{};
                 for (int j = 0; j < 4; ++j) {
                     src[j] = base64[i * 4 + j];
                 }
@@ -120,7 +122,7 @@ namespace WireGuard {
             }
 
             // 处理最后一个块（带填充）
-            std::array < char, 4 > src = {
+            std::array<char, 4> src = {
                 base64[i * 4 + 0], base64[i * 4 + 1], base64[i * 4 + 2],
                 'A' // 用 'A' 替换 '=' 进行解码
             };
