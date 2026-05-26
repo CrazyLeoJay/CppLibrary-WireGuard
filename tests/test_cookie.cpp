@@ -46,7 +46,7 @@ namespace WireGuard {
     }
 
     TEST(COOKIE, test_cookie) {
-        Logs::setLogHandler([](Logs::LogLevel level, const std::string &message) {
+        Logs::setLogHandler([](Logs::LogLevel log_level, const char *file, int line, const std::string &message) {
             std::cout << GREEN << "覆盖log\t" << message << RESET << std::endl;
         });
 
@@ -71,7 +71,7 @@ namespace WireGuard {
         receive.init(server_private);
 
 
-        LOG_DEBUG("%s： %d","数值测试", 12);
+        LOG_DEBUG("%s： %d", "数值测试", 12);
         LOG_DEBUG("=============== 发送端：第一次握手！ =================\n");
         MessageInitiation msg;
         try {
@@ -138,9 +138,9 @@ namespace WireGuard {
             receiveCookieChecker.messageAddMac2(sendEndpoint, respMsg);
 
             LOG_DEBUG("握手Response:\nmac1:%s\nmac2:%s",
-                  crypto::bin2B64(respMsg.mac1, COOKIE_LEN).c_str(),
-                  crypto::bin2B64(respMsg.mac2, COOKIE_LEN).c_str()
-        );
+                      crypto::bin2B64(respMsg.mac1, COOKIE_LEN).c_str(),
+                      crypto::bin2B64(respMsg.mac2, COOKIE_LEN).c_str()
+            );
         } catch (const std::exception &e) {
             printf("exception server 创建握手响应: %s\n", e.what());
             throw e;
