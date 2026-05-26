@@ -193,16 +193,16 @@ struct InterfaceEditCardView {
       }
       .width('100%')
 
-      Text('应用过滤')
-        .onClick(() => {
-
-        })
-        .textAlign(TextAlign.Center)
-        .align(Alignment.Center)
-        .layoutGravity(LocalizedAlignment.CENTER)
-        .width('100%')
-        .height('auto')
-        .padding('16vp')
+      // Text('应用过滤')
+      //   .onClick(() => {
+      //
+      //   })
+      //   .textAlign(TextAlign.Center)
+      //   .align(Alignment.Center)
+      //   .layoutGravity(LocalizedAlignment.CENTER)
+      //   .width('100%')
+      //   .height('auto')
+      //   .padding('16vp')
     }
     .cardBackgroundStyle()
   }
