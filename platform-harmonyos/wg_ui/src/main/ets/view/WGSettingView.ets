@@ -73,13 +73,16 @@ struct WGSettingView {
             .aspectRatio(1)
             .width('85vp')
           Column({ space: '8vp' }) {
-            Text(`WireGuard for HarmonyOs ${this.vm.appVersion}`)
+            Text(`WireGuard for HarmonyOs v${this.vm.appVersion}`)
               .fontSize('18fp')
+              .wordBreak(WordBreak.BREAK_WORD)
+              .maxLines(3)
               .width('100%')
             Text('Author: GitHub/CrazyLeojay ')
               .fontSize('12fp')
           }
           .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
         }
         .alignItems(VerticalAlign.Top)
         .onClick(() => {
@@ -104,6 +107,7 @@ struct WGSettingView {
           this.vm.clickToWireGuardWebSite(this.getUIContext());
         })
       }
+
       ListItem() {
         Row() {
           Text('WireGuard 白皮书')
@@ -131,7 +135,11 @@ struct WGSettingView {
       ListItem() {
         Column() {
           Text(`联系邮箱：${this.vm.email}`)
+            .wordBreak(WordBreak.BREAK_WORD)
+            .width('100%')
           Text(`可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
+            .wordBreak(WordBreak.BREAK_WORD)
+            .width('100%')
         }
         .alignItems(HorizontalAlign.Start)
         .itemRowStyle()
