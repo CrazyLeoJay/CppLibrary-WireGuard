@@ -64,7 +64,8 @@ export struct WGConfigPreViewNavDest {
         value: "編輯",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.pencil_waveform')),
         action: () => {
-          WireGuardNav.navDescToNewWGConfigView(this.vm.nav, { id: this.vm.params!.id, config: this.vm.data },()=>{
+          WireGuardNav.navDescToNewWGConfigView(this.vm.nav, { id: this.vm.params!.id, config: this.vm.data }, () => {
+            LLog.info(TAG, "更新数据")
             this.vm.updateData()
           })
         }
@@ -117,6 +118,7 @@ struct InterfaceCardView {
 
   async aboutToAppear(): Promise<void> {
     this.publicKey = await WireGuard.genPublicKey(this.data.conf.inter.privateKey)
+    this.vm.updateStatus();
   }
 
   build() {
@@ -128,12 +130,12 @@ struct InterfaceCardView {
           .align(Alignment.Start)
         Column() {
           Text('名称').width('100%')
-          Text(this.data.name).width('100%')
+          Text(this.data.name!!).width('100%')
         }
 
         Column() {
           Text('公钥').width('100%')
-          Text(this.publicKey)
+          Text(this.publicKey!!)
             .width('100%')
             .maxLines(1)
             .ellipsisMode(EllipsisMode.END)
@@ -148,13 +150,12 @@ struct InterfaceCardView {
 
         Column() {
           Text('局域网IP地址').width('100%')
-          Text(`${this.data.conf.inter?.ipArea.address.ip}/${this.data.conf.inter.ipArea?.cidr ??
-            (this.data.conf.inter.ipArea?.address.isIpv4 ? 32 : 128)}`).width('100%')
+          Text(this.vm.getWlanIp!!).width('100%')
         }
 
         Column() {
           Text('DNS服务器').width('100%')
-          Text(`${this.data.conf.inter.dns?.map((it) => it.ip).join(", ") ?? "(未定义)"}`).width('100%')
+          Text(this.vm.dns!!).width('100%')
         }
       }
       .cardBackgroundStyle()
@@ -192,7 +193,7 @@ struct PeerCardView {
       Text(`${this.index + 1}、远程（Peer）`).width('100%')
       Column() {
         Text('公钥').width('100%')
-        Text(`${this.data.publicKey}`)
+        Text(this.data.publicKey!!)
           .width('100%')
           .maxLines(1)
           .layoutGravity(LocalizedAlignment.START)
@@ -208,7 +209,7 @@ struct PeerCardView {
       if (this.data.preSharedKey) {
         Column() {
           Text('预共享密钥').width('100%')
-          Text(`${this.data.preSharedKey}`)
+          Text(this.data.preSharedKey!!)
             .width('100%')
             .maxLines(1)
             .layoutGravity(LocalizedAlignment.START)

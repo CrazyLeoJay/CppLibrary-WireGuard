@@ -117,7 +117,7 @@ export namespace WireGuard {
    * @throws
    */
   export
-  async function runWGConfig(context: Context, id: number, config: WGDeviceConfig, isOne: boolean) {
+  async function runWGConfig(id: number, config: WGDeviceConfig, isOne: boolean) {
     // let want: Want = {};
     // 获取自身包名
     let bundleInfo = await bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
@@ -138,21 +138,20 @@ export namespace WireGuard {
       })
         .then(() => {
           LLog.info(TAG, "vpn start notify")
+          setRunningServer(id)
         })
         .catch((e: BusinessError) => {
           switch (e.code) {
             case 15501001:
               LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
-              break;
             case 201:
               LLog.warn(TAG, { error: e, message: "未授权！" })
-              break;
             default:
               LLog.warn(TAG, e)
-              break;
           }
+          throw new WGAppException({ e: e, message: "VPN启动异常" });
         })
-    }else{
+    } else {
       await vpnExtension.stopVpnExtensionAbility({
         deviceId: '',
         bundleName: packageName,

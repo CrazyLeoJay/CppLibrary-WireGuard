@@ -36,6 +36,10 @@ export default class WGConfigPreViewModel {
   @Trace isVpnOpen: boolean = false;
 
   constructor() {
+    this.updateStatus();
+  }
+
+  updateStatus() {
     const state: ConnectState = WireGuard.getRunningServer();
     this.isVpnOpen = this.params != undefined && state.runningConfigId == this.params?.id
   }
@@ -50,6 +54,15 @@ export default class WGConfigPreViewModel {
     return this.data?.conf.peers ?? []
   }
 
+  @Computed
+  get getWlanIp(): string {
+    return `${this.data?.conf.inter?.ipArea.address.ip}/${this.data?.conf.inter.ipArea?.cidr ??
+      (this.data?.conf.inter.ipArea?.address.isIpv4 ? 32 : 128)}`
+  }
+
+  get dns(): string {
+    return this.data?.conf.inter.dns?.map((it) => it.ip).join(", ") ?? "(未定义)"
+  }
 
   async loadData(params: WGConfigPreViewParams) {
     this.params = params;
@@ -92,10 +105,7 @@ export default class WGConfigPreViewModel {
       const vpnConf = await WireGuard.toVpnStartConfig(config);
       LLog.info(TAG, `创建VPN配置：${JSON.stringify(vpnConf)}`)
 
-      WireGuard.runWGConfig(context.getHostContext()!, id, vpnConf, isOn)
-        .catch((e: BusinessError) => {
-          LLog.error(TAG, e);
-        })
+      await WireGuard.runWGConfig(id, vpnConf, isOn)
       //
       // if (!this.helper) {
       //   this.helper = WireGuard.makeVpnConnection(context);
