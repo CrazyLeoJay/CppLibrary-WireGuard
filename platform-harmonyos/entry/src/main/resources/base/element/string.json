@@ -9,8 +9,8 @@
       "value": "description"
     },
     {
-      "name": "EntryAbility_label",
-      "value": "WireGuard"
+      "name": "app_name",
+      "value": "WireGuard V+"
     }
   ]
 }
