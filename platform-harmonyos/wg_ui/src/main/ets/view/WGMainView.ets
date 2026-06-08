@@ -45,7 +45,10 @@ export struct WGMainViewNavDest {
     })
     // .hideTitleBar(true)
     // .title(this.titleView())
-    .title("WireGuard.CLJ_Fu")
+    .title({
+      main:"WireGuard",
+      sub :"CrazyLeojay",
+    })
     .menus([
       {
         value: "刷新",
