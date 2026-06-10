@@ -2,7 +2,7 @@
   "string": [
     {
       "name": "perm_reason_internet",
-      "value": "用于WireGuard建立Socket连接"
+      "value": "用于WireGuard协议建立Socket连接"
     },
     {
       "name": "reason_running_info",

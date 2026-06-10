@@ -19,6 +19,7 @@
         "srcEntry": "./ets/entryability/EntryAbility.ets",
         "description": "$string:EntryAbility_desc",
         "label": "$string:app_name",
+        "startWindow": "$profile:start_window",
         "startWindowIcon": "$media:wg_icon_foreground",
         "startWindowBackground": "$color:ic_launcher_background",
         "exported": true,

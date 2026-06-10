@@ -46,7 +46,7 @@ export struct WGMainViewNavDest {
     // .hideTitleBar(true)
     // .title(this.titleView())
     .title({
-      main:"WireGuard",
+      main: $r('app.string.app_name'),
       sub :"CrazyLeojay",
     })
     .menus([

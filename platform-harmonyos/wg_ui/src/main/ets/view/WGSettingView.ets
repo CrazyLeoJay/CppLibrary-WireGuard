@@ -78,7 +78,7 @@ struct WGSettingView {
               .wordBreak(WordBreak.BREAK_WORD)
               .maxLines(3)
               .width('100%')
-            Text('Author: GitHub/CrazyLeojay ')
+            Text('开源项目\nAuthor: GitHub/CrazyLeojay ')
               .fontSize('12fp')
           }
           .alignItems(HorizontalAlign.Start)
@@ -122,6 +122,18 @@ struct WGSettingView {
 
       ListItem() {
         Row() {
+          Text('开源库声明')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .itemRowStyle()
+        .onClick(() => {
+          this.vm.clickToOpenSourceNotice(this.getUIContext());
+        })
+      }
+
+      ListItem() {
+        Row() {
           Text('关于作者')
           Blank().layoutWeight(1)
           SymbolGlyph($r('sys.symbol.chevron_right'))
@@ -137,7 +149,7 @@ struct WGSettingView {
           Text(`联系邮箱：${this.vm.email}`)
             .wordBreak(WordBreak.BREAK_WORD)
             .width('100%')
-          Text(`可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
+          Text(`项目是我根据WireGuard官方白皮书，使用C++完全由自己编写，项目中用到的开源项目均已在项目中标记。可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
             .wordBreak(WordBreak.BREAK_WORD)
             .width('100%')
         }

@@ -17,7 +17,6 @@ import { bundleManager, common } from '@kit.AbilityKit';
 import { UIContext } from '@ohos.arkui.UIContext';
 import pasteboard from '@ohos.pasteboard';
 import { LLog } from 'wg_tunnel';
-import { JSON } from '@kit.ArkTS';
 
 const TAG = "设置界面"
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -26,6 +25,7 @@ const wireguardPapersSite = "https://www.wireguard.com/papers/wireguard.pdf"
 const myGitHubProjectSite = "https://github.com/CrazyLeoJay/CppLibrary-WireGuard/tree/master-harmonyos"
 const myGitHubSite = "https://github.com/CrazyLeoJay"
 const email = "crazyleojay@163.com"
+const OPEN_SOURCE_NOTICE = "https://github.com/CrazyLeoJay/CppLibrary-WireGuard/blob/master/NOTICE"
 
 /**
  * 设置界面数据配置
@@ -85,6 +85,22 @@ export default class WGSettingViewModel {
         console.error(`失败代码: ${err.code}, 错误信息: ${err.message}`);
       });
   }
+
+  /**
+   * 开源库声明
+   */
+  clickToOpenSourceNotice(context: UIContext) {
+    (context.getHostContext() as common.UIAbilityContext).startAbility({
+      action: 'ohos.want.action.viewData', // 固定操作类型
+      entities: ['entity.system.browsable'], // 标识可浏览实体
+      uri: OPEN_SOURCE_NOTICE      // 目标链接
+    })
+      .then(() => console.info('浏览器拉起成功'))
+      .catch((err: BusinessError) => {
+        console.error(`失败代码: ${err.code}, 错误信息: ${err.message}`);
+      });
+  }
+
   clickToMyGitHubProjectWebSite(context: UIContext) {
     (context.getHostContext() as common.UIAbilityContext).startAbility({
       action: 'ohos.want.action.viewData', // 固定操作类型

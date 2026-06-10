@@ -1,0 +1,8 @@
+{
+  "startWindowType": "REQUIRED_SHOW",
+  "startWindowColorModeType": "FOLLOW_SYSTEM",
+  "startWindowAppIcon": "$media:wg_icon_foreground",
+  "startWindowIllustration": "$media:wg_icon_foreground",
+  "startWindowBackgroundColor": "$color:ic_launcher_background",
+  "startWindowBackgroundImageFit": "Cover"
+}
