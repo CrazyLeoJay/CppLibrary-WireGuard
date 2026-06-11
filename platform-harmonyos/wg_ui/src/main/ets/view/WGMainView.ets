@@ -47,7 +47,7 @@ export struct WGMainViewNavDest {
     // .title(this.titleView())
     .title({
       main: $r('app.string.app_name'),
-      sub :"CrazyLeojay",
+      sub :$r('app.string.sub_title'),
     })
     .menus([
       {

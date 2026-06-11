@@ -49,6 +49,9 @@ struct WGSettingViewNavDest {
 @ComponentV2
 struct WGSettingView {
   @Param @Require vm: WGSettingViewModel;
+  @Local showHide: boolean = false;
+  @Local showHideClickCount: number = 0;
+  maxClick = 10 - 1;
 
   aboutToAppear(): void {
     this.vm.loadData(this.getUIContext())
@@ -94,6 +97,36 @@ struct WGSettingView {
           left: '16vp',
           right: '16vp'
         })
+      }
+
+      ListItem() {
+        Column() {
+          Text($r('app.string.review_instructions'))
+            .fontSize('14fp')
+            .wordBreak(WordBreak.BREAK_WORD)
+            .width('100%')
+            .onClick(() => {
+              if (this.showHide) {
+                this.showHide = false;
+              } else if (this.showHideClickCount == this.maxClick) {
+                this.showHide = true;
+                this.showHideClickCount = 0;
+              } else {
+                this.showHideClickCount++;
+              }
+            })
+          if (this.showHide) {
+            Text($r('app.string.review_instructions_hide'))
+              .fontSize('14fp')
+              .wordBreak(WordBreak.BREAK_WORD)
+              .width('100%')
+              .onClick(() => {
+                this.showHide = false;
+              })
+          }
+        }
+        .layoutWeight(1)
+        .itemRowStyle()
       }
 
       ListItem() {
@@ -149,7 +182,8 @@ struct WGSettingView {
           Text(`联系邮箱：${this.vm.email}`)
             .wordBreak(WordBreak.BREAK_WORD)
             .width('100%')
-          Text(`项目是我根据WireGuard官方白皮书，使用C++完全由自己编写，项目中用到的开源项目均已在项目中标记。可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
+          Text(
+            `项目是我根据WireGuard官方白皮书，使用C++完全由自己编写，项目中用到的开源项目均已在项目中标记。可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
             .wordBreak(WordBreak.BREAK_WORD)
             .width('100%')
         }
