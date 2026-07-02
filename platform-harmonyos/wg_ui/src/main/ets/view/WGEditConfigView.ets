@@ -20,7 +20,9 @@ import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 import { LLog } from 'wg_tunnel';
+
 const TAG = "编辑界面";
+
 @Builder
 export function WGEditConfigViewBuilder() {
   WGEditConfigViewNavDest();
@@ -43,7 +45,7 @@ export struct WGEditConfigViewNavDest {
       if (data) {
         // 如果数据存在就去加载
         this.vm.initEditData(data)
-          .catch((e:BusinessError)=>{
+          .catch((e: BusinessError) => {
             LLog.warn(TAG, e)
           })
       }
@@ -216,8 +218,7 @@ struct PeerEditCardView {
   @Param @Require vm: WGEditConfigViewModel
   @Param @Require index: number
   @Param @Require data: PeerEditConfig
-
-  private TAG = "";
+  private TAG = "Peer编辑";
 
   build() {
     Column({ space: "16vp" }) {
@@ -256,14 +257,31 @@ struct PeerEditCardView {
         inputValue: this.data.address!!,
         inputId: `remotePeer_${this.index}`,
         tag: "对端",
-        inputFilter: this.vm.inputRegex.ipPort,
+        inputFilter: this.vm.inputRegex.noSpace,
       })
+
+      Row() {
+        Text(this.data.addressCheckMessage)
+          .fontColor(this.data.addressVerify ? Color.Green : Color.Red)
+          .fontSize('12fp')
+          .width('100%')
+          .layoutGravity(LocalizedAlignment.START)
+      }
+      .layoutWeight(0)
+      .width("100%")
+
       WgCardTextInput({
         inputValue: this.data.allowedIpsInput!!,
         inputId: `ipArea_${this.index}`,
         tag: "路由的IP地址（段）",
-        inputFilter: this.vm.inputRegex.ipArea,
+        inputFilter: this.vm.inputRegex.domainArea,
       })
+      Row() {
+        Text($r('app.string.seek_router_value_desc'))
+          .fontSize('12fp')
+      }
+      .alignSelf(ItemAlign.Start)
+      .padding({ left: 2 })
     }
     .cardBackgroundStyle()
   }

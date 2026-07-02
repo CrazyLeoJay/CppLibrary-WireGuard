@@ -26,6 +26,7 @@ import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { IPAddressArea, KeyPair, WGConf } from './entity/napi_entity';
+import ParamsRegex from './ParamsRegex';
 
 const TAG = "wgHelper"
 
@@ -70,6 +71,7 @@ export namespace WireGuard {
   export const helper = new WGHelper();
 
   // export const device = new native.WireGuardDevice();
+  export const regex = new ParamsRegex();
 
   /*
   主要功能
