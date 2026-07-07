@@ -71,11 +71,11 @@
 >
 > 根据实际开发情况，版本号应该不会保持一致，根据实际开发决定。
 
-| 主要开发分支       | 版本   | 标签               |
-| ------------------ | ------ | ------------------ |
-| master-cpp         | v1.0.0 | native-v1.0.0      |
-| master-harmonyos   | v1.0.0 | harmony-app-v1.0.0 |
-| master-android-dev | v1.0.0 | android-app-v1.0.0 |
+| 主要开发分支       | 版本   | 标签           |
+| ------------------ | ------ | -------------- |
+| master-cpp         | v1.0.0 | native-v1.0.0  |
+| master-harmonyos   | v1.0.0 | harmony-v1.0.0 |
+| master-android-dev | v1.0.0 | android-v1.0.0 |
 
 
 
