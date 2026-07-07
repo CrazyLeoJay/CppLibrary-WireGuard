@@ -280,7 +280,7 @@ namespace wg_napi {
                     LOG_DEBUG("private key=%{public}s", ipStr.c_str());
                 });
                 deviceHelper->device = std::make_shared<WireGuard::Device>(*deviceHelper->configPtr);
-                uint32_t sockFd = deviceHelper->device->initSocket(onChange);
+                uint32_t sockFd = deviceHelper->device->initSocketStart(onChange);
                 LOG_INFO("wireGuard initSocket invoke socket_fd: %{public}d", sockFd);
                 napi_value tunnelFd;
                 napi_create_int64(env, sockFd, &tunnelFd);
