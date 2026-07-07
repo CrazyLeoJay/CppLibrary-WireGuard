@@ -12,7 +12,6 @@ add_library(${PROJECT_NAME} STATIC
         ratelimiter.h ratelimiter.cpp
         timers.h timers.cpp
         WGException.h WGException.cpp
-        udp_socket.h udp_socket.cpp
         keypair.h keypair.cpp
         cookie.h cookie.cpp
         device.h device.cpp
@@ -25,6 +24,8 @@ add_library(${PROJECT_NAME} STATIC
         tools/wg_dns.cpp
         tools/conf_file.h
         tools/conf_file.cpp
+        tools/socket/socket_tools.cpp
+        tools/socket/socket_tools.h
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE sodium wg_clib logs)

@@ -23,8 +23,8 @@
 #include "crypto/nonce.h"
 #include "test_params.h"
 #include "../src/wg/tools.h"
-#include "udp_socket.h"
 #include "gtest/gtest.h"
+#include "tools/socket/socket_tools.h"
 /*
  * 记录测试
  * 客户端keypair
@@ -184,10 +184,10 @@ namespace WireGuard {
             throw e;
         }
 
-        UDPSocket sock;
+        UDPSocket sock{DNS::IPV4};
         // sock.bind(61113);
-        sock.initSocket(std::make_shared<uint32_t>(61113), nullptr);
-        Endpoint ep = Tools::IP::makeEndpointIpv4("10.3.3.2", 62222);
+        sock.initSocketStart(std::make_shared<uint32_t>(61113), nullptr);
+        const Endpoint ep = Tools::IP::makeEndpointIpv4("10.3.3.2", 62222);
         sock.write(&msg, sizeof(msg), ep);
         sock.close();
     }

@@ -140,8 +140,10 @@ namespace WireGuard {
         return result;
     }
 
-    void Peer::clear() {
+    bool Peer::isActive() const {
+        return Clock::now() - lastDataReceived_ <= std::chrono::minutes(2);
     }
+
 
     void Peer::init() {
         if (std::all_of(content_key.local_private_key.begin(), content_key.local_private_key.end(), [](uint8_t it) {

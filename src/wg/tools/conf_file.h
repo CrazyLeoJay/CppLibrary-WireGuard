@@ -81,11 +81,18 @@ namespace WireGuard {
         };
 
         bool isIPv4(const std::string &str);
+
         bool isIPv6(const std::string &str);
+
         bool isValidIPAddress(const std::string &str);
+
         bool isValidDomain(const std::string &str);
+
         bool isValidBase64Key(const std::string &str);
 
+        IPAddress ipAddressForIpv4(const std::string &ipStr);
+
+        IPAddress ipAddressForIpv6(const std::string &ipStr);
 
         /**
          * 解析WireGuard 的 conf 文件内容，解析成实实体

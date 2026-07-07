@@ -47,12 +47,12 @@ namespace WireGuard {
         }
 
         bool isIPv4(const std::string &str) {
-            struct sockaddr_in sa;
+            sockaddr_in sa{};
             return inet_pton(AF_INET, str.c_str(), &(sa.sin_addr)) != 0;
         }
 
         bool isIPv6(const std::string &str) {
-            struct sockaddr_in6 sa;
+            sockaddr_in6 sa{};
             return inet_pton(AF_INET6, str.c_str(), &(sa.sin6_addr)) != 0;
         }
 
@@ -76,6 +76,26 @@ namespace WireGuard {
             }
             std::regex base64Regex(R"(^[A-Za-z0-9+/]{43}[A-Za-z0-9+/=]$)");
             return std::regex_match(str, base64Regex);
+        }
+
+        IPAddress ipAddressForIpv4(const std::string &ipStr) {
+            IPAddress addr{};
+            addr.family = IPAddress::IPv4;
+            const auto ret = inet_pton(AF_INET, ipStr.c_str(), &addr.ip.ipv4);
+            if (ret != 1) {
+                throw WGException("%s，转为Ip4 IP address 失败, ret=%d", ipStr.c_str(), ret);
+            }
+            return addr;
+        }
+
+        IPAddress ipAddressForIpv6(const std::string &ipStr) {
+            IPAddress addr{};
+            addr.family = IPAddress::IPv6;
+            const auto ret = inet_pton(AF_INET6, ipStr.c_str(), addr.ip.ipv6);
+            if (ret != 1) {
+                throw WGException("%s，转为Ip6 IP address 失败, ret=%d", ipStr.c_str(), ret);
+            }
+            return addr;
         }
 
         bool isValidCIDR(uint32_t cidr, IPAddress::Family family) {

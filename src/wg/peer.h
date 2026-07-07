@@ -85,6 +85,9 @@ namespace WireGuard {
         std::queue<std::vector<uint8_t> > stagedPackets_; // 等待握手完成后发送的数据包队列
 
     public:
+        /**
+         * 初始化参数
+         */
         void init();
 
         // 发送端
@@ -314,7 +317,13 @@ namespace WireGuard {
          */
         std::queue<std::vector<uint8_t> > consumeStagedPackets();
 
-        void clear();
+        /**
+         * 判断当前Peer是否活跃
+         * 如果长达2分钟没有收到对端消息，就判定为不活跃。可能已经中断连接
+         *
+         * @return 是否活跃
+         */
+        bool isActive() const;
     };
 
 
