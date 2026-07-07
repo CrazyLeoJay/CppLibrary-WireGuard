@@ -1,5 +1,5 @@
 /*
-* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+ * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,43 +12,38 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
-//
-// Created on 2026/3/24.
-// @author leojay`fu
-//
-// Node APIs are not fully supported. To solve the compilation error of the interface cannot be found,
-// please include "napi/native_api.h".
 
-#ifndef WIREGUARD_UDP_SOCKET_H
-#define WIREGUARD_UDP_SOCKET_H
+/**
+ * Created by Leojay on 2026/7/5.
+ *
+ * @author leojay`fu
+ * @email crazyleojay@163.com
+ * @url https://github.com/CrazyLeoJay
+ */
 
-#include <atomic>
-
-#include "entity.h"
-#include <cstddef>
-#include <cstdint>
-#include <sys/epoll.h>
-#include "version.h"
-
+#ifndef WG_MAIN_SOCKET_TOOLS_H
+#define WG_MAIN_SOCKET_TOOLS_H
 #define MAX_WAKEUP_PIP_COUNT 2
 #define MAX_EVENTS           2
 
+#include <atomic>
+#include <sys/socket.h>
+#include <sys/epoll.h>
+
+#include "tools/wg_dns.h"
+
 namespace WireGuard {
-    /**
-     * UDP 通信
-     * 不需要监听或者是连接操作
-     * 服务端和客户端都是直接轮询  recvfrom 读取数据即可。。
-     * todo 2026年4月9日 计划：需改实现方式，多路复用需要另外实现，
-     * socket的fd可能被系统释放，所以我需要有一个重启机制。直接 socket 添加入多路复用，然后继续 read
-     */
     class UDPSocket {
+    public:
+        explicit UDPSocket(const DNS::IPType &type);
+
+        ~UDPSocket();
+
     private:
-        std::shared_ptr<uint32_t> _port{0};
-        std::shared_ptr<IPAddress> _bindAddress{0};
-
-
+        const DNS::IPType type;
+        std::shared_ptr<uint32_t> _port{nullptr};
+        std::shared_ptr<IPAddress> _bind_address{nullptr};
         mutable std::atomic<int> _fd{-1};
         mutable std::atomic<bool> _initialized{false};
 
@@ -60,29 +55,23 @@ namespace WireGuard {
         epoll_event events[MAX_EVENTS]{};
 
     public:
-        UDPSocket();
-
-        ~UDPSocket();
-
         /**
          * 初始化  UDPSocket 参数和状态，并且创建一个socket
+         * 使用参数创建一个 socket
          *
-         *
-         * @param port
-         * @param bindAddress
+         * @param port 指定端口
+         * @param bindAddress 指定绑定的地址
          * @return
          */
-        int initSocket(const std::shared_ptr<uint32_t> &port, const std::shared_ptr<IPAddress> &bindAddress);
+        int initSocketStart(const std::shared_ptr<uint32_t> &port = nullptr,
+                       const std::shared_ptr<IPAddress> &bindAddress = nullptr);
 
         /**
-         * 使用参数创建一个 socket
-         * 如果有地址或者端口绑定，必须在 initSocket 之后，
-         *
-         * @return
+         * @return 重置Socket的套接字
          */
-        int createSocket();
+        int resetSocketFd();
 
-        int fd() { return _fd.load(); }
+        int fd() const { return _fd.load(); }
 
         /**
          * 从套接字中读取数据
@@ -101,7 +90,7 @@ namespace WireGuard {
          * @param len 缓冲区长度
          * @param endpoint 写入的节点
          */
-        ssize_t write(const void *buf, const size_t len, const Endpoint &endpoint) const;
+        ssize_t write(const void *buf, size_t len, const Endpoint &endpoint) const;
 
         /**
          * @return socket 是否在运行
@@ -111,13 +100,27 @@ namespace WireGuard {
         void close();
 
     private:
+        void bindPortForIpv4(uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
+
+        void bindPortForIpv6(uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
+
         /**
-         * select 多路复用方式
-         * @param buf
-         * @param len
-         * @param endpoint
-         * @return
+         * 初始化 epoll 多路复用
+         * - 创建 wakeup_pipe_ 通道
+         * - 创建 epoll_fd 套接字
+         * - 配置通道
+         *
+         * 主要用于结束阻塞，防止socket read时一直等待。
          */
+        void initEpollFd();
+
+        /**
+        * select 多路复用方式
+        * @param buf
+        * @param len
+        * @param endpoint
+        * @return
+        */
         ssize_t read_select(char *buf, size_t len, Endpoint &endpoint) const;
 
         /**
@@ -144,6 +147,6 @@ namespace WireGuard {
          */
         ssize_t pip_read_socket(char *buf, size_t len, Endpoint &endpoint) const;
     };
-}; // namespace WireGuard
+} // WireGuard
 
-#endif // WIREGUARD_UDP_SOCKET_H
+#endif //WG_MAIN_SOCKET_TOOLS_H

@@ -29,10 +29,17 @@
 
 namespace WireGuard {
     namespace DNS {
+        enum IPType {
+            IPV4,
+            IPV6
+        };
+
         /**
          * @return 将域名解析成ip地址
          */
-        WireGuard::IPAddress readDomainToIp(const std::string &domain);
+        IPAddress readDomainToIp(const std::string &domain, const IPType &type = IPV4);
+
+        std::vector<IPAddress> readDomainToIpAll(const std::string &domain);
     }
 } // WireGuardTools
 

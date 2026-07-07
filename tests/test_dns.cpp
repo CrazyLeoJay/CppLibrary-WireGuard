@@ -21,13 +21,20 @@
  * @email crazyleojay@163.com
  * @url https://github.com/CrazyLeoJay
  */
-
-
 #include "gtest/gtest.h"
 #include "tools/wg_dns.h"
+
+
+void printIps(const std::string &domain) {
+    const std::vector<WireGuard::IPAddress> allResult = WireGuard::DNS::readDomainToIpAll(domain);
+    LOG_INFO("%s : ", domain.c_str());
+    for (auto ip_address: allResult) {
+        LOG_INFO("\t\tIP：%s", ip_address.toIpStr().c_str());
+    }
+}
+
 TEST(DNS, testDomainToIp) {
-    auto result = WireGuard::DNS::readDomainToIp("www.baidu.com");
-    LOG_INFO("IP：%s", result.toIpStr().c_str());
-    result = WireGuard::DNS::readDomainToIp("www.google.com");
-    LOG_INFO("IP：%s", result.toIpStr().c_str());
+    printIps("www.baidu.com");
+    printIps("www.google.com");
+    printIps("leojay.synology.me");
 }

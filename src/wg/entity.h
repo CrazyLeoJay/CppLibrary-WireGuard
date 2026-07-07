@@ -215,7 +215,7 @@ namespace WireGuard {
                 return std::hash<uint32_t>{}(addr.ip.ipv4);
             } else {
                 size_t h = 0;
-                for (const unsigned char i : addr.ip.ipv6) {
+                for (const unsigned char i: addr.ip.ipv6) {
                     h = h * 31 + i;
                 }
                 return h;
@@ -274,8 +274,8 @@ namespace WireGuard {
     struct DeviceConfig {
         std::string device_name;
         PrivateKey private_key{};
-        std::shared_ptr<uint32_t> listener_port; // 监听端口默认没有，这样socket可以随机选择一个端口进行绑定
-        std::shared_ptr<IPAddress> bind_address;
+        std::shared_ptr<uint32_t> listener_port{nullptr}; // 监听端口默认没有，这样socket可以随机选择一个端口进行绑定
+        std::shared_ptr<IPAddress> bind_address{nullptr};
     };
 
     /**
@@ -288,7 +288,7 @@ namespace WireGuard {
 
 
     // 数据包回调
-    using PacketCallback = std::function<void(const uint8_t * data, size_t len, const PublicKey & peerPublicKey)>;
+    using PacketCallback = std::function<void(const uint8_t *data, size_t len, const PublicKey &peerPublicKey)>;
 
 
     struct ContentKey {

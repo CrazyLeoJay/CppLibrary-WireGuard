@@ -26,16 +26,15 @@
 #include "allowedips.h"
 #include "entity.h"
 #include "pipwait.h"
-#include "udp_socket.h"
 #include <random>
 #include <thread>
 #include <unordered_map>
 
 #include "cookie.h"
 #include "version.h"
+#include "tools/socket/socket_tools.h"
 
 namespace WireGuard {
-
     /**
      * 由于Wireguard的设计是端对端，所以无论是服务端还是客户端，都有发起握手的权力，
      * 那么，实际上，我需要处理两种情况，需要根据实际情况判断当前端是 发送端 还是 接收端
@@ -55,7 +54,7 @@ namespace WireGuard {
 
         const ContentKey content_key_;
         const DeviceConfig config;
-        UDPSocket socket{};
+        UDPSocket socket{DNS::IPV6};
         AllowedIPs allowedIps{};
 
         // ============ Peer 管理 ===============
@@ -92,7 +91,7 @@ namespace WireGuard {
         /**
          * 创建Socket服务，并且绑定本地端口，返回socket套接字
          */
-        uint32_t initSocket(const std::function<void(int &)> &onSocketFDChange);
+        uint32_t initSocketStart(const std::function<void(int &)> &onSocketFDChange);
 
         /**
          * 启动轮询任务，读写数据包
@@ -193,6 +192,12 @@ namespace WireGuard {
          * 接收到加密的数据传输 这个无关发送端还是接收端
          */
         void handleData(const char *data, const size_t &len, const Endpoint &endpoint);
+
+        /**
+         * _receiverIndexPeers和_keypairIndexPeers清理
+         * 在心跳轮询时调用，用于检查索引是否过期，防止内存溢出
+         */
+        void indexMapClear();
 
     private: // 协议相关主动操作
         void sendInitiation(const std::shared_ptr<Peer> &peer, const bool &force = false);

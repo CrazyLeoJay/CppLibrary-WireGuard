@@ -48,7 +48,7 @@ namespace WireGuard {
                 }
                 // 在构造函数 pipe 创建后添加：
                 // 将写入端设置为非阻塞 避免写入时阻塞
-                int flags = fcntl(wake_up_pip[1], F_GETFL, 0);
+                const int flags = fcntl(wake_up_pip[1], F_GETFL, 0);
                 if (flags == -1 || fcntl(wake_up_pip[1], F_SETFL, flags | O_NONBLOCK) == -1) {
                     close();
                     throw WGException("设置 pipe 写端为非阻塞失败");
@@ -61,7 +61,7 @@ namespace WireGuard {
                 }
 
                 // 将唤醒管道添加入 epoll
-                struct epoll_event ev;
+                epoll_event ev{};
                 ev.events = EPOLLIN;
                 ev.data.fd = wake_up_pip[0];
                 if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, wake_up_pip[0], &ev) == -1) {
@@ -77,7 +77,7 @@ namespace WireGuard {
             int wake_up_pip[2]{-1, -1};
             int epoll_fd_ = -1;
 
-            void close() {
+            void close() const {
                 notify();
                 if (wake_up_pip[0] != -1) {
                     ::close(wake_up_pip[0]);
@@ -95,21 +95,39 @@ namespace WireGuard {
              * 等待
              * @param waitTime 等待时间
              */
-            void wait(const std::chrono::milliseconds &waitTime) {
+            void wait(const std::chrono::milliseconds &waitTime) const {
+                // 1. 获取原始毫秒数（long 类型）
+                long raw_ms = waitTime.count();
+
+                // 2. 计算安全的 timeout 值（int）
+                int timeout_ms;
+                if (raw_ms < 0) {
+                    // 负数会导致 epoll_wait 无限阻塞，不符合“等待指定时间”的语义
+                    // 你可以选择立即返回（0）或视为错误，这里设为 0（立即返回）
+                    timeout_ms = 0;
+                    LOG_WARN("waitTime is negative, treating as 0");
+                } else if (raw_ms > std::numeric_limits<int>::max()) {
+                    // 超出 int 最大值，使用 int 最大值（约 24.8 天）
+                    timeout_ms = std::numeric_limits<int>::max();
+                } else {
+                    // 安全范围内，直接转换
+                    timeout_ms = static_cast<int>(raw_ms);
+                }
+
                 // epoll 事件数组，这里只用到了一个通道
                 // 实际应用中可根据需要调整
                 constexpr int count = 1;
                 epoll_event events[count]{};
-                int nfds = ::epoll_wait(epoll_fd_, events, count, waitTime.count());
+                int nfds = ::epoll_wait(epoll_fd_, events, count, timeout_ms);
                 if (nfds == 0) {
                     return;
                 } else if (nfds < 0) {
-                    LOG_WARN("pip wait epoll_wait failed : errno=%{public}d", nfds);
+                    LOG_WARN("pip wait epoll_wait failed : errno=%{public}d", errno);
                     return;
                 }
                 // 遍历所有就绪的事件
                 for (int i = 0; i < nfds; ++i) {
-                    int fd = events[i].data.fd;
+                    const int fd = events[i].data.fd;
                     // 检查是否是 UDP socket 事件
                     if (fd == wake_up_pip[0]) {
                         pip_read_wake();
@@ -122,14 +140,14 @@ namespace WireGuard {
              * 通知通道，停止等待，返回阻塞内容
              * 非线程安全，每个线程单独维护
              */
-            void notify() {
+            void notify() const {
                 LOG_DEBUG("notify wake up return");
                 char dummy = 1;
                 ::write(wake_up_pip[1], &dummy, 1);
             }
 
         private:
-            void pip_read_wake() {
+            void pip_read_wake() const {
                 // 从管道读取一个字节（必须读走，否则下次 select 仍会触发）
                 // 这里只读一个字节，因为我们只写了一个字节作为信号
                 //                char dummy;

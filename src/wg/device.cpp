@@ -50,18 +50,19 @@ namespace WireGuard {
 
     Device::~Device() {
         try {
+            LOG_INFO("析构 Device 关闭");
             close();
         } catch (const std::exception &e) {
             LOG_ERROR("设备关闭Close方法异常：%{public}s", e.what());
         }
     }
 
-    uint32_t Device::initSocket(const std::function<void(int &)> &onSocketFDChange) {
+    uint32_t Device::initSocketStart(const std::function<void(int &)> &onSocketFDChange) {
         LOG_INFO("初始化 socket");
         if (config.listener_port) {
             LOG_INFO("监听端口：%{public}d", *config.listener_port);
         }
-        int fd = socket.initSocket(config.listener_port, config.bind_address);
+        int fd = socket.initSocketStart(config.listener_port, config.bind_address);
         LOG_INFO("socket init");
         onSocketFDChange(fd);
         this->onSocketFDChange = onSocketFDChange;
@@ -140,7 +141,7 @@ namespace WireGuard {
     }
 
     void Device::loopSocketHeartbeatTask() {
-        LOG_INFO("开启心跳任务");
+        LOG_INFO("开启心跳+清理任务");
         std::vector<std::shared_ptr<Peer> > peers{};
         while (isRunning.load(std::memory_order_acquire)) {
             // 睡眠等待任务由 Tools::PipeWait 实现，
@@ -193,6 +194,10 @@ namespace WireGuard {
                     nextSleepDuration = std::min(nextSleepDuration, waitTime);
                 }
             }
+
+            // 执行清理任务
+            indexMapClear();
+
             // 根据最短时间设置睡眠时间，否则就睡默认值s数
             // 即使在退出心跳任务时，这个任务不需要等待结束，在后台默默退出即可
             pipWaitForHeartbeatTask.wait(nextSleepDuration);
@@ -228,7 +233,7 @@ namespace WireGuard {
                     // 需要重新建立socket
                     // 由于socket创建fd后需要系统标记保护，需要外部触发。或者创建回调
                     //                    break; // 套接字错误
-                    auto fd = socket.createSocket(); // 重新创建套接字然后去通信，需要重新握手 并且需要通知客户端
+                    auto fd = socket.resetSocketFd(); // 重新创建套接字然后去通信，需要重新握手 并且需要通知客户端
                     LOG_SOCKET("更换Socket fd=%{public}d", fd);
                     socketNewFd(fd); // 通知fd更换
                     continue;
@@ -578,6 +583,28 @@ namespace WireGuard {
         currentPeer->addRxBytes(cipherLen);
         // 将解密的数据写入网卡进行返回
         sendToLocal(result.data(), result.size());
+    }
+
+    void Device::indexMapClear() {
+        for (auto it = _receiverIndexPeers.begin(); it != _receiverIndexPeers.end();) {
+            if (!it->second->isActive()) {
+                it = _receiverIndexPeers.erase(it);
+            } else {
+                ++it;
+            }
+        }
+
+        for (auto it = _keypairIndexPeers.begin(); it != _keypairIndexPeers.end();) {
+            if (auto k = it->second.lock()) {
+                if (!it->second.expired()) {
+                    // 如果没有过期，就继续轮询
+                    ++it;
+                    continue;
+                }
+            }
+            // 如果过期了，并且不不存在值引用了，就直接返回。
+            it = _keypairIndexPeers.erase(it);
+        }
     }
 
     void Device::sendInitiation(const std::shared_ptr<Peer> &peer, const bool &force) {
