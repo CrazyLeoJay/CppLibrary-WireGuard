@@ -95,6 +95,19 @@ namespace WireGuard {
         IPAddress ipAddressForIpv6(const std::string &ipStr);
 
         /**
+         * 根据输入的域名或IP字符串（可附带端口）解析出 WebSitePoint
+         * 支持格式：
+         *   - IPv4: 192.168.1.1 或 192.168.1.1:51820
+         *   - 域名: your.server.com 或 your.server.com:51820
+         *   - IPv6(标准方括号): [2001:db8::1] 或 [2001:db8::1]:51820
+         *   - IPv6(无括号启发式): 2001:db8::1:51820 / 2001:db8::1
+         *
+         * @param endpointStr endpoint字符串，如 "192.168.1.1:51820"、"[::1]:8080"
+         * @return 解析后的 WebSitePoint，无端口默认 80
+         */
+        WebSitePoint endpointForDomainOrIpStr(const std::string &endpointStr);
+
+        /**
          * 解析WireGuard 的 conf 文件内容，解析成实实体
          *
          * @param content conf WireGuard配置文件内容
