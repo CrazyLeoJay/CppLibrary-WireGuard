@@ -132,6 +132,137 @@ namespace WireGuard {
             return std::string(buffer);
         }
 
+        WebSitePoint endpointForDomainOrIpStr(const std::string &endpointStr) {
+            WebSitePoint result{};
+            result.port = 80;
+            const std::string &value = endpointStr;
+            std::string host;
+            uint32_t port = 80;
+
+            if (value.empty()) {
+                throw WGException("Endpoint 地址不能为空");
+            }
+
+            if (value.front() == '[') {
+                size_t closeBracket = value.find(']');
+                if (closeBracket == std::string::npos) {
+                    throw WGException("Endpoint 格式错误，IPv6 方括号未闭合，当前值：%s", value.c_str());
+                }
+                host = value.substr(1, closeBracket - 1);
+                if (trim(host).empty()) {
+                    throw WGException("Endpoint 方括号内的 IPv6 地址为空，当前值：%s", value.c_str());
+                }
+                size_t afterBracket = closeBracket + 1;
+                if (afterBracket < value.size()) {
+                    if (value[afterBracket] != ':') {
+                        throw WGException(
+                            "Endpoint IPv6 方括号后只允许跟 :端口，当前值：%s", value.c_str());
+                    }
+                    std::string portStr = value.substr(afterBracket + 1);
+                    if (portStr.empty()) {
+                        throw WGException("Endpoint 端口不能为空，当前值：%s", value.c_str());
+                    }
+                    try {
+                        int parsedPort = std::stoi(portStr);
+                        if (!isValidPort(static_cast<uint32_t>(parsedPort))) {
+                            throw WGException(
+                                "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
+                                portStr.c_str(), value.c_str());
+                        }
+                        port = static_cast<uint32_t>(parsedPort);
+                    } catch (const std::invalid_argument &) {
+                        throw WGException(
+                            "Endpoint 端口格式非法，必须是数字，当前端口值：%s，原值：%s",
+                            portStr.c_str(), value.c_str());
+                    } catch (const std::out_of_range &) {
+                        throw WGException(
+                            "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
+                            portStr.c_str(), value.c_str());
+                    }
+                }
+            } else {
+                size_t colonCount = std::count(value.begin(), value.end(), ':');
+                if (colonCount >= 2) {
+                    if (isIPv6(value)) {
+                        host = value;
+                    } else {
+                        size_t lastColon = value.rfind(':');
+                        std::string beforeColon = value.substr(0, lastColon);
+                        std::string afterColon = value.substr(lastColon + 1);
+                        bool portParsed = false;
+                        if (!afterColon.empty() && isIPv6(beforeColon)) {
+                            try {
+                                int parsedPort = std::stoi(afterColon);
+                                if (isValidPort(static_cast<uint32_t>(parsedPort))) {
+                                    host = beforeColon;
+                                    port = static_cast<uint32_t>(parsedPort);
+                                    portParsed = true;
+                                } else {
+                                    throw WGException(
+                                        "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
+                                        afterColon.c_str(), value.c_str());
+                                }
+                            } catch (const std::invalid_argument &) {
+                                throw WGException(
+                                    "Endpoint 端口格式非法，必须是数字，当前端口值：%s，原值：%s",
+                                    afterColon.c_str(), value.c_str());
+                            } catch (const std::out_of_range &) {
+                                throw WGException(
+                                    "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
+                                    afterColon.c_str(), value.c_str());
+                            }
+                        }
+                        if (!portParsed) {
+                            throw WGException(
+                                "Endpoint 无法解析为合法的 IPv6 地址或 IPv6:端口 格式，请改用 [IPv6]:端口 形式，当前值：%s",
+                                value.c_str());
+                        }
+                    }
+                } else if (colonCount == 1) {
+                    size_t colonPos = value.rfind(':');
+                    host = value.substr(0, colonPos);
+                    if (trim(host).empty()) {
+                        throw WGException(
+                            "Endpoint 主机(IP/域名)部分为空，当前值：%s", value.c_str());
+                    }
+                    std::string portStr = value.substr(colonPos + 1);
+                    if (portStr.empty()) {
+                        throw WGException("Endpoint 端口不能为空，当前值：%s", value.c_str());
+                    }
+                    try {
+                        int parsedPort = std::stoi(portStr);
+                        if (!isValidPort(static_cast<uint32_t>(parsedPort))) {
+                            throw WGException(
+                                "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
+                                portStr.c_str(), value.c_str());
+                        }
+                        port = static_cast<uint32_t>(parsedPort);
+                    } catch (const std::invalid_argument &) {
+                        throw WGException(
+                            "Endpoint 端口格式非法，必须是数字，当前端口值：%s，原值：%s",
+                            portStr.c_str(), value.c_str());
+                    } catch (const std::out_of_range &) {
+                        throw WGException(
+                            "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
+                            portStr.c_str(), value.c_str());
+                    }
+                } else {
+                    host = value;
+                    if (trim(host).empty()) {
+                        throw WGException("Endpoint 主机(IP/域名)部分为空，当前值：%s", value.c_str());
+                    }
+                }
+            }
+
+            if (trim(host).empty()) {
+                throw WGException("Endpoint 主机(IP/域名)部分解析为空，当前值：%s", value.c_str());
+            }
+
+            result.ipStrOrDomain = host;
+            result.port = port;
+            return result;
+        }
+
         void validateConf(const WGConf &conf) {
             if (conf.inter.privateKey[0] == 0) {
                 throw WGException("Interface PrivateKey 不能为空");
@@ -278,14 +409,8 @@ namespace WireGuard {
                     if (key == "PublicKey") {
                         currentPeer->publicKey = crypto::base642Bin32Array(value);
                     } else if (key == "Endpoint") {
-                        size_t colonPos = value.rfind(':');
-                        if (colonPos != std::string::npos) {
-                            currentPeer->endpoint.ipStrOrDomain = value.substr(0, colonPos);
-                            currentPeer->endpoint.port = static_cast<uint32_t>(std::stoi(value.substr(colonPos + 1)));
-                        } else {
-                            currentPeer->endpoint.ipStrOrDomain = value;
-                            currentPeer->endpoint.port = 80;
-                        }
+                        const WebSitePoint sitePoint = endpointForDomainOrIpStr(value);
+                        currentPeer->endpoint = sitePoint;
                     } else if (key == "AllowedIPs") {
                         std::vector<std::string> ipList = split(value, ',');
                         for (const auto &ipStr: ipList) {
