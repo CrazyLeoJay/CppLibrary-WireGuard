@@ -185,3 +185,19 @@ TEST(SOCKET, clientStart) {
     std::cout << "Cleanup and exit." << std::endl;
     // 在这里释放 VPN 适配器、关闭套接字等
 }
+
+TEST(network, ipv6) {
+    WireGuard::IPAddress result;
+    try {
+        result = WireGuard::Tools::ipAddressForIpv6("[fd6e:627:ac0e:0:9167:135:56bc:3098]");
+        std::cout << "ipv6 addresses:" << result.toIpStr() << std::endl;
+    } catch (const std::exception &e) {
+        LOG_ERROR("ipv6 addresses: %s", e.what());
+    }
+    try {
+        result = WireGuard::Tools::ipAddressForIpv6("fd6e:627:ac0e:0:9167:135:56bc:3098");
+        std::cout << "ipv6 addresses:" << result.toIpStr() << std::endl;
+    } catch (const std::exception &e) {
+        LOG_ERROR("ipv6 addresses: %s", e.what());
+    }
+}
