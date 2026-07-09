@@ -138,32 +138,49 @@ namespace WireGuard {
             const std::string &value = endpointStr;
             std::string host;
             uint32_t port = 80;
+            SiteUrlType urlType = ERROR;
 
+            // 判断：输入字符串是否为空
             if (value.empty()) {
                 throw WGException("Endpoint 地址不能为空");
             }
 
+            // 判断：是否为 [IPv6]:port 或 [IPv6] 的标准方括号 IPv6 格式
             if (value.front() == '[') {
                 size_t closeBracket = value.find(']');
+                // 判断：是否找不到闭合 ]，方括号不完整
                 if (closeBracket == std::string::npos) {
                     throw WGException("Endpoint 格式错误，IPv6 方括号未闭合，当前值：%s", value.c_str());
                 }
                 host = value.substr(1, closeBracket - 1);
+                // 判断：提取出的方括号内 IPv6 内容 trim 后是否为空
                 if (trim(host).empty()) {
                     throw WGException("Endpoint 方括号内的 IPv6 地址为空，当前值：%s", value.c_str());
                 }
+                // 判断：方括号内的内容是否为合法 IPv6 地址
+                if (!isIPv6(host)) {
+                    throw WGException(
+                        "Endpoint 方括号内的内容不是合法 IPv6 地址，方括号内容：%s，原值：%s",
+                        host.c_str(), value.c_str());
+                }
+                urlType = IPv6;
+
                 size_t afterBracket = closeBracket + 1;
+                // 判断：] 之后是否还有内容需要处理（如 :端口）
                 if (afterBracket < value.size()) {
+                    // 判断：] 之后紧跟的字符是否为端口分隔符 :
                     if (value[afterBracket] != ':') {
                         throw WGException(
                             "Endpoint IPv6 方括号后只允许跟 :端口，当前值：%s", value.c_str());
                     }
                     std::string portStr = value.substr(afterBracket + 1);
+                    // 判断：端口字符串是否为空（写了 : 但后面没跟端口号）
                     if (portStr.empty()) {
                         throw WGException("Endpoint 端口不能为空，当前值：%s", value.c_str());
                     }
                     try {
                         int parsedPort = std::stoi(portStr);
+                        // 判断：解析出的端口是否在 1-65535 合法范围内
                         if (!isValidPort(static_cast<uint32_t>(parsedPort))) {
                             throw WGException(
                                 "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
@@ -182,20 +199,26 @@ namespace WireGuard {
                 }
             } else {
                 size_t colonCount = std::count(value.begin(), value.end(), ':');
+                // 判断：冒号数 >= 2，疑似是 IPv6（整体或 IPv6:端口启发式格式）
                 if (colonCount >= 2) {
+                    // 判断：整个字符串是否本身就是合法的纯 IPv6 地址（无端口）
                     if (isIPv6(value)) {
                         host = value;
+                        urlType = IPv6;
                     } else {
                         size_t lastColon = value.rfind(':');
                         std::string beforeColon = value.substr(0, lastColon);
                         std::string afterColon = value.substr(lastColon + 1);
                         bool portParsed = false;
+                        // 判断：最后一段冒号后非空，且冒号前是合法 IPv6，尝试按 IPv6:端口 启发式拆分
                         if (!afterColon.empty() && isIPv6(beforeColon)) {
                             try {
                                 int parsedPort = std::stoi(afterColon);
+                                // 判断：启发式拆分后的端口号是否在 1-65535 合法范围
                                 if (isValidPort(static_cast<uint32_t>(parsedPort))) {
                                     host = beforeColon;
                                     port = static_cast<uint32_t>(parsedPort);
+                                    urlType = IPv6;
                                     portParsed = true;
                                 } else {
                                     throw WGException(
@@ -212,25 +235,30 @@ namespace WireGuard {
                                     afterColon.c_str(), value.c_str());
                             }
                         }
+                        // 判断：启发式拆分是否成功，否则抛出格式异常
                         if (!portParsed) {
                             throw WGException(
                                 "Endpoint 无法解析为合法的 IPv6 地址或 IPv6:端口 格式，请改用 [IPv6]:端口 形式，当前值：%s",
                                 value.c_str());
                         }
                     }
+                // 判断：冒号数恰好为 1 个，按 IPv4:端口 或 域名:端口 格式解析
                 } else if (colonCount == 1) {
                     size_t colonPos = value.rfind(':');
                     host = value.substr(0, colonPos);
+                    // 判断：冒号前的主机(IP/域名)部分 trim 后是否为空
                     if (trim(host).empty()) {
                         throw WGException(
                             "Endpoint 主机(IP/域名)部分为空，当前值：%s", value.c_str());
                     }
                     std::string portStr = value.substr(colonPos + 1);
+                    // 判断：冒号后的端口字符串是否为空（写了 : 但无端口号）
                     if (portStr.empty()) {
                         throw WGException("Endpoint 端口不能为空，当前值：%s", value.c_str());
                     }
                     try {
                         int parsedPort = std::stoi(portStr);
+                        // 判断：解析出的端口是否在 1-65535 合法范围内
                         if (!isValidPort(static_cast<uint32_t>(parsedPort))) {
                             throw WGException(
                                 "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
@@ -246,20 +274,52 @@ namespace WireGuard {
                             "Endpoint 端口超出有效范围(1-65535)，当前端口值：%s，原值：%s",
                             portStr.c_str(), value.c_str());
                     }
+                    // 判断：冒号前的主机部分是否是合法 IPv4 地址
+                    if (isIPv4(host)) {
+                        urlType = IPv4;
+                    // 判断：冒号前的主机部分是否是合法域名
+                    } else if (isValidDomain(host)) {
+                        urlType = Domain;
+                    } else {
+                        throw WGException(
+                            "Endpoint 主机部分既不是合法 IPv4，也不是合法域名，主机值：%s，原值：%s",
+                            host.c_str(), value.c_str());
+                    }
+                // 冒号数 == 0：按纯 IPv4 或纯域名（无端口，默认 80）解析
                 } else {
                     host = value;
+                    // 判断：主机字符串 trim 后是否为空
                     if (trim(host).empty()) {
                         throw WGException("Endpoint 主机(IP/域名)部分为空，当前值：%s", value.c_str());
+                    }
+                    // 判断：主机是否为合法 IPv4 地址
+                    if (isIPv4(host)) {
+                        urlType = IPv4;
+                    // 判断：主机是否为合法域名
+                    } else if (isValidDomain(host)) {
+                        urlType = Domain;
+                    } else {
+                        throw WGException(
+                            "Endpoint 主机部分既不是合法 IPv4，也不是合法域名，主机值：%s，原值：%s",
+                            host.c_str(), value.c_str());
                     }
                 }
             }
 
+            // 判断：最终解析出的主机部分 trim 后是否仍为空（防御性兜底）
             if (trim(host).empty()) {
                 throw WGException("Endpoint 主机(IP/域名)部分解析为空，当前值：%s", value.c_str());
+            }
+            // 判断：SiteUrlType 是否仍为 ERROR（防御性兜底，避免所有分支漏赋值）
+            if (urlType == ERROR) {
+                throw WGException(
+                    "Endpoint 无法识别主机类型（IPv4/IPv6/Domain），主机值：%s，原值：%s",
+                    host.c_str(), value.c_str());
             }
 
             result.ipStrOrDomain = host;
             result.port = port;
+            result.type = urlType;
             return result;
         }
 

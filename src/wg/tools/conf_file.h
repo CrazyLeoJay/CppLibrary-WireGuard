@@ -35,6 +35,10 @@ namespace WireGuard {
         constexpr size_t WG_KEY_LEN = 32;
         using WGKey = std::array<uint8_t, WG_KEY_LEN>;
 
+        enum SiteUrlType {
+            IPv4, IPv6, Domain, ERROR
+        };
+
         /**
          * 网络站点地址，需要ip或者域名和端口
          * 主要表达可以访问的地址
@@ -43,6 +47,7 @@ namespace WireGuard {
         struct WebSitePoint {
             std::string ipStrOrDomain; // ip地址或者域名
             uint32_t port; // 远程端口，没有默认80
+            SiteUrlType type{ERROR};
         };
 
         struct WGConfInterface {
