@@ -36,7 +36,8 @@ namespace WireGuard {
         using WGKey = std::array<uint8_t, WG_KEY_LEN>;
 
         enum SiteUrlType {
-            IPv4, IPv6, Domain, ERROR
+            ERROR = 0,
+            IPv4 = 1, IPv6 = 2, Domain = 3,
         };
 
         /**
