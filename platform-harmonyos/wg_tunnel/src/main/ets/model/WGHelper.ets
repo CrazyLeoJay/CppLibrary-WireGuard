@@ -20,13 +20,14 @@ import { Context } from '@ohos.abilityAccessCtrl';
 import WGDao from './db/WGDao';
 import { makeWGConf2VpnStartConfig, WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
-import { AppStorageV2, UIContext } from '@kit.ArkUI';
-import ConnectState from './entity/ConnectState';
+import { UIContext } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { IPAddressArea, KeyPair, WGConf } from './entity/napi_entity';
 import ParamsRegex from './ParamsRegex';
+import WGConfig from './WGConfig';
+import WGEvent from './WGEvent';
 
 const TAG = "wgHelper"
 
@@ -70,8 +71,14 @@ export namespace WireGuard {
 
   export const helper = new WGHelper();
 
-  // export const device = new native.WireGuardDevice();
   export const regex = new ParamsRegex();
+
+  export const event = WGEvent;
+
+  /**
+   * 状态配置
+   */
+  export const statusConfig = WGConfig;
 
   /*
   主要功能
@@ -140,7 +147,7 @@ export namespace WireGuard {
       })
         .then(() => {
           LLog.info(TAG, "vpn start notify")
-          setRunningServer(id)
+          statusConfig.setRunningServer(id)
         })
         .catch((e: BusinessError) => {
           switch (e.code) {
@@ -175,18 +182,6 @@ export namespace WireGuard {
    * 其他功能
    */
 
-
-  /**
-   * 暂存变量，表示正在运行服务
-   * @param configId 如果不传入，表示置空
-   */
-  export function setRunningServer(configId?: number) {
-    getRunningServer().runningConfigId = configId;
-  }
-
-  export function getRunningServer(): ConnectState {
-    return AppStorageV2.connect<ConnectState>(ConnectState, () => new ConnectState())!;
-  }
 
   export async function readWgConf(qrContent: string): Promise<WGConf> {
     let result = await native.readWGConf(qrContent);

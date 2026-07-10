@@ -14,13 +14,14 @@
  * limitations under the License.
  *
  */
-import { ConnectState, WGConfPeer, WGDBConf } from 'wg_tunnel';
+import { SiteUrlType, WGConfPeer, WGDBConf } from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import WGConfigPreViewModel from '../view_model/WGConfigPreViewModel';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { WireGuardNav } from '../../../../Index';
+import { SubEventCancel } from 'wg_tunnel/src/main/ets/model/WGEvent';
 
 const TAG = "配置预览"
 
@@ -113,12 +114,24 @@ function cardBackgroundStyle() {
 struct InterfaceCardView {
   @Param @Require vm: WGConfigPreViewModel
   @Param @Require data: WGDBConf
-  @Local state: ConnectState = WireGuard.getRunningServer();
   @Local publicKey: string = ""
+
+  vpnEvent:SubEventCancel = WireGuard.event.subscribeVpnChange((params)=>{
+    LLog.info(TAG, "配置发生变化")
+    this.vm.updateStatus()
+  })
+  vpnThrow:SubEventCancel = WireGuard.event.subscribeVpnThrow((msg)=>{
+    LLog.info(TAG, `VPN 异常：${msg}`)
+  })
 
   async aboutToAppear(): Promise<void> {
     this.publicKey = await WireGuard.genPublicKey(this.data.conf.inter.privateKey)
     this.vm.updateStatus();
+  }
+
+  aboutToDisappear(): void {
+    this.vpnEvent.cancel()
+    this.vpnThrow.cancel()
   }
 
   build() {
@@ -163,7 +176,6 @@ struct InterfaceCardView {
       Toggle({
         type: ToggleType.Switch,
         isOn: this.vm.isVpnOpen!!
-        // isOn: (this.vm.params != undefined && this.state.runningConfigId == this.vm.params?.id)
       })
         .layoutGravity(LocalizedAlignment.TOP_END)
         .margin({
@@ -171,6 +183,7 @@ struct InterfaceCardView {
           right: '40vp',
         })
         .onChange((isOn) => {
+          LLog.info(TAG, `vpn switch 开关状态变化:${isOn}`)
           this.vm.changeVpnConfig(this.getUIContext(), isOn)
         })
 
@@ -230,7 +243,11 @@ struct PeerCardView {
 
       Column() {
         Text(`对端`).width('100%')
-        Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%')
+        if (this.data.endpoint.type == SiteUrlType.IPv6) {
+          Text(`[${this.data.endpoint.ipStrOrDomain}]:${this.data.endpoint.port}`).width('100%')
+        } else {
+          Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%')
+        }
       }
 
       Column() {

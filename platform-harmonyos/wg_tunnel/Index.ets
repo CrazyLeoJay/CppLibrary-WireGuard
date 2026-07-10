@@ -21,4 +21,4 @@ export * from './src/main/ets/model/entity/napi_entity';
 export * from './src/main/ets/model/entity/WGConfigEntity';
 export * from './src/main/ets/model/entity/PeerEditConfig';
 export * from './src/main/ets/model/entity/ClientEditConfig';
-export { default as ConnectState } from './src/main/ets/model/entity/ConnectState';
+export { default as StatusConfig } from './src/main/ets/model/WGConfig';

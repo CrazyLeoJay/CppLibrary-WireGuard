@@ -150,8 +150,8 @@ namespace NapiTools {
             if (ns != napi_ok) {
                 throw WireGuard::WGException("napi调用异常");
             }
-
-
+            
+            // 设置域名或者ip的Str
             napi_value nvIpDomain;
             auto ipStr = wsp.ipStrOrDomain;
             ns = napi_create_string_utf8(env, ipStr.c_str(), ipStr.length(), &nvIpDomain);
@@ -162,8 +162,8 @@ namespace NapiTools {
             if (ns != napi_ok) {
                 throw WireGuard::WGException("napi调用异常");
             }
-
-
+            
+            // 设置端口
             napi_value nvPort;
             auto port = wsp.port;
             ns = napi_create_int64(env, port, &nvPort);
@@ -175,6 +175,17 @@ namespace NapiTools {
                 throw WireGuard::WGException("napi调用异常");
             }
 
+            // 设置类型 type
+            napi_value nvType;
+            auto type = static_cast<uint32_t>(wsp.type);
+            ns = napi_create_int32(env, type, &nvType);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+            ns = napi_set_named_property(env, result, "type", nvType);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
             return result;
         }
 

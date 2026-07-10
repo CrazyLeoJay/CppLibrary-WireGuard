@@ -43,6 +43,10 @@ export default class WGMainViewModel {
     }
   }
 
+  get isEmptyList() : boolean{
+    return this.wgList.length == 0;
+  }
+
   async loadConfigs() {
     this.wgList = WireGuard.helper.config.allConfig().map((it) => {
       return new MainItemData(it);

@@ -47,7 +47,7 @@ export struct WGMainViewNavDest {
     // .title(this.titleView())
     .title({
       main: $r('app.string.app_name'),
-      sub :$r('app.string.sub_title'),
+      sub: $r('app.string.sub_title'),
     })
     .menus([
       {
@@ -139,35 +139,11 @@ export struct WGMainView {
 
   build() {
     Stack() {
-      List() {
-        Repeat(this.vm.wgList)
-          .each((it) => {
-            ListItem() {
-              MainItemView({ data: it.item, index: it.index })
-                .onClick(() => {
-                  WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
-                })
-            }
-            .swipeAction({
-              end: {
-                builder: () => {
-                  this.itemEndFunsView(it);
-                },
-                onAction: () => {
-                  LLog.info(TAG, "item row to end");
-                }
-              },
-              start: undefined,
-            })
-          })
-          .virtualScroll({})
+      if (this.vm.isEmptyList) {
+        this.buildEmptyView()
+      } else {
+        this.buildConfigListView()
       }
-      .width('100%')
-      .height('100%')
-      .divider({
-        strokeWidth: '1vp',
-      })
-
       Button() {
         SymbolGlyph($r('sys.symbol.plus'))
           .fontColor([$r('app.color.wg_float_button_svg_color')])
@@ -190,6 +166,49 @@ export struct WGMainView {
         placement: Placement.Top,
       })
     }
+    .width('100%')
+    .height('100%')
+  }
+
+  @LocalBuilder
+  buildConfigListView() {
+    List() {
+      Repeat(this.vm.wgList)
+        .each((it) => {
+          ListItem() {
+            MainItemView({ data: it.item, index: it.index })
+              .onClick(() => {
+                WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
+              })
+          }
+          .swipeAction({
+            end: {
+              builder: () => {
+                this.itemEndFunsView(it);
+              },
+              onAction: () => {
+                LLog.info(TAG, "item row to end");
+              }
+            },
+            start: undefined,
+          })
+        })
+        .virtualScroll({})
+    }
+    .width('100%')
+    .height('100%')
+    .divider({
+      strokeWidth: '1vp',
+    })
+
+  }
+
+  /**
+   * 空白界面时显示
+   */
+  @LocalBuilder
+  buildEmptyView() {
+    Text("快来添加一个新配置吧")
   }
 
   @LocalBuilder

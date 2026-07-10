@@ -16,9 +16,7 @@
  */
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import {
-  ConnectState, LLog, Tools, VpnConnHelper, WGConfPeer, WGDBConf, WireGuard
-} from 'wg_tunnel';
+import { LLog, Tools, VpnConnHelper, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -40,8 +38,11 @@ export default class WGConfigPreViewModel {
   }
 
   updateStatus() {
-    const state: ConnectState = WireGuard.getRunningServer();
-    this.isVpnOpen = this.params != undefined && state.runningConfigId == this.params?.id
+    const state = WireGuard.statusConfig.getConfig();
+    // 判断id是否相同，且存在
+    const isIdSame = this.params?.id != undefined && state.runningConfigId == this.params?.id;
+    this.isVpnOpen = isIdSame && state.isOpen()
+    LLog.info(TAG, `isVpnOpen=${this.isVpnOpen} status: ${JSON.stringify(state)}`)
   }
 
   @Computed

@@ -69,7 +69,7 @@ export interface WGConfInterface {
   ipArea: IPAddressArea;
   listenerPort?: number,
   dns: IPAddress[];
-  mtu?:number;
+  mtu?: number;
 }
 
 export interface WGConfPeer {
@@ -80,6 +80,11 @@ export interface WGConfPeer {
   preSharedKey?: string; // 共享密钥，可能为null
 }
 
+export enum SiteUrlType {
+  ERROR = 0,
+  IPv4 = 1, IPv6 = 2, Domain = 3,
+}
+
 /**
  * 站点：域名或者ip地址 和 端口
  * 域名和ip地址都可
@@ -87,4 +92,5 @@ export interface WGConfPeer {
 export interface WebSitePoint {
   ipStrOrDomain: string; // ip地址或者域名
   port: number; // 远程端口，没有默认80
+  type: SiteUrlType;
 }
