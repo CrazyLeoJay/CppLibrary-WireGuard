@@ -17,6 +17,7 @@
 
 import { DeviceConfig, IPAddress, IPAddressArea, PeerConfig, WGConf } from './napi_entity';
 import native from 'libwg_tunnel.so';
+import { SiteUrlType } from '../../../../../Index';
 
 /**
  * 额外补充的vpn配置
@@ -66,7 +67,7 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
       endpoint: {
         address: {
           ip: ip,
-          isIpv4: true,
+          isIpv4: item.endpoint.type == SiteUrlType.IPv4,
         },
         port: item.endpoint.port,
       },

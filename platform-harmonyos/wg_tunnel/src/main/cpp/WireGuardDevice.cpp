@@ -504,39 +504,16 @@ namespace wg_napi {
         endpoint.port = getPropInt64_t(env, arg, "port");
     }
 
-// std::regex pattern_is_ipv4(R"(^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})(\/\d{1,2})?$)");
-    std::regex
-        pattern_is_ipv4(R"(^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$)"
-        );
-    std::regex pattern_is_ipv4_cidr(
-        R"(^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\/(?:[0-9]|[12][0-9]|3[0-2])$)"
-    );
-    std::regex pattern_is_ipv6(
-        R"(^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$|^::1$|^::$|^(?:[0-9a-fA-F]{1,4}:)*::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}$|^(?:[0-9a-fA-F]{1,4}:)*::$)"
-    );
-    std::regex pattern_is_ipv6_cidr(
-        R"(^(?:([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}|::1|::$|(?:[0-9a-fA-F]{1,4}:)*::(?:[0-9a-fA-F]{1,4}:)*[0-9a-fA-F]{1,4}|(?:[0-9a-fA-F]{1,4}:)*::)\/(?:[0-9]|[1-9][0-9]|1[01][0-9]|12[0-8])$)"
-    );
-
-
     void setIp(WireGuard::IPAddress &ipAddress, bool isIpv4, std::string ip) {
         if (isIpv4) {
             ipAddress.family = WireGuard::IPAddress::IPv4;
-            if (std::regex_match(ip, pattern_is_ipv4)) {
-                // 大端序方式保存
-                if (inet_pton(AF_INET, ip.c_str(), &ipAddress.ip.ipv4) <= 0) {
-                    throw std::invalid_argument("Invalid IPv4 address");
-                }
-            } else {
+            // 大端序方式保存
+            if (inet_pton(AF_INET, ip.c_str(), &ipAddress.ip.ipv4) <= 0) {
                 throw std::invalid_argument("Ipv4地址不合法：" + ip);
             }
         } else {
             ipAddress.family = WireGuard::IPAddress::IPv6;
-            if (std::regex_match(ip, pattern_is_ipv6)) {
-                if (inet_pton(AF_INET6, ip.c_str(), &ipAddress.ip.ipv6) <= 0) {
-                    throw std::invalid_argument("Invalid IPv6 address");
-                }
-            } else {
+            if (inet_pton(AF_INET6, ip.c_str(), &ipAddress.ip.ipv6) <= 0) {
                 throw std::invalid_argument("Ipv6地址不合法：" + ip);
             }
         }
