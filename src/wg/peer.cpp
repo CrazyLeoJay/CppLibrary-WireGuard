@@ -25,9 +25,10 @@
 #include "WGException.h"
 
 namespace WireGuard {
-    Peer::Peer(const ContentKey &content_key, const PeerConfig &config)
-        : content_key(content_key), config(config), endpoint(config.endpoint) {
+    Peer::Peer(size_t index, const ContentKey &content_key, const PeerConfig &config)
+        : index(index), content_key(content_key), config(config), endpoint(config.endpoint) {
     }
+
 
     Peer::~Peer() = default;
 

@@ -84,6 +84,10 @@ namespace WireGuard {
         LOG_INFO("device start end");
     }
 
+    void Device::setStreamLog(const StreamLog::StreamLogPrint &listener) {
+        this->streamLog = listener;
+    }
+
     void Device::close() {
         LOG_INFO("device close 通知停止所有任务");
         isRunning.store(false, std::memory_order_release);
@@ -129,12 +133,14 @@ namespace WireGuard {
         LOG_INFO("peers clear");
         // 添加新配置
         _peers.reserve(peers.size());
+        size_t index = 0;
         for (const PeerConfig &pc: peers) {
-            auto peer = std::make_shared<Peer>(content_key_, pc);
+            auto peer = std::make_shared<Peer>(index, content_key_, pc);
             peer->init();
             // 配置Ip树查询
             this->allowedIps.addPeer(peer);
             _peers[pc.public_key] = peer;
+            ++index;
         }
         //        allowedIps.debugPrint();
         LOG_INFO("peers push finish : %{public}zu", peers.size());
@@ -179,6 +185,7 @@ namespace WireGuard {
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 一般是创建的太频繁，这里等2秒再循环 或者直接调用握手
+                            LOG_WARN("心跳发送握手失败 peerIndex=%zu err=%{public}s，2秒后重试", peer->getIndex(), e.what());
                             nextSleepDuration = std::chrono::seconds(2);
                         }
                     } else {
@@ -187,6 +194,7 @@ namespace WireGuard {
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 如果发送发生异常，就设置一个小的等待时间，再次尝试
+                            LOG_WARN("心跳发送数据包失败 peerIndex=%zu err=%{public}s，1秒后重试", peer->getIndex(), e.what());
                             nextSleepDuration = std::chrono::seconds(1);
                         }
                     }
@@ -435,6 +443,10 @@ namespace WireGuard {
             return;
         }
         const auto currentPeer = _peers[pk];
+        currentPeer->updateEndpoint(endpoint);
+        // 发送日志
+        printStreamLog(currentPeer, MessageType::HANDSHAKE_INITIATION, StreamLog::RECEIVE, len);
+
         try {
             currentPeer->handleHandshakeInitiation(*msg);
         } catch (const std::exception &e) {
@@ -466,8 +478,11 @@ namespace WireGuard {
             // 发送 Response
             const auto wl = socket.write(&response, sizeof(response), endpoint);
             if (wl < 0) {
+                printStreamLogThrow(currentPeer, MessageType::HANDSHAKE_RESPONSE, StreamLog::SEND, sizeof(response));
                 throw WGException("发送失败");
             }
+            // 发送数据流日志
+            printStreamLog(currentPeer, MessageType::HANDSHAKE_RESPONSE, StreamLog::SEND, sizeof(response));
             // 发送等待的数据包
             // 服务端在被攻击或者解密失败时，会等待客户端重新握手，或者cookie访问后，继续服务，所以也是有积压的数据的。
             sendStagedPackets(currentPeer);
@@ -496,7 +511,8 @@ namespace WireGuard {
         }
         // 获取到当前 peer
         const auto currentPeer = _receiverIndexPeers[msg->receiverIndex];
-
+        // 发送数据流日志
+        printStreamLog(currentPeer, MessageType::HANDSHAKE_RESPONSE, StreamLog::RECEIVE, len);
         // 更新端点 (PS:其实我觉得没啥更新必要，按道理，返回的ip地址和端口，应该和请求的一致)
         currentPeer->updateEndpoint(endpoint);
 
@@ -536,7 +552,8 @@ namespace WireGuard {
         }
         // 获取到当前 peer
         const std::shared_ptr<Peer> currentPeer = _receiverIndexPeers[msg->receiverIndex];
-
+        // 发送数据流日志
+        printStreamLog(currentPeer, MessageType::HANDSHAKE_COOKIE, StreamLog::RECEIVE, len);
         // 处理cookie消息，并且保存cookie到peer中，再次发送握手时，会携带cookie加密后的mac2
         // 由于解密时用到了握手时的mac1，所以只有发送了握手消息才能获取到正确cookie
         currentPeer->handleCookie(*msg);
@@ -556,6 +573,7 @@ namespace WireGuard {
         //            throw WGException("接收到的加密消息长度不是16倍数len=%d", cipherLen);
         //        }
         auto *msg = reinterpret_cast<const MessageData *>(data);
+        std::lock_guard<std::mutex> guard(_indexMutex);
         // 简化处理：遍历所有 Peer
         if (_receiverIndexPeers.find(msg->keyIndex) == _receiverIndexPeers.end()) {
             throw WGException("未找到远端Peer");
@@ -565,6 +583,8 @@ namespace WireGuard {
         }
         //        // 获取到当前 peer
         const auto currentPeer = _receiverIndexPeers[msg->keyIndex];
+        // 发送数据流日志
+        printStreamLog(currentPeer, MessageType::DATA, StreamLog::RECEIVE, len);
         //        // 解密数据流
         //        auto result = currentPeer->decryptPacket(msg, len);
         //        // 获取密钥对
@@ -623,10 +643,26 @@ namespace WireGuard {
             endpoint.port,
             endpoint.address.toIpHex().c_str()
         );
+
+        if (endpoint.port == 0) {
+            std::string str = "Peer(index=" + std::to_string(peer->getIndex()) + ") ";
+            str += "端点为空（" + endpoint.address.toIpStr() + ":" + fmt::to_string(endpoint.port) + "），跳过握手发送。";
+            str += "请确认是否已收到对端握手包或是否配置了 Endpoint";
+            printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), str);
+            LOG_WARN(str.c_str());
+            return;
+        }
+
         const auto result = socket.write(&msg, sizeof(msg), endpoint);
         if (result < 0) {
-            throw WGException("握手信息，发送失败！");
+            std::string error;
+            error += "握手信息发送失败！目标=" + endpoint.address.toIpStr() + ":" + fmt::to_string(endpoint.port) + ", ";
+            error.append("errno=%d, err=%s", errno, *strerror(errno));
+            printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), error);
+            throw WGException(error);
         }
+        // 发送数据流日志
+        printStreamLog(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg));
     }
 
     bool Device::checkCookieForMac2(const Endpoint &endpoint, const MessageInitiation &msg) {
@@ -666,6 +702,9 @@ namespace WireGuard {
         if (let < 0) {
             throw WGException("发送cookie挑战失败");
         }
+        // 发送数据流日志
+        printStreamLog(_receiverIndexPeers[msg.senderIndex], MessageType::HANDSHAKE_COOKIE, StreamLog::SEND,
+                       sizeof(cookieMsg));
     }
 
     void Device::encryptPacketAndSendSocket(const std::shared_ptr<Peer> &peer, const uint8_t *data,
@@ -686,6 +725,8 @@ namespace WireGuard {
             });
             // 加密数据，并且通过 socket 发送
             socket.write(message.data(), message.size(), endpoint);
+            // 发送数据流日志
+            printStreamLog(peer, MessageType::DATA, StreamLog::SEND, message.size());
         } catch (const std::exception &e) {
             // 由于发送失败是服务自己原因，这里不去触发重新握手
             LOG_WARN("socket 发送失败：%{public}s", e.what());
@@ -703,7 +744,8 @@ namespace WireGuard {
                 auto msg = peer->encryptPacketToMessageData(packet.data(), packet.size());
                 // 写到远端
                 socket.write(msg.data(), msg.size(), peer->getEndpoint());
-
+                // 发送数据流日志
+                printStreamLog(peer, MessageType::DATA, StreamLog::SEND, msg.size());
                 packets.pop();
             }
         } catch (const std::exception &e) {
@@ -761,5 +803,28 @@ namespace WireGuard {
     void Device::sendToLocal(const uint8_t *data, const size_t len) const {
         Logs::print_space([&]() { LOG_SOCKET("写入网卡数据 len=%{public}zu", len); });
         write(tunFd, data, len);
+    }
+
+    void Device::printStreamLog(const std::shared_ptr<Peer> &peer, const MessageType type,
+                                const StreamLog::StreamDirection direction, const size_t len) const {
+        const auto rx = peer->getRxBytes(); // 接收总量
+        const auto tx = peer->getTxBytes(); // 发送总量
+        try {
+            streamLog({peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, true, "成功发送"});
+        } catch (const std::exception &e) {
+            LOG_WARN("[%s] 日志输出异常： %s", LOG_TAG, e.what());
+        }
+    }
+
+    void Device::printStreamLogThrow(const std::shared_ptr<Peer> &peer, const MessageType type,
+                                     const StreamLog::StreamDirection direction, const size_t len,
+                                     const std::string &message) const {
+        const auto rx = peer->getRxBytes(); // 接收总量
+        const auto tx = peer->getTxBytes(); // 发送总量
+        try {
+            streamLog({peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, false, message});
+        } catch (const std::exception &e) {
+            LOG_WARN("[%s] 日志输出异常： %s", LOG_TAG, e.what());
+        }
     }
 }; // namespace WireGuard
