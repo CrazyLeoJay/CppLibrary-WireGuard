@@ -115,12 +115,16 @@ struct InterfaceCardView {
   @Param @Require vm: WGConfigPreViewModel
   @Param @Require data: WGDBConf
   @Local publicKey: string = ""
-
-  vpnEvent:SubEventCancel = WireGuard.event.subscribeVpnChange((params)=>{
-    LLog.info(TAG, "配置发生变化")
+  vpnEvent: SubEventCancel = WireGuard.event.subscribeVpnChange((params) => {
+    LLog.info(TAG, `配置发生变化: ${JSON.stringify(params)}`)
+    const status = params.status
+    if (status) {
+      // 更新UI线程配置
+      WireGuard.statusConfig.update(status)
+    }
     this.vm.updateStatus()
   })
-  vpnThrow:SubEventCancel = WireGuard.event.subscribeVpnThrow((msg)=>{
+  vpnThrow: SubEventCancel = WireGuard.event.subscribeVpnThrow((msg) => {
     LLog.info(TAG, `VPN 异常：${msg}`)
   })
 
@@ -175,7 +179,7 @@ struct InterfaceCardView {
 
       Toggle({
         type: ToggleType.Switch,
-        isOn: this.vm.isVpnOpen!!
+        isOn: this.vm.isVpnOpen!!,
       })
         .layoutGravity(LocalizedAlignment.TOP_END)
         .margin({
@@ -183,8 +187,16 @@ struct InterfaceCardView {
           right: '40vp',
         })
         .onChange((isOn) => {
-          LLog.info(TAG, `vpn switch 开关状态变化:${isOn}`)
-          this.vm.changeVpnConfig(this.getUIContext(), isOn)
+
+        })
+        .onClick((event) => {
+          if (!this.vm.isVpnOpen) {
+            LLog.info(TAG, "点击开启VPN")
+            this.vm.changeVpnConfig(this.getUIContext(), true)
+          } else {
+            LLog.info(TAG, "点击关闭VPN")
+            this.vm.changeVpnConfig(this.getUIContext(), false)
+          }
         })
 
     }

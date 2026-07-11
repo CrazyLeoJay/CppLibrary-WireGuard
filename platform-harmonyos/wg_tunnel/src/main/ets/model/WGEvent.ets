@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 import { commonEventManager } from '@kit.BasicServicesKit';
-import { LLog } from '../../../../Index';
+import { LLog, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
 import VPNEventStatusParams from './entity/VPNEventStatusParams';
+import WGTools from './WGTools';
 
 /**
  * WireGuard 事件发布
@@ -32,6 +33,7 @@ const packageName = bundleInfo.name
 const VPN_START_ERROR = `${packageName}.VPN_ERROR`
 const VPN_START_CLOSE = `${packageName}.VPN_CLOSE`
 const VPN_STATUS_CHANGE = `${packageName}.VPN_STATUS_CHANGE` // VPN状态变化
+const VPN_STATUS_QUERY = `${packageName}.VPN_STATUS_QUERY` // VPN状态变化
 
 export interface SubEventCancel {
   cancel(): void
@@ -78,18 +80,27 @@ export class SubEvent implements SubEventCancel {
  */
 export class WGSystemEventDef {
   private publish(tag: string, data?: string) {
-    LLog.info(TAG, `to publish ${tag}`)
-    commonEventManager.publish(tag, {
-      data: data,
-    }, (err, data) => {
-      if (err) {
-        const code = JSON.stringify(err.code)
-        const msg = JSON.stringify(err.message);
-        LLog.error(TAG, `发布 (${tag}) 事件 failed, code is ${code}, message is ${msg}`)
-      } else {
-        LLog.info(TAG, `发布 (${tag}) 事件 success`);
+    try {
+      const callback = (err: BusinessError, data: void) => {
+        if (err) {
+          const code = JSON.stringify(err.code)
+          const msg = JSON.stringify(err.message);
+          LLog.error(TAG, `发布 (${tag}) 事件 failed, code is ${code}, message is ${msg}`)
+        } else {
+          LLog.info(TAG, `发布 (${tag}) 事件 success。data=${data}`);
+        }
       }
-    })
+      if (data) {
+        commonEventManager.publish(tag, { data: data }, callback)
+      } else {
+        commonEventManager.publish(tag, callback)
+      }
+    } catch (e) {
+      LLog.error(TAG, {
+        error: e,
+        message: `发布(${tag})异常`
+      })
+    }
   }
 
   private subscribe(tag: string, invoke: (data: commonEventManager.CommonEventData) => void,
@@ -111,8 +122,10 @@ export class WGSystemEventDef {
   }
 
   publishVpnChange(params: VPNEventStatusParams) {
+    params.status = WireGuard.statusConfig.getConfig()
     this.publish(VPN_STATUS_CHANGE, JSON.stringify(params))
   }
+
 
   subscribeVpnChange(paramsInvoke: (result: VPNEventStatusParams) => void): SubEventCancel {
     return this.subscribe(VPN_STATUS_CHANGE, (data) => {
@@ -120,6 +133,26 @@ export class WGSystemEventDef {
         const result = JSON.parse(data.data) as VPNEventStatusParams
         paramsInvoke(result)
       }
+    })
+  }
+
+  /**
+   * 这个主要是从UI线程去查询当前vpn状态，需要在非UI线程调用
+   */
+  publishVpnStatusQuery() {
+    WGTools.isVpnExtensionRunning()
+      .then((running) => {
+        if (running) {
+          this.publish(VPN_STATUS_QUERY)
+        } else {
+          this.publishVpnChange({ isOpen: false, tag: "query for vpn no running" })
+        }
+      })
+  }
+
+  subscribeVpnStatusQuery(paramsInvoke: () => void): SubEventCancel {
+    return this.subscribe(VPN_STATUS_QUERY, (data) => {
+      paramsInvoke()
     })
   }
 }

@@ -32,8 +32,14 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
     const params = want.parameters
     if (!params) {
       LLog.error(TAG, "没有配置")
+      VPNChangeHelper.startVpnThrow("没有获取到配置")
       return
     }
+    // 查询的话，需要返回状态
+    WireGuard.event.subscribeVpnStatusQuery(() => {
+      VPNChangeHelper.queryStatus()
+    })
+
     LLog.info(TAG, "WG VPN onCreate")
     const id = params["id"] as number;
     const config = params["config"] as WGDeviceConfig
@@ -47,6 +53,7 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
         // vpn 启动异常
         VPNChangeHelper.startVpnThrow(e.message)
       });
+
   }
 
   override onDestroy(): void {
@@ -75,7 +82,7 @@ class VPNChangeHelper {
   static startVpn(id: number) {
     // 记录正在运行的服务配置id
     WireGuard.statusConfig.vpnStartRun(id)
-    WireGuard.event.publishVpnChange({ isOpen: true });
+    WireGuard.event.publishVpnChange({ isOpen: true, tag: "startVpn" });
   }
 
   /**
@@ -85,14 +92,14 @@ class VPNChangeHelper {
   static stopVpn() {
     // 记录正在运行的服务配置id
     WireGuard.statusConfig.vpnStop()
-    WireGuard.event.publishVpnChange({ isOpen: false });
+    WireGuard.event.publishVpnChange({ isOpen: false, tag: "stop vpn" });
   }
 
   static startVpnThrow(msg?: string) {
     // 记录正在运行的服务配置id
     WireGuard.statusConfig.vpnStopThrow()
-    WireGuard.event.publishVpnChange({ isOpen: false });
     WireGuard.event.publishVpnThrow(msg);
+    WireGuard.event.publishVpnChange({ isOpen: false, tag: "throw" });
 
     // 获取自身包名
     bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT)
@@ -105,11 +112,16 @@ class VPNChangeHelper {
           abilityName: abilityName,
         })
           .then(() => {
-            LLog.info(TAG, "关闭 VPN Extension ability")
+            LLog.info(TAG, "异常后正常关闭 VPN Extension ability")
           })
           .catch((e: BusinessError) => {
             LLog.error(TAG, e)
           })
       });
+  }
+
+  static queryStatus() {
+    const isOpen = WireGuard.statusConfig.getConfig().isOpen()
+    WireGuard.event.publishVpnChange({ isOpen: isOpen, tag: "Query Status" });
   }
 }

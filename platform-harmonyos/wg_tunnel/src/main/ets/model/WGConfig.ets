@@ -13,7 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { PersistenceV2, UIUtils } from '@ohos.arkui.StateManagement';
+import { AppStorageV2, PersistenceV2, UIUtils } from '@ohos.arkui.StateManagement';
+import { LLog } from '../../../../Index';
+
+const TAG = "WG状态"
 
 /**
  * WireGuard 状态记录
@@ -23,43 +26,40 @@ import { PersistenceV2, UIUtils } from '@ohos.arkui.StateManagement';
  */
 
 class WGStatusImpl {
-  config = new StatusConfig();
-
   /**
    * @returns 获取状态配置
    */
   getConfig(): StatusConfig {
+    // 注意以下方法都不能跨进程使用
+    return AppStorageV2.connect<StatusConfig>(StatusConfig, () => new StatusConfig())!
     return PersistenceV2.globalConnect<StatusConfig>({
       type: StatusConfig,
       // 定义默认构造器，返回时需要调用makeObserved，才能实现自动持久化
-      defaultCreator: () => UIUtils.makeObserved(new StatusConfig())
+      defaultCreator: () => UIUtils.makeObserved(new StatusConfig()),
     })!;
+    // return preferences.getPreferencesSync()
   }
 
-  /**
-   * 暂存变量，表示正在运行服务
-   * @param configId 如果不传入，表示置空
-   */
-  setRunningServer(configId?: number) {
-    this.getConfig().runningConfigId = configId;
-  }
 
   /**
    * vpn开始运行
    * @param configId
    */
-  vpnStartRun(configId: number){
-    this.getConfig().running = true
-    this.getConfig().runningConfigId = configId;
+  vpnStartRun(configId: number) {
+    const config = this.getConfig()
+    config.running = true
+    config.runningConfigId = configId;
+    LLog.info(TAG, `更新状态:${JSON.stringify(this.getConfig())}`)
   }
-
 
   /**
    * vpn 正常停止运行
    */
   vpnStop() {
-    this.getConfig().runningConfigId = undefined;
-    this.getConfig().running = false;
+    const config = this.getConfig()
+    config.runningConfigId = undefined;
+    config.running = false;
+    LLog.info(TAG, `更新状态:${JSON.stringify(this.getConfig())}`)
   }
 
   /**
@@ -67,6 +67,13 @@ class WGStatusImpl {
    */
   vpnStopThrow() {
     this.getConfig().running = false;
+    LLog.info(TAG, `更新状态:${JSON.stringify(this.getConfig())}`)
+  }
+
+  update(config:StatusConfig){
+    const c =this.getConfig()
+    c.runningConfigId = config.runningConfigId
+    c.running = config.running
   }
 }
 
@@ -78,7 +85,6 @@ export class StatusConfig {
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true
   }
-
 }
 
 const WGConfig = new WGStatusImpl();

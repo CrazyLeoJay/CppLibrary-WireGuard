@@ -28,6 +28,7 @@ import { IPAddressArea, KeyPair, WGConf } from './entity/napi_entity';
 import ParamsRegex from './ParamsRegex';
 import WGConfig from './WGConfig';
 import WGEvent from './WGEvent';
+import WGTools from './WGTools';
 
 const TAG = "wgHelper"
 
@@ -79,6 +80,11 @@ export namespace WireGuard {
    * 状态配置
    */
   export const statusConfig = WGConfig;
+
+  /**
+   * 工具类
+   */
+  export const tools = WGTools
 
   /*
   主要功能
@@ -147,7 +153,7 @@ export namespace WireGuard {
       })
         .then(() => {
           LLog.info(TAG, "vpn start notify")
-          statusConfig.setRunningServer(id)
+          // statusConfig.setRunningServer(id)
         })
         .catch((e: BusinessError) => {
           switch (e.code) {

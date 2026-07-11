@@ -19,7 +19,7 @@ import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } 
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
-import { WGConf } from 'wg_tunnel';
+import { WGConf, WireGuard } from 'wg_tunnel';
 
 const TAG = "WG主页";
 
@@ -54,6 +54,7 @@ export struct WGMainViewNavDest {
         value: "刷新",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_2_circlepath')),
         action: () => {
+          WireGuard.event.publishVpnStatusQuery();
           this.vm.loadConfigs()
         }
       },
@@ -132,9 +133,22 @@ export struct WGMainView {
       }
     },
   ];
+  vpnEvent = WireGuard.event.subscribeVpnChange((params) => {
+    LLog.info(TAG, `配置读取: ${JSON.stringify(params)}`)
+    const status = params.status
+    if (status) {
+      // 更新UI线程配置
+      WireGuard.statusConfig.update(status)
+    }
+  })
 
   aboutToAppear(): void {
     this.vm.loadConfigs();
+    WireGuard.event.publishVpnStatusQuery();
+  }
+
+  aboutToDisappear(): void {
+    this.vpnEvent.cancel()
   }
 
   build() {
