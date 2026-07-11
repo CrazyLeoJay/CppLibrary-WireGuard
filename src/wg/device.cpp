@@ -650,7 +650,7 @@ namespace WireGuard {
             str += "端点为空（" + endpoint.address.toIpStr() + ":" + std::to_string(endpoint.port) + "），跳过握手发送。";
             str += "请确认是否已收到对端握手包或是否配置了 Endpoint";
             printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), str);
-            LOG_WARN(str.c_str());
+            LOG_WARN("%{public}s",str.c_str());
             return;
         }
 
