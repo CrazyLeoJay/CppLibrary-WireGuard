@@ -646,7 +646,7 @@ namespace WireGuard {
 
         if (endpoint.port == 0) {
             std::string str = "Peer(index=" + std::to_string(peer->getIndex()) + ") ";
-            str += "端点为空（" + endpoint.address.toIpStr() + ":" + fmt::to_string(endpoint.port) + "），跳过握手发送。";
+            str += "端点为空（" + endpoint.address.toIpStr() + ":" + std::to_string(endpoint.port) + "），跳过握手发送。";
             str += "请确认是否已收到对端握手包或是否配置了 Endpoint";
             printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), str);
             LOG_WARN(str.c_str());
@@ -656,7 +656,7 @@ namespace WireGuard {
         const auto result = socket.write(&msg, sizeof(msg), endpoint);
         if (result < 0) {
             std::string error;
-            error += "握手信息发送失败！目标=" + endpoint.address.toIpStr() + ":" + fmt::to_string(endpoint.port) + ", ";
+            error += "握手信息发送失败！目标=" + endpoint.address.toIpStr() + ":" + std::to_string(endpoint.port) + ", ";
             error.append("errno=%d, err=%s", errno, *strerror(errno));
             printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), error);
             throw WGException(error);
