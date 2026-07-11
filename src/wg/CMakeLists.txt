@@ -26,6 +26,9 @@ add_library(${PROJECT_NAME} STATIC
         tools/conf_file.cpp
         tools/socket/socket_tools.cpp
         tools/socket/socket_tools.h
+        tools/wg_stream_log.cpp
+        tools/wg_stream_log.cpp
+        tools/wg_stream_log.h
 )
 
 target_link_libraries(${PROJECT_NAME} PRIVATE sodium wg_clib logs)

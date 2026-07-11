@@ -32,6 +32,7 @@
 
 #include "cookie.h"
 #include "version.h"
+#include "tools/wg_stream_log.h"
 #include "tools/socket/socket_tools.h"
 
 namespace WireGuard {
@@ -87,6 +88,16 @@ namespace WireGuard {
         bool enableCookie{false}; // 是否开启 cookie 挑战
         CookieChecker cookieChecker{content_key_};
 
+        // =============== 日志打印 ===============
+        StreamLog::StreamLogPrint streamLog {
+            [](StreamLog::Message msg) {
+                // const auto direction = msg.direction == WireGuard::StreamLog::RECEIVE ? "接收" : "发送";
+                // LOG_INFO("Device in [streamLog]：peerIndex=%d, 方向=%s 数据量=%zu", static_cast<int>(msg.peerIndex),
+                //          direction,
+                //          msg.sc.length);
+            }
+        };
+
     public: // 对外操作方法
         /**
          * 创建Socket服务，并且绑定本地端口，返回socket套接字
@@ -100,6 +111,12 @@ namespace WireGuard {
          */
         void start(const uint32_t &tunFd);
 
+        /**
+         * 设置流监听
+         *
+         * @param listener stream 流监听
+         */
+        void setStreamLog(const StreamLog::StreamLogPrint &listener);
 
         /**
          * 停止并清除资源，close 后需要重新初始化
@@ -266,6 +283,19 @@ namespace WireGuard {
          * 写数据到本地（网卡或者代理）
          */
         void sendToLocal(const uint8_t *data, size_t len) const;
+
+        void printStreamLog(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len) const;
+
+        /**
+         * 异常打印
+         *
+         * @param peer
+         * @param type
+         * @param direction
+         * @param len
+         * @param message
+         */
+        void printStreamLogThrow(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len, const std::string &message = "") const;
     };
 }; // namespace WireGuard
 #endif // WIREGUARD_DEVICE_H

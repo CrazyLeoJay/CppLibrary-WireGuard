@@ -45,11 +45,12 @@ namespace WireGuard {
      */
     class Peer final {
     public:
-        Peer(const ContentKey &content_key, const PeerConfig &config);
+        Peer(size_t index, const ContentKey &content_key, const PeerConfig &config);
 
         ~Peer();
 
     protected:
+        const size_t index;
         const ContentKey &content_key;
         const PeerConfig &config;
 
@@ -136,6 +137,7 @@ namespace WireGuard {
 
     public:
         PublicKey getPublicKey() const { return config.public_key; }
+        size_t getIndex() const { return index; }
 
         std::vector<IpAddressArea> getAllowedIps() const { return config.allowedIps; }
 

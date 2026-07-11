@@ -93,19 +93,6 @@ WireGuard::DeviceRegisterConfig makeConfig() {
     return config;
 }
 
-void startServer() {
-    const auto config = makeConfig();
-    WireGuard::Device device{config};
-
-    // 启动socket
-    auto socket_fd = device.initSocketStart([](int fd) {
-        LOG_INFO("server init for fd=%d", fd);
-    });
-    // 启动读取线程
-    device.start(0);
-    LOG_INFO("server start", socket_fd);
-}
-
 WireGuard::DeviceRegisterConfig makeClientConfig() {
     WireGuard::DeviceRegisterConfig config{};
     config.client.device_name = "server";
@@ -144,20 +131,33 @@ void startClient() {
     LOG_INFO("client start", socket_fd);
 }
 
+#define  NDEBUG
+
 TEST(SOCKET, serverStart) {
     install_signal_handler();
 
-    try {
-        startServer();
-    } catch (const std::exception &e) {
-        LOG_ERROR("server start: %s", e.what());
-    }
+    const auto config = makeConfig();
+    WireGuard::Device device{config};
+    device.setStreamLog([](const WireGuard::StreamLog::Message &msg) {
+        const auto direction = msg.direction == WireGuard::StreamLog::RECEIVE ? "接收" : "发送";
+        LOG_INFO("数据流日志(%s)：peerIndex=%d, 方向=%s 数据量=%zu message=%s", msg.success?"true":"false",
+                 static_cast<int>(msg.peerIndex), direction, msg.sc.length, msg.msg);
+    });
+
+    // 启动socket
+    auto socket_fd = device.initSocketStart([](int fd) {
+        LOG_INFO("server init for fd=%d", fd);
+    });
+    // 启动读取线程
+    device.start(0);
+    LOG_INFO("server start", socket_fd);
+
 
     std::cout << "Begin Working..." << std::endl;
     // 主循环，不断检查运行标志
     while (g_running) {
         // 执行你的任务（例如 VPN 数据收发）
-        // std::cout << "Working..." << std::endl;
+        std::cout << "Working..." << std::endl;
         sleep(2); // 模拟工作
     }
 
