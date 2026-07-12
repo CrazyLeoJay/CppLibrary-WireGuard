@@ -30,7 +30,7 @@
     #undef LOG_DOMAIN
     #undef LOG_TAG
     #define LOG_DOMAIN 0x0002 // 自定义业务域（0x0000~0xFFFF）
-    #define LOG_TAG    "wg_c14_harmony"
+    #define LOG_TAG    "wg_c14_hm"
 
 namespace WireGuard {
     namespace Logs {
@@ -40,10 +40,12 @@ namespace WireGuard {
             }
         }
     }; // namespace Logs
-};     // namespace WireGuard
+}; // namespace WireGuard
 
 
 //    #define LOG_PRINT(level, fmt, ...) ::WireGuard::Logs::log_println(level, __FILE__, __LINE__, fmt, ##__VA_ARGS__)
+
+//    #define SHOW_DEBUG_LOGS // 如果需要查看debug日志时开启
 
     #ifdef SHOW_DEBUG_LOGS
         #define LOG_DEBUG(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)

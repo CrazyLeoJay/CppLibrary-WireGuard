@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 export * from './src/main/ets/model/WGHelper';
+// export * from './src/main/ets/model/WGConnect';
+export * from './src/main/ets/model/WGConfig';
+export * from './src/main/ets/model/WGEvent';
+export * from './src/main/ets/model/WGTools';
 export * from './src/main/ets/tools/LLog';
 export { default as Tools } from './src/main/ets/tools/tools';
 export * from './src/main/ets/tools/http';
@@ -21,4 +25,3 @@ export * from './src/main/ets/model/entity/napi_entity';
 export * from './src/main/ets/model/entity/WGConfigEntity';
 export * from './src/main/ets/model/entity/PeerEditConfig';
 export * from './src/main/ets/model/entity/ClientEditConfig';
-export { default as StatusConfig } from './src/main/ets/model/WGConfig';

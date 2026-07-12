@@ -4,6 +4,8 @@
 #include "tools/conf_file.h"
 #include "tools/wg_dns.h"
 #include <hilog/log.h>
+#include <memory>
+#include <vector>
 
 static napi_value NAPI_Global_makeKeyPair(napi_env env, napi_callback_info info) {
     try {
@@ -107,13 +109,13 @@ static napi_value NAPI_Global_genPublicKey(napi_env env, napi_callback_info info
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
-        char *buf = new char[len + 1];
-        ns = napi_get_value_string_utf8(env, args[0], buf, len + 1, &len);
+        std::vector<char> buf(len + 1);
+        ns = napi_get_value_string_utf8(env, args[0], buf.data(), len + 1, &len);
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        WireGuard::PrivateKey privateKey = WireGuard::crypto::base642Bin32Array(std::string(buf, len));
+        WireGuard::PrivateKey privateKey = WireGuard::crypto::base642Bin32Array(std::string(buf.data(), len));
         WireGuard::PublicKey pub;
         WireGuard::crypto::generatePublicKey(pub, privateKey);
 
@@ -144,14 +146,13 @@ static napi_value NAPI_Global_readWGConf(napi_env env, napi_callback_info info) 
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
-        char *buf = new char[len + 1];
-        ns = napi_get_value_string_utf8(env, args[0], buf, len + 1, &len);
+        std::vector<char> buf(len + 1);
+        ns = napi_get_value_string_utf8(env, args[0], buf.data(), len + 1, &len);
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        WireGuard::Tools::readConfFileToJson(std::string(buf));
-        WireGuard::Tools::WGConf entity = WireGuard::Tools::readConfFileToEntity(std::string(buf));
+        WireGuard::Tools::WGConf entity = WireGuard::Tools::readConfFileToEntity(std::string(buf.data(), len));
         return NapiTools::createNvForWGConf(env, entity);
     } catch (const std::exception &e) {
         napi_throw_error(env, "读取异常", e.what());
@@ -175,14 +176,13 @@ static napi_value NAPI_Global_readWGConfToJson(napi_env env, napi_callback_info 
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
-        char *buf = new char[len + 1];
-        ns = napi_get_value_string_utf8(env, args[0], buf, len + 1, &len);
+        std::vector<char> buf(len + 1);
+        ns = napi_get_value_string_utf8(env, args[0], buf.data(), len + 1, &len);
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        WireGuard::Tools::readConfFileToJson(std::string(buf));
-        std::string entity = WireGuard::Tools::readConfFileToJson(std::string(buf));
+        std::string entity = WireGuard::Tools::readConfFileToJson(std::string(buf.data(), len));
         napi_value result;
         ns = napi_create_string_utf8(env, entity.c_str(), entity.length(), &result);
         if (ns != napi_ok) {

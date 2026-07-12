@@ -83,6 +83,7 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
       dns: conf.conf.inter.dns,
     },
     device: {
+      deviceName: conf.name,
       privateKey: conf.conf.inter.privateKey,
       listenerPort: conf.conf.inter.listenerPort,
     },

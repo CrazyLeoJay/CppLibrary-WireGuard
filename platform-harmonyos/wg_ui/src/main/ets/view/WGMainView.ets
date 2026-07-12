@@ -242,9 +242,7 @@ export struct WGMainView {
 
   newConfigDialog(wgConf: WGConf) {
     const contentNode = new ComponentContent(this.getUIContext(), wrapBuilder(buildDialog),
-      {
-        wgConf: wgConf
-      } as QRCodeNewConfig
+      { wgConf: wgConf } as QRCodeNewConfig
     );
     this.getUIContext()
       .getPromptAction()

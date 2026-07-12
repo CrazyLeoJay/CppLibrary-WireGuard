@@ -16,7 +16,7 @@
  */
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import { LLog, Tools, VpnConnHelper, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
+import { LLog, Tools, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -92,8 +92,6 @@ export default class WGConfigPreViewModel {
       LLog.info(TAG, `将公钥复制进入系统剪贴板 异常！！！！：${error}`)
     }
   }
-
-  helper?: VpnConnHelper;
 
   /**
    * 改变Vpn配置，启动或停止

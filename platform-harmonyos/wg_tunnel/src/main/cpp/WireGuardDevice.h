@@ -1,5 +1,5 @@
 /*
-* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+ * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -49,6 +49,9 @@ public:
     napi_threadsafe_function _currentSocketFdListener{};
     NapiTools::TsfnContext _currentListenerContext;
 
+    napi_threadsafe_function _currentStreamLogListener{};
+    NapiTools::TsfnContext _currentStreamLogListenerContext;
+
     int32_t tag{0};
     napi_env _env;
     napi_ref _wrapper; // 主动管理生命周期
@@ -64,6 +67,8 @@ public:
 
     void callbackOnSocketChangeListener(int socketFd);
 //    void callbackOnSocketChangeListener(int socketFd, napi_threadsafe_function _currentSocketFdListener);
+
+    void callbackOnStreamLogListener(WireGuard::StreamLog::Message &msg);
 };
 
 
@@ -73,6 +78,7 @@ namespace wg_napi {
     napi_value New(napi_env env, napi_callback_info info);
     napi_value InitVpn(napi_env env, napi_callback_info info);
     napi_value Start(napi_env env, napi_callback_info info);
+    napi_value setStreamLogListener(napi_env env, napi_callback_info info);
     napi_value Close(napi_env env, napi_callback_info info);
 
     void GetConnectConfig(napi_env env, napi_value arg, WireGuard::DeviceRegisterConfig &config);

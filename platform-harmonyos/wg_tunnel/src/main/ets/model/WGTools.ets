@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { appManager } from '@kit.AbilityKit';
+import { appManager, common } from '@kit.AbilityKit';
 import { LLog } from '../tools/LLog';
 
 /**
@@ -49,6 +49,21 @@ class WGToolsImpl {
       return false;
     }
   }
+
+  // 在 UIAbility 或页面中通过 context 获取
+  async checkVpnByContext(context: common.UIAbilityContext): Promise<boolean> {
+  try {
+    const processInfos =
+      await context.getApplicationContext().getRunningProcessInformation();
+
+    return processInfos.some((info: appManager.ProcessInformation) =>
+    info.processName.endsWith(':vpn')
+    );
+  } catch (err) {
+    LLog.error('VpnCheck', '检查失败: %{public}s', JSON.stringify(err));
+    return false;
+  }
+}
 }
 
 const WGTools = new WGToolsImpl();

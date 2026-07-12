@@ -29,6 +29,7 @@
  * Napi 实现工具类
  */
 #include "tools/conf_file.h"
+#include "tools/wg_stream_log.h"
 #include <node_api.h>
 
 namespace NapiTools {
@@ -46,6 +47,8 @@ namespace NapiTools {
 
     napi_value makeNapiBool(napi_env &env, const bool &value);
     napi_value makeNapiString(napi_env &env, const std::string &value);
+    
+    napi_value makeStreamLogMessage(napi_env &env, const WireGuard::StreamLog::Message message);
 }; // namespace NapiTools
 
 #endif // WIREGUARD_NAPI_TOOLS_H

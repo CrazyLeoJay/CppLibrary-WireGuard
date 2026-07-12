@@ -15,6 +15,7 @@ export interface DeviceRegisterConfig {
  * @author leojay`fu
  */
 export interface DeviceConfig {
+  deviceName: string; // 设备名称
   privateKey: string; // 本地私钥
   listenerPort?: number; //本地监听端口(0或者空表示使用默认值 51820)
   bindAddress?: IPAddress; // 绑定本地ip，一般是null，如果有多网卡情况，可以指定ip监听。
@@ -94,3 +95,38 @@ export interface WebSitePoint {
   port: number; // 远程端口，没有默认80
   type: SiteUrlType;
 }
+
+/**
+ * 数据方向
+ */
+export enum StreamDirection { RECEIVE = 1, SEND = 2 }
+
+/**
+ * 流数据计算
+ * 每个Peer单独计算
+ */
+export interface StreamCalculate {
+  length: number; // 当前数据大小
+  receiveTotal: number; // 接收总数据量
+  sendTotal: number; // 发送总数据量
+}
+
+export enum MessageType {
+  // 无效消息类型，用于初始化或错误处理
+  INVALID = 0,
+  HANDSHAKE_INITIATION = 1,
+  HANDSHAKE_RESPONSE = 2,
+  HANDSHAKE_COOKIE = 3,
+  DATA = 4
+}
+
+export interface StreamLogMessage {
+  publicKey: string; // 使用PublicKey作为主键
+  peerIndex: number; // 顺序索引
+  messageType: MessageType; // 数据类型
+  direction: StreamDirection; // 数据方向
+  sc: StreamCalculate; // 数据大小
+  success: boolean;
+  msg: string;
+}
+;

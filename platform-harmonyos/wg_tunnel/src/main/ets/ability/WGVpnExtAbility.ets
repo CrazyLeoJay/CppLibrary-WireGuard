@@ -17,8 +17,10 @@
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { bundleManager, Want } from '@kit.AbilityKit';
 import { LLog } from '../tools/LLog';
-import { VpnConnHelper, WireGuard } from '../model/WGHelper';
+import { WireGuard } from '../model/WGHelper';
 import { WGDeviceConfig } from '../model/entity/WGConfigEntity';
+import { VpnConnHelper } from '../model/WGConnect';
+import { StreamDirection } from '../../../../Index';
 
 const TAG = "vpn_ability"
 
@@ -27,33 +29,45 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
 
   override onCreate(want: Want): void {
     super.onCreate(want);
-    this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context));
+    try {
+      const params = want.parameters
+      if (!params) {
+        LLog.error(TAG, "没有配置")
+        VPNChangeHelper.startVpnThrow("没有获取到配置")
+        return
+      }
+      // 查询的话，需要返回状态
+      WireGuard.event.subscribeVpnStatusQuery(() => {
+        VPNChangeHelper.queryStatus()
+      })
 
-    const params = want.parameters
-    if (!params) {
-      LLog.error(TAG, "没有配置")
-      VPNChangeHelper.startVpnThrow("没有获取到配置")
-      return
+      LLog.info(TAG, "WG VPN onCreate")
+      const id = params["id"] as number;
+      const config = params["config"] as WGDeviceConfig
+
+      this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context), config)
+        .setStreamListener((msg) => {
+          const direction = msg.direction == StreamDirection.RECEIVE ? "接收" : "发送"
+          LLog.info(TAG, `Peer(${msg.peerIndex}/${msg.messageType}/Result:${msg.success}) ${direction} length:${msg.sc.length} `)
+        });
+
+      this.vpnConnection.startServer()
+        .then(() => {
+          VPNChangeHelper.startVpn(id)
+        })
+        .catch((e: BusinessError) => {
+          LLog.error(TAG, `VPN Error (${e.code}): ${e.message}`);
+          LLog.error(TAG, e);
+          // vpn 启动异常
+          VPNChangeHelper.startVpnThrow(e.message)
+        });
+
+    } catch (e) {
+      const t = e as BusinessError
+      LLog.error(TAG, e);
+      // vpn 启动异常
+      VPNChangeHelper.startVpnThrow(`${e.message}\n${t.stack}`)
     }
-    // 查询的话，需要返回状态
-    WireGuard.event.subscribeVpnStatusQuery(() => {
-      VPNChangeHelper.queryStatus()
-    })
-
-    LLog.info(TAG, "WG VPN onCreate")
-    const id = params["id"] as number;
-    const config = params["config"] as WGDeviceConfig
-
-    this.vpnConnection!.startServer(config).then(() => {
-      VPNChangeHelper.startVpn(id)
-    })
-      .catch((e: BusinessError) => {
-        LLog.error(TAG, `VPN Error (${e.code}): ${e.message}`);
-        LLog.error(TAG, e);
-        // vpn 启动异常
-        VPNChangeHelper.startVpnThrow(e.message)
-      });
-
   }
 
   override onDestroy(): void {
