@@ -48,7 +48,9 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
       this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context), config)
         .setStreamListener((msg) => {
           const direction = msg.direction == StreamDirection.RECEIVE ? "接收" : "发送"
-          LLog.info(TAG, `Peer(${msg.peerIndex}/${msg.messageType}/Result:${msg.success}) ${direction} length:${msg.sc.length} `)
+          LLog.info(TAG,
+            `Peer(${msg.peerIndex}/${msg.messageType}/Result:${msg.success}) ${direction} length:${msg.sc.length} `)
+          WireGuard.event.publishVpnStreamLogs(msg)
         });
 
       this.vpnConnection.startServer()

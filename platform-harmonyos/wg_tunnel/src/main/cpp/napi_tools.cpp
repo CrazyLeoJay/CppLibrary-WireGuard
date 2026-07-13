@@ -375,7 +375,7 @@ namespace NapiTools {
 
             return result;
         }
-    }
+    } // namespace
 
     napi_value makeStreamLogMessage(napi_env &env, const WireGuard::StreamLog::Message message) {
         napi_value nvResult;
@@ -384,6 +384,7 @@ namespace NapiTools {
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
+        const auto timestamp = message.timestamp;
         const auto pk = WireGuard::crypto::bin32Array2Base64(message.publicKey);
         const auto peerIndex = message.peerIndex;
         const auto messageType = message.messageType;
@@ -391,6 +392,17 @@ namespace NapiTools {
         const auto sc = message.sc;
         const auto success = message.success;
         const auto msg = message.msg;
+
+        napi_value nvTimestamp;
+        int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count();
+        ns = napi_create_int64(env, ms, &nvTimestamp);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "timestamp", nvTimestamp);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
 
         napi_value nvPublicKey;
         ns = napi_create_string_utf8(env, pk.c_str(), pk.length(), &nvPublicKey);

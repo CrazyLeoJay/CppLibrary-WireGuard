@@ -18,7 +18,7 @@ import native from 'libwg_tunnel.so';
 import { DatabaseHelper } from './db/wgdb';
 import { Context } from '@ohos.abilityAccessCtrl';
 import WGDao from './db/WGDao';
-import { makeWGConf2VpnStartConfig, WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
+import { WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
 import { UIContext } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
@@ -29,7 +29,7 @@ import ParamsRegex from './ParamsRegex';
 import WGConfig from './WGConfig';
 import WGEvent from './WGEvent';
 import WGTools from './WGTools';
-import { VpnConnHelper } from './WGConnect';
+import { makeWGConf2VpnStartConfig, VpnConnHelper } from './WGConnect';
 
 const TAG = "wgHelper"
 
@@ -134,7 +134,7 @@ export namespace WireGuard {
    * @throws
    */
   export
-  async function runWGConfig(id: number, config: WGDeviceConfig, isOne: boolean) {
+  async function runWGConfig(id: number, config: WGDBConf, isOne: boolean) {
     // let want: Want = {};
     // 获取自身包名
     let bundleInfo = await bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
@@ -142,7 +142,10 @@ export namespace WireGuard {
     const abilityName = 'WGVpnExtAbility'
 
     if (isOne) {
-      const TAG = "run wg"
+      // 这个配置将会发送到VPN服务进程，去配置、启动VPN服务
+      const vpnConf = await makeWGConf2VpnStartConfig(config);
+      LLog.info(TAG, `创建VPN配置：${JSON.stringify(vpnConf)}`)
+
       LLog.info(TAG, "启动 vpn")
       await vpnExtension.startVpnExtensionAbility({
         deviceId: '',
@@ -150,7 +153,7 @@ export namespace WireGuard {
         abilityName: abilityName,
         parameters: {
           id: id,
-          config: config,
+          config: vpnConf,
         }
       })
         .then(() => {
@@ -175,15 +178,6 @@ export namespace WireGuard {
         abilityName: abilityName,
       })
     }
-  }
-
-  /**
-   * 将数据库实体转换为可以启动的vpn参数
-   * @param config 数据库实体
-   * @returns vpn启动参数
-   */
-  export async function toVpnStartConfig(config: WGDBConf): Promise<WGDeviceConfig> {
-    return await makeWGConf2VpnStartConfig(config)
   }
 
   /*

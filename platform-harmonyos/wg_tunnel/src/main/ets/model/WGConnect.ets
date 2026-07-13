@@ -15,11 +15,11 @@
  */
 
 import native, { WireGuardDevice } from 'libwg_tunnel.so';
-import { WGDeviceConfig } from './entity/WGConfigEntity';
+import { WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
 import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
-import { DeviceRegisterConfig, IPAddressArea, StreamLogMessage } from './entity/napi_entity';
+import { DeviceRegisterConfig, IPAddressArea, PeerConfig, SiteUrlType, StreamLogMessage } from './entity/napi_entity';
 
 const TAG = "WG连接"
 
@@ -139,4 +139,43 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
     routes: routes,
   }
   return vpnConfig;
+}
+
+export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDeviceConfig> {
+  // 获取peers 如果有域名 需要将域名转成ip
+  let peers: PeerConfig[] = await Promise.all(conf.conf.peers.map(async (item) => {
+    const value = item.endpoint.ipStrOrDomain;
+    let ip: string;
+    if (await native.isIpAddress(value)) {
+      ip = value;
+    } else {
+      ip = await native.dnsToIp(item.endpoint.ipStrOrDomain);
+    }
+    return {
+      publicKey: item.publicKey,
+      endpoint: {
+        address: {
+          ip: ip,
+          isIpv4: item.endpoint.type == SiteUrlType.IPv4,
+        },
+        port: item.endpoint.port,
+      },
+      allowedIps: item.allowedIPs,
+      preSharedKey: item.preSharedKey,
+      keepaliveInterval: item.keepaliveInterval
+    } as PeerConfig
+  }))
+  return {
+    name: conf.name,
+    vpn: {
+      vpnIp: conf.conf.inter.ipArea,
+      dns: conf.conf.inter.dns,
+    },
+    device: {
+      deviceName: conf.name,
+      privateKey: conf.conf.inter.privateKey,
+      listenerPort: conf.conf.inter.listenerPort,
+    },
+    peers: peers,
+  }
 }

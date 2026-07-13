@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { commonEventManager } from '@kit.BasicServicesKit';
-import { LLog, WireGuard } from '../../../../Index';
+import { LLog, StreamLogMessage, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
 import VPNEventStatusParams from './entity/VPNEventStatusParams';
 import WGTools from './WGTools';
@@ -33,7 +33,8 @@ const packageName = bundleInfo.name
 const VPN_START_ERROR = `${packageName}.VPN_ERROR`
 const VPN_START_CLOSE = `${packageName}.VPN_CLOSE`
 const VPN_STATUS_CHANGE = `${packageName}.VPN_STATUS_CHANGE` // VPN状态变化
-const VPN_STATUS_QUERY = `${packageName}.VPN_STATUS_QUERY` // VPN状态变化
+const VPN_STATUS_QUERY = `${packageName}.VPN_STATUS_QUERY` // VPN状态查询
+const VPN_STREAM_LOGS = `${packageName}.VPN_STREAM_LOGS` // VPN Stream 流日志
 
 export interface SubEventCancel {
   cancel(): void
@@ -153,6 +154,19 @@ export class WGSystemEventDef {
   subscribeVpnStatusQuery(paramsInvoke: () => void): SubEventCancel {
     return this.subscribe(VPN_STATUS_QUERY, (data) => {
       paramsInvoke()
+    })
+  }
+
+  publishVpnStreamLogs(msg: StreamLogMessage) {
+    this.publish(VPN_STREAM_LOGS, JSON.stringify(msg))
+  }
+
+  subscribeVpnStreamLogs(logListener: (msg: StreamLogMessage) => void): SubEventCancel {
+    return this.subscribe(VPN_STREAM_LOGS, (data) => {
+      if (data.data) {
+        const log = JSON.parse(data.data) as StreamLogMessage
+        logListener(log);
+      }
     })
   }
 }

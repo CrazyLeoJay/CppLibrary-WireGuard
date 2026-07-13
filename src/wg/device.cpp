@@ -824,7 +824,7 @@ namespace WireGuard {
         }
         const auto rx = peer->getRxBytes(); // 接收总量
         const auto tx = peer->getTxBytes(); // 发送总量
-        const auto now = Clock::now();
+        const auto now = std::chrono::system_clock::now();
         try {
             streamLog({now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, true, "成功发送"});
         } catch (const std::exception &e) {
@@ -841,7 +841,7 @@ namespace WireGuard {
         }
         const auto rx = peer->getRxBytes(); // 接收总量
         const auto tx = peer->getTxBytes(); // 发送总量
-        const auto now = Clock::now();
+        const auto now = std::chrono::system_clock::now();
         try {
             streamLog({now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, false, message});
         } catch (const std::exception &e) {

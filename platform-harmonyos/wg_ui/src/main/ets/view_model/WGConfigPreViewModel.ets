@@ -16,8 +16,9 @@
  */
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import { LLog, Tools, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
+import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
+import { AppStorageV2 } from '@kit.ArkUI';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
@@ -32,6 +33,7 @@ export default class WGConfigPreViewModel {
    * @returns 当前Vpn是否运行中
    */
   @Trace isVpnOpen: boolean = false;
+  @Trace logData: WGStreamLogsData = AppStorageV2.connect(WGStreamLogsData, () => new WGStreamLogsData())!
 
   constructor() {
     this.updateStatus();
@@ -43,6 +45,11 @@ export default class WGConfigPreViewModel {
     const isIdSame = this.params?.id != undefined && state.runningConfigId == this.params?.id;
     this.isVpnOpen = isIdSame && state.isOpen()
     LLog.info(TAG, `isVpnOpen=${this.isVpnOpen} status: ${JSON.stringify(state)}`)
+  }
+
+  @Computed
+  get configName(): string {
+    return this.data?.name ?? "未命名"
   }
 
   @Computed
@@ -100,11 +107,9 @@ export default class WGConfigPreViewModel {
     try {
       const id = this.params!.id;
       const config = this.data!;
-      // 转化实体
-      const vpnConf = await WireGuard.toVpnStartConfig(config);
-      LLog.info(TAG, `创建VPN配置：${JSON.stringify(vpnConf)}`)
 
-      await WireGuard.runWGConfig(id, vpnConf, isOn)
+      await WireGuard.runWGConfig(id, config, isOn)
+      // 这里主要是本地启动VPN，不在vpn 专属进程 便于测试。
       //
       // if (!this.helper) {
       //   this.helper = WireGuard.makeVpnConnection(context);
@@ -129,4 +134,10 @@ export default class WGConfigPreViewModel {
       LLog.error(TAG, { error: e, message: "开启VPN异常" });
     }
   }
+}
+
+
+@ObservedV2
+export class WGStreamLogsData {
+  @Trace logs: StreamLogMessage[] = []
 }

@@ -14,12 +14,12 @@
  * limitations under the License.
  *
  */
-import { SiteUrlType, WGConfPeer, WGDBConf } from 'wg_tunnel';
+import { MessageType, SiteUrlType, StreamDirection, StreamLogMessage, Timestamp, WGConfPeer, WGDBConf } from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import WGConfigPreViewModel from '../view_model/WGConfigPreViewModel';
-import { SymbolGlyphModifier } from '@kit.ArkUI';
+import { AppStorageV2, SymbolGlyphModifier } from '@kit.ArkUI';
 import { WireGuardNav } from '../../../../Index';
 import { SubEventCancel } from 'wg_tunnel/src/main/ets/model/WGEvent';
 
@@ -34,17 +34,38 @@ function WGConfigPreViewBuilder() {
 @ComponentV2
 export struct WGConfigPreViewNavDest {
   @Local vm: WGConfigPreViewModel = new WGConfigPreViewModel();
+  @Local subTitle: string = "配置预览"
 
   aboutToAppear(): void {
-
   }
 
   build() {
     NavDestination() {
-      WGConfigPreView({ vm: this.vm })
+      Swiper() {
+        SwiperTitleLineView({
+          rightTag: "左滑查看日志"
+        }) {
+          WGConfigPreView({ vm: this.vm })
+        }
+
+        SwiperTitleLineView({
+          leftTag: "右滑回到主页"
+        }) {
+          WGConfigPreViewStreamLogView({ vm: this.vm })
+        }
+      }
+      .loop(false)
+      .width('100%')
+      .height('100%')
+      .onSelected((index) => {
+        this.subTitle = index == 0 ? "配置预览" : "VPN日志"
+      })
     }
     // .hideTitleBar(true)
-    .title("WireGuard")
+    .title({
+      main: `WireGuard：${this.vm.configName}`,
+      sub: this.subTitle,
+    })
     .onReady((data) => {
       if (data.pathStack instanceof NavPathStack) {
         this.vm.nav = data.pathStack
@@ -80,7 +101,7 @@ export default struct WGConfigPreView {
   @Param @Require vm: WGConfigPreViewModel;
 
   build() {
-    List({ space: '32vp' }) {
+    List({ space: '16vp' }) {
       ListItem() {
         InterfaceCardView({ vm: this.vm, data: this.vm.client })
       }
@@ -273,3 +294,116 @@ struct PeerCardView {
     .cardBackgroundStyle()
   }
 }
+
+
+@ComponentV2
+struct SwiperTitleLineView {
+  @Param leftTag?: string = undefined
+  @Param rightTag?: string = undefined
+  @BuilderParam childView: () => void
+
+  build() {
+    Column() {
+      Row() {
+        if (this.leftTag) {
+          Row() {
+            SymbolGlyph($r('sys.symbol.left_turn'))
+              .fontColor([$r('app.color.symbol_color')])
+            Text(this.leftTag)
+          }
+        }
+        Blank().layoutWeight(1)
+        if (this.rightTag) {
+          Row() {
+            Text(this.rightTag)
+            SymbolGlyph($r('sys.symbol.right_turn'))
+              .fontColor([$r('app.color.symbol_color')])
+          }
+        }
+      }
+      .width('100%')
+      .padding({
+        left: '16vp',
+        right: '16vp',
+        top: '8vp',
+        bottom: '8vp',
+      })
+      .layoutWeight(0)
+
+      Row() {
+        this.childView()
+      }
+      .width('100%')
+      .height('100%')
+      .layoutWeight(1)
+    }
+  }
+}
+
+const date_format = new Intl.DateTimeFormat('zh-CN', {
+});
+
+/**
+ * 预览配置界面的 Stream 流 日志
+ */
+@ComponentV2
+export struct WGConfigPreViewStreamLogView {
+  @Param @Require vm: WGConfigPreViewModel;
+
+  listener = WireGuard.event.subscribeVpnStreamLogs((log) => {
+    this.vm.logData.logs.unshift(log);
+  })
+
+  aboutToDisappear(): void {
+    this.listener.cancel()
+  }
+
+  build() {
+    Column() {
+      List() {
+        Repeat(this.vm.logData.logs)
+          .each((item) => {
+            this.buildRow(item.item)
+          })
+          .virtualScroll({ totalCount: this.vm.logData.logs.length })
+      }
+      .width('100%')
+      .height('100%')
+      .layoutWeight(1)
+
+      Row() {
+        Text(`总数：${this.vm.logData.logs.length}`)
+      }
+      .width('100%')
+      .layoutWeight(0)
+    }
+    .width('100%')
+    .height('100%')
+  }
+
+  @Builder
+  buildRow(log: StreamLogMessage) {
+    Row({ space: '8vp' }) {
+      Text(`${Timestamp.from(log.timestamp).format('yyyy-MM-dd HH:mm:ss SSS')}`).layoutWeight(0)
+      Text(`${log.peerIndex + 1}`).layoutWeight(0)
+      Text(`${this.getMessageTypeString(log.messageType)}`).layoutWeight(0)
+      Text(`${log.direction == StreamDirection.RECEIVE ? "接收" : "发送"}`).layoutWeight(0)
+    }
+  }
+
+  getMessageTypeString(type: MessageType): string {
+    switch (type) {
+      case MessageType.HANDSHAKE_INITIATION:
+        return "握手初始化"
+      case MessageType.HANDSHAKE_RESPONSE:
+        return "握手响应"
+      case MessageType.HANDSHAKE_COOKIE:
+        return "Cookie"
+      case MessageType.DATA:
+        return "数据"
+      default:
+        return "未知数据"
+    }
+  }
+}
+

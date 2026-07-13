@@ -7,6 +7,10 @@
     {
       "name": "wg_new_card_item_select_color",
       "value": "#FF345FDE"
+    },
+    {
+      "name": "symbol_color",
+      "value": "#fff"
     }
   ]
 }

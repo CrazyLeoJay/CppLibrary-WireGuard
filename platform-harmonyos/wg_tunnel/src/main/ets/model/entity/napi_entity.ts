@@ -120,7 +120,81 @@ export enum MessageType {
   DATA = 4
 }
 
+export class Timestamp extends Number {
+  constructor(value: number) {
+    super(value);
+  }
+
+  static from(value: number | Timestamp): Timestamp {
+    if (value instanceof Timestamp) {
+      return value;
+    }
+    return new Timestamp(value);
+  }
+
+  getFullYear(): number {
+    return new Date(this.valueOf()).getFullYear();
+  }
+
+  getMonth(): number {
+    return new Date(this.valueOf()).getMonth() + 1;
+  }
+
+  getDate(): number {
+    return new Date(this.valueOf()).getDate();
+  }
+
+  getHours(): number {
+    return new Date(this.valueOf()).getHours();
+  }
+
+  getMinutes(): number {
+    return new Date(this.valueOf()).getMinutes();
+  }
+
+  getSeconds(): number {
+    return new Date(this.valueOf()).getSeconds();
+  }
+
+  getMilliseconds(): number {
+    return new Date(this.valueOf()).getMilliseconds();
+  }
+
+  format(pattern: string = 'yyyy-MM-dd HH:mm:ss:SSS'): string {
+    const date = new Date(this.valueOf());
+    const year = date.getFullYear().toString();
+    const month = this.pad(date.getMonth() + 1);
+    const day = this.pad(date.getDate());
+    const hours = this.pad(date.getHours());
+    const minutes = this.pad(date.getMinutes());
+    const seconds = this.pad(date.getSeconds());
+    const ms = this.pad(date.getMilliseconds(), 3);
+
+    return pattern
+      .replace('yyyy', year)
+      .replace('MM', month)
+      .replace('dd', day)
+      .replace('HH', hours)
+      .replace('mm', minutes)
+      .replace('ss', seconds)
+      .replace('SSS', ms);
+  }
+
+  toString(): string {
+    return this.format();
+  }
+
+  toLocaleString(): string {
+    return new Date(this.valueOf()).toLocaleString();
+  }
+
+  private pad(num: number, length: number = 2): string {
+    return num.toString().padStart(length, '0');
+  }
+}
+
 export interface StreamLogMessage {
+  timestamp: number,
   publicKey: string; // 使用PublicKey作为主键
   peerIndex: number; // 顺序索引
   messageType: MessageType; // 数据类型
@@ -129,4 +203,3 @@ export interface StreamLogMessage {
   success: boolean;
   msg: string;
 }
-;
