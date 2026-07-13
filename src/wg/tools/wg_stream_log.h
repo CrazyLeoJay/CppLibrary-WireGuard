@@ -57,6 +57,7 @@ namespace WireGuard {
         };
 
         struct Message {
+            TimePoint timestamp; // 时间戳
             PublicKey publicKey; // 使用PublicKey作为主键
             size_t peerIndex; // 顺序索引
             MessageType messageType; // 数据类型
