@@ -85,7 +85,11 @@ namespace WireGuard {
     }
 
     void Device::setStreamLog(const StreamLog::StreamLogPrint &listener) {
-        this->streamLog = listener;
+        if (!listener) {
+            LOG_WARN("setStreamLog: listener 为空可调用对象，保持默认");
+            return;
+        }
+        streamLog = listener;
     }
 
     void Device::close() {
@@ -283,7 +287,9 @@ namespace WireGuard {
     }
 
     void WireGuard::Device::socketNewFd(int _socketFd) {
-        this->onSocketFDChange(_socketFd);
+        if (onSocketFDChange) {
+            this->onSocketFDChange(_socketFd);
+        }
         // 通知去握手
     }
 
@@ -703,8 +709,9 @@ namespace WireGuard {
             throw WGException("发送cookie挑战失败");
         }
         // 发送数据流日志
-        printStreamLog(_receiverIndexPeers[msg.senderIndex], MessageType::HANDSHAKE_COOKIE, StreamLog::SEND,
-                       sizeof(cookieMsg));
+        auto it = _receiverIndexPeers.find(msg.senderIndex);
+        const std::shared_ptr<Peer> peer = (it != _receiverIndexPeers.end()) ? it->second : nullptr;
+        printStreamLog(peer, MessageType::HANDSHAKE_COOKIE, StreamLog::SEND, sizeof(cookieMsg));
     }
 
     void Device::encryptPacketAndSendSocket(const std::shared_ptr<Peer> &peer, const uint8_t *data,
@@ -807,10 +814,18 @@ namespace WireGuard {
 
     void Device::printStreamLog(const std::shared_ptr<Peer> &peer, const MessageType type,
                                 const StreamLog::StreamDirection direction, const size_t len) const {
+        if (!peer) {
+            LOG_WARN("printStreamLog: peer 为空，跳过日志");
+            return;
+        }
+        if (!streamLog) {
+            return;
+        }
         const auto rx = peer->getRxBytes(); // 接收总量
         const auto tx = peer->getTxBytes(); // 发送总量
+        const auto now = Clock::now();
         try {
-            streamLog({peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, true, "成功发送"});
+            streamLog({now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, true, "成功发送"});
         } catch (const std::exception &e) {
             LOG_WARN("[%s] 日志输出异常： %s", LOG_TAG, e.what());
         }
@@ -819,10 +834,15 @@ namespace WireGuard {
     void Device::printStreamLogThrow(const std::shared_ptr<Peer> &peer, const MessageType type,
                                      const StreamLog::StreamDirection direction, const size_t len,
                                      const std::string &message) const {
+        if (!peer) {
+            LOG_WARN("printStreamLogThrow: peer 为空，跳过日志");
+            return;
+        }
         const auto rx = peer->getRxBytes(); // 接收总量
         const auto tx = peer->getTxBytes(); // 发送总量
+        const auto now = Clock::now();
         try {
-            streamLog({peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, false, message});
+            streamLog({now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, false, message});
         } catch (const std::exception &e) {
             LOG_WARN("[%s] 日志输出异常： %s", LOG_TAG, e.what());
         }
