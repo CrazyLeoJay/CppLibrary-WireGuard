@@ -141,8 +141,8 @@ namespace WireGuard {
     };
 
     enum PacketIpType : uint32_t {
-        IPV4 = 0,
-        IPV6 = 0,
+        IPV4 = 4,
+        IPV6 = 6,
     };
 
 
