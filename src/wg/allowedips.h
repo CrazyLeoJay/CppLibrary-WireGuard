@@ -58,6 +58,16 @@ namespace WireGuard {
 
 
         /**
+         * 将 IP 地址按 CIDR 掩码进行处理，只保留网络位
+         *
+         * @param ip 输入的 IP 地址字节数组（网络字节序）
+         * @param ipLen IP 地址长度（IPv4=4, IPv6=16）
+         * @param cidr 前缀长度
+         * @param result 输出的掩码后的 IP 地址（长度必须 >= ipLen）
+         */
+        void applyMask(const uint8_t *ip, size_t ipLen, uint32_t cidr, uint8_t *result);
+
+        /**
          * 给 根索引添加 节点
          *
          * @param root  要操作的索引

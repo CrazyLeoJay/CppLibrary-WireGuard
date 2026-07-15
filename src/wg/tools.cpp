@@ -125,37 +125,53 @@ namespace WireGuard {
         }
 
 
+        /**
+         * @brief 从 IP 数据包中解析源地址和目的地址
+         *
+         * 支持 IPv4 和 IPv6 协议：
+         * - IPv4 头部最小 20 字节，版本号为 4
+         * - IPv6 头部固定 40 字节，版本号为 6
+         *
+         * 解析逻辑：
+         * 1. 根据第一个字节的高 4 位判断 IP 版本
+         * 2. IPv4：从头部提取源 IP（偏移 12）和目的 IP（偏移 16）
+         * 3. IPv6：从头部提取源 IP（偏移 8）和目的 IP（偏移 24）
+         *
+         * @param p 数据包指针
+         * @param len 数据包长度
+         * @return PacketHeader 结构体，包含源端点和目的端点
+         * @throw WGException 如果数据包不合法或不完整
+         */
         PacketHeader readPacketEndpoint(const uint8_t *p, const size_t len) {
             uint8_t ver = (p[0] >> 4) & 0x0F;
             PacketHeader ph{};
             if (ver == 4) {
-                // ipv4 头最小20
                 if (len < IPv4HeaderLen) {
                     throw WGException("不是合法的Ipv4包");
                 }
-                // 获取从第2字节开始的两个字节，作为 uint16_t（小端）
+
                 const uint16_t field = *reinterpret_cast<const uint16_t *>(p + IPv4offsetTotalLength);
                 const uint16_t length = ntohs(field);
                 if (length > len || length < IPv4HeaderLen) {
-                    throw WGException("Ipv4包不完整， 数据长度大于数据包总大小，或者小于20。len=%d", length);
+                    throw WGException("Ipv4包不完整，数据长度大于数据包总大小或小于最小头部长度。len=%d", length);
                 }
+
                 const uint32_t srcIp = *reinterpret_cast<const uint32_t *>(p + IPv4offsetSrc);
                 const uint32_t dstIp = *reinterpret_cast<const uint32_t *>(p + IPv4offsetDst);
-                // 这里保存的是小端序
                 ph.src.address.ip.ipv4 = srcIp;
                 ph.dst.address.ip.ipv4 = dstIp;
                 ph.src.address.family = IPAddress::IPv4;
                 ph.dst.address.family = IPAddress::IPv4;
                 return ph;
             } else if (ver == 6) {
-                if (len <= (sizeof(IPv6Hdr))) {
+                if (len < sizeof(IPv6Hdr)) {
                     throw WGException("不是合法的Ipv6包");
                 }
 
                 const uint16_t field = *reinterpret_cast<const uint16_t *>(p + IPv6offsetPayloadLength);
                 const uint16_t length = ntohs(field);
                 if (length > len) {
-                    throw WGException("Ipv6包不完整， 数据长度大于数据包总大小。len=%d", length);
+                    throw WGException("Ipv6包不完整，数据长度大于数据包总大小。len=%d", length);
                 }
 
                 std::memcpy(ph.src.address.ip.ipv6, p + IPv6offsetSrc, 16);
