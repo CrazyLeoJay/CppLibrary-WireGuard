@@ -13,6 +13,7 @@ add_executable(test_main test_main.cpp
         test_params.h
         test_dns.cpp
         test_cookie.cpp
+        test_allowedips.cpp
         socket/test_server.cpp
 )
 

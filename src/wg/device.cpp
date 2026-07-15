@@ -189,7 +189,7 @@ namespace WireGuard {
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 一般是创建的太频繁，这里等2秒再循环 或者直接调用握手
-                            LOG_WARN("心跳发送握手失败 peerIndex=%zu err=%{public}s，2秒后重试", peer->getIndex(), e.what());
+                            LOG_WARN("发送握手初始化失败 peerIndex=%{public}zu err=%{public}s，2秒后重试", peer->getIndex(), e.what());
                             nextSleepDuration = std::chrono::seconds(2);
                         }
                     } else {
@@ -198,7 +198,7 @@ namespace WireGuard {
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 如果发送发生异常，就设置一个小的等待时间，再次尝试
-                            LOG_WARN("心跳发送数据包失败 peerIndex=%zu err=%{public}s，1秒后重试", peer->getIndex(), e.what());
+                            LOG_WARN("心跳发送数据包失败 peerIndex=%{public}zu err=%{public}s，1秒后重试", peer->getIndex(), e.what());
                             nextSleepDuration = std::chrono::seconds(1);
                         }
                     }

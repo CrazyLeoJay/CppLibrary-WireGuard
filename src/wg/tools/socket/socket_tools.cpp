@@ -139,7 +139,7 @@ namespace WireGuard {
             std::memcpy(&addr.sin6_addr, endpoint.address.ip.ipv6, 16);
             ret = sendto(_fd.load(), buf, len, 0, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_in6));
         } else {
-            throw WGException("特殊数据类型，ipv?");
+            throw WGException("特殊数据类型，ipv? type=%d family=%d", type, endpoint.address.family);
         }
         if (ret != len) {
             std::string error;

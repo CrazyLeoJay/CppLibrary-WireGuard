@@ -87,13 +87,15 @@ namespace WireGuard {
         for (IpAddressArea item: allowedIps) {
             if (item.address.family == IPAddress::IPv4) {
                 LOG_INFO("ip bin: %{public}s", item.address.toIpHex().c_str());
-                const uint32_t cidr = item.cidr > 0 ? item.cidr : (4 * 8);
+                // CIDR=255（uint8_t -1）表示未设置掩码，使用默认值 /32
+                const uint32_t cidr = item.cidr != 255 ? item.cidr : (4 * 8);
                 uint8_t maskedIp[4];
                 applyMask(reinterpret_cast<const uint8_t *>(&item.address.ip.ipv4), 4, cidr, maskedIp);
                 LOG_INFO("ip bin ipBytes: %{public}s", crypto::bin2Hex(maskedIp, 4).c_str());
                 insertTrieNode(ipv4Root, maskedIp, sizeof(uint32_t), cidr, peer);
             } else {
-                const uint32_t cidr = item.cidr > 0 ? item.cidr : (16 * 8);
+                // CIDR=255（uint8_t -1）表示未设置掩码，使用默认值 /128
+                const uint32_t cidr = item.cidr != 255 ? item.cidr : (16 * 8);
                 uint8_t maskedIp[16];
                 applyMask(item.address.ip.ipv6, 16, cidr, maskedIp);
                 insertTrieNode(ipv6Root, maskedIp, 16, cidr, peer);
@@ -170,6 +172,14 @@ namespace WireGuard {
             return;
         }
 
+        // 默认路由（CIDR=0）匹配所有 IP，直接设置在根节点上
+        if (cidr == 0) {
+            index->peer = peer;
+            index->cidr = 0;
+            index->bits.assign(ip, ip + ipLen);
+            return;
+        }
+
         // 如果当前节点不是根节点，检查是否与待插入 IP 完全匹配
         if (!index->isRoot()) {
             if (index->cidr == cidr && index->bits.size() == ipLen) {
@@ -213,7 +223,7 @@ namespace WireGuard {
 
         // 子节点不存在，直接挂载
         if (!next) {
-            index->child[index->chooseBit(ip, ipLen)] = std::move(newNode);
+            index->child[nextNodeIndex] = std::move(newNode);
             return;
         }
 
@@ -236,11 +246,11 @@ namespace WireGuard {
             intermediate->child[newBit] = std::move(newNode);
 
             // 将中间节点挂载到当前节点
-            index->child[index->chooseBit(intermediate->bits.data(), ipLen)] = std::move(intermediate);
+            index->child[nextNodeIndex] = std::move(intermediate);
         } else if (common >= newNode->cidr && Tools::IP::prefixMatches(next.get(), ip)) {
             // 情况2：新节点是现有子节点的父节点，将子节点挂到新节点下
             newNode->child[newNode->chooseBit(next->bits.data(), next->bits.size())] = std::move(next);
-            index->child[index->chooseBit(ip, ipLen)] = std::move(newNode);
+            index->child[nextNodeIndex] = std::move(newNode);
         } else {
             // 情况3：新节点应该插入到现有子节点的子树中，递归处理
             insertTrieNode(next, ip, ipLen, cidr, peer);
@@ -286,7 +296,11 @@ namespace WireGuard {
         }
 
         // 子节点没有匹配，检查当前节点
+        // 根节点如果设置了 peer（默认路由 CIDR=0），则作为最后兜底返回
         if (index->isRoot()) {
+            if (index->peer.lock()) {
+                return index->peer.lock();
+            }
             return nullptr;
         }
 

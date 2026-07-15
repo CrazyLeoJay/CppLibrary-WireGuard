@@ -5,9 +5,7 @@ set(CMAKE_CXX_STANDARD 14)
 include(FetchContent)
 FetchContent_Declare(
         fmt
-        GIT_REPOSITORY https://github.com/fmtlib/fmt.git
-        #        GIT_TAG        10.0.0 # 建议指定一个稳定版本
-        GIT_TAG        12.1.0 # 建议指定一个稳定版本
+        URL https://github.com/fmtlib/fmt/archive/refs/tags/12.1.0.zip
 )
 FetchContent_MakeAvailable(fmt)
 

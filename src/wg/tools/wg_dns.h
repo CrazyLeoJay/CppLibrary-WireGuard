@@ -30,8 +30,8 @@
 namespace WireGuard {
     namespace DNS {
         enum IPType {
-            IPV4,
-            IPV6
+            IPV4=4,
+            IPV6=6,
         };
 
         /**
