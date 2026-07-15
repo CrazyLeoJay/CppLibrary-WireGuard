@@ -35,6 +35,11 @@ namespace WireGuard {
         constexpr size_t WG_KEY_LEN = 32;
         using WGKey = std::array<uint8_t, WG_KEY_LEN>;
 
+        enum SiteUrlType {
+            ERROR = 0,
+            IPv4 = 1, IPv6 = 2, Domain = 3,
+        };
+
         /**
          * 网络站点地址，需要ip或者域名和端口
          * 主要表达可以访问的地址
@@ -43,6 +48,7 @@ namespace WireGuard {
         struct WebSitePoint {
             std::string ipStrOrDomain; // ip地址或者域名
             uint32_t port; // 远程端口，没有默认80
+            SiteUrlType type{ERROR};
         };
 
         struct WGConfInterface {
@@ -81,11 +87,31 @@ namespace WireGuard {
         };
 
         bool isIPv4(const std::string &str);
+
         bool isIPv6(const std::string &str);
+
         bool isValidIPAddress(const std::string &str);
+
         bool isValidDomain(const std::string &str);
+
         bool isValidBase64Key(const std::string &str);
 
+        IPAddress ipAddressForIpv4(const std::string &ipStr);
+
+        IPAddress ipAddressForIpv6(const std::string &ipStr);
+
+        /**
+         * 根据输入的域名或IP字符串（可附带端口）解析出 WebSitePoint
+         * 支持格式：
+         *   - IPv4: 192.168.1.1 或 192.168.1.1:51820
+         *   - 域名: your.server.com 或 your.server.com:51820
+         *   - IPv6(标准方括号): [2001:db8::1] 或 [2001:db8::1]:51820
+         *   - IPv6(无括号启发式): 2001:db8::1:51820 / 2001:db8::1
+         *
+         * @param endpointStr endpoint字符串，如 "192.168.1.1:51820"、"[::1]:8080"
+         * @return 解析后的 WebSitePoint，无端口默认 80
+         */
+        WebSitePoint endpointForDomainOrIpStr(const std::string &endpointStr);
 
         /**
          * 解析WireGuard 的 conf 文件内容，解析成实实体

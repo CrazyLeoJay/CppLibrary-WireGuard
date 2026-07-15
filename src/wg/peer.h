@@ -45,11 +45,12 @@ namespace WireGuard {
      */
     class Peer final {
     public:
-        Peer(const ContentKey &content_key, const PeerConfig &config);
+        Peer(size_t index, const ContentKey &content_key, const PeerConfig &config);
 
         ~Peer();
 
     protected:
+        const size_t index;
         const ContentKey &content_key;
         const PeerConfig &config;
 
@@ -85,6 +86,9 @@ namespace WireGuard {
         std::queue<std::vector<uint8_t> > stagedPackets_; // 等待握手完成后发送的数据包队列
 
     public:
+        /**
+         * 初始化参数
+         */
         void init();
 
         // 发送端
@@ -133,6 +137,7 @@ namespace WireGuard {
 
     public:
         PublicKey getPublicKey() const { return config.public_key; }
+        size_t getIndex() const { return index; }
 
         std::vector<IpAddressArea> getAllowedIps() const { return config.allowedIps; }
 
@@ -314,7 +319,13 @@ namespace WireGuard {
          */
         std::queue<std::vector<uint8_t> > consumeStagedPackets();
 
-        void clear();
+        /**
+         * 判断当前Peer是否活跃
+         * 如果长达2分钟没有收到对端消息，就判定为不活跃。可能已经中断连接
+         *
+         * @return 是否活跃
+         */
+        bool isActive() const;
     };
 
 

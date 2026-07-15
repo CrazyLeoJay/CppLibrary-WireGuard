@@ -26,16 +26,16 @@
 #include "allowedips.h"
 #include "entity.h"
 #include "pipwait.h"
-#include "udp_socket.h"
 #include <random>
 #include <thread>
 #include <unordered_map>
 
 #include "cookie.h"
 #include "version.h"
+#include "tools/wg_stream_log.h"
+#include "tools/socket/socket_tools.h"
 
 namespace WireGuard {
-
     /**
      * 由于Wireguard的设计是端对端，所以无论是服务端还是客户端，都有发起握手的权力，
      * 那么，实际上，我需要处理两种情况，需要根据实际情况判断当前端是 发送端 还是 接收端
@@ -55,7 +55,7 @@ namespace WireGuard {
 
         const ContentKey content_key_;
         const DeviceConfig config;
-        UDPSocket socket{};
+        UDPSocket socket{DNS::IPV6};
         AllowedIPs allowedIps{};
 
         // ============ Peer 管理 ===============
@@ -88,11 +88,21 @@ namespace WireGuard {
         bool enableCookie{false}; // 是否开启 cookie 挑战
         CookieChecker cookieChecker{content_key_};
 
+        // =============== 日志打印 ===============
+        StreamLog::StreamLogPrint streamLog {
+            [](StreamLog::Message msg) {
+                // const auto direction = msg.direction == WireGuard::StreamLog::RECEIVE ? "接收" : "发送";
+                // LOG_INFO("Device in [streamLog]：peerIndex=%d, 方向=%s 数据量=%zu", static_cast<int>(msg.peerIndex),
+                //          direction,
+                //          msg.sc.length);
+            }
+        };
+
     public: // 对外操作方法
         /**
          * 创建Socket服务，并且绑定本地端口，返回socket套接字
          */
-        uint32_t initSocket(const std::function<void(int &)> &onSocketFDChange);
+        uint32_t initSocketStart(const std::function<void(int &)> &onSocketFDChange);
 
         /**
          * 启动轮询任务，读写数据包
@@ -101,6 +111,12 @@ namespace WireGuard {
          */
         void start(const uint32_t &tunFd);
 
+        /**
+         * 设置流监听
+         *
+         * @param listener stream 流监听
+         */
+        void setStreamLog(const StreamLog::StreamLogPrint &listener);
 
         /**
          * 停止并清除资源，close 后需要重新初始化
@@ -194,6 +210,12 @@ namespace WireGuard {
          */
         void handleData(const char *data, const size_t &len, const Endpoint &endpoint);
 
+        /**
+         * _receiverIndexPeers和_keypairIndexPeers清理
+         * 在心跳轮询时调用，用于检查索引是否过期，防止内存溢出
+         */
+        void indexMapClear();
+
     private: // 协议相关主动操作
         void sendInitiation(const std::shared_ptr<Peer> &peer, const bool &force = false);
 
@@ -261,6 +283,19 @@ namespace WireGuard {
          * 写数据到本地（网卡或者代理）
          */
         void sendToLocal(const uint8_t *data, size_t len) const;
+
+        void printStreamLog(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len) const;
+
+        /**
+         * 异常打印
+         *
+         * @param peer
+         * @param type
+         * @param direction
+         * @param len
+         * @param message
+         */
+        void printStreamLogThrow(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len, const std::string &message = "") const;
     };
 }; // namespace WireGuard
 #endif // WIREGUARD_DEVICE_H

@@ -15,26 +15,14 @@
  */
 
 /**
- * Created by Leojay on 2026/4/22.
+ * Created by Leojay on 2026/7/11.
  *
  * @author leojay`fu
  * @email crazyleojay@163.com
  * @url https://github.com/CrazyLeoJay
  */
-#include "gtest/gtest.h"
-#include "tools/wg_dns.h"
 
+#include "wg_stream_log.h"
 
-void printIps(const std::string &domain) {
-    const std::vector<WireGuard::IPAddress> allResult = WireGuard::DNS::readDomainToIpAll(domain);
-    LOG_INFO("%s : ", domain.c_str());
-    for (auto ip_address: allResult) {
-        LOG_INFO("\t\tIP：%s", ip_address.toIpStr().c_str());
-    }
-}
-
-TEST(DNS, testDomainToIp) {
-    printIps("www.baidu.com");
-    printIps("www.google.com");
-    printIps("leojay.synology.me");
-}
+namespace WireGuard {
+} // WireGuard

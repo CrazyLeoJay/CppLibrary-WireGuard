@@ -25,9 +25,10 @@
 #include "WGException.h"
 
 namespace WireGuard {
-    Peer::Peer(const ContentKey &content_key, const PeerConfig &config)
-        : content_key(content_key), config(config), endpoint(config.endpoint) {
+    Peer::Peer(size_t index, const ContentKey &content_key, const PeerConfig &config)
+        : index(index), content_key(content_key), config(config), endpoint(config.endpoint) {
     }
+
 
     Peer::~Peer() = default;
 
@@ -140,8 +141,10 @@ namespace WireGuard {
         return result;
     }
 
-    void Peer::clear() {
+    bool Peer::isActive() const {
+        return Clock::now() - lastDataReceived_ <= std::chrono::minutes(2);
     }
+
 
     void Peer::init() {
         if (std::all_of(content_key.local_private_key.begin(), content_key.local_private_key.end(), [](uint8_t it) {
