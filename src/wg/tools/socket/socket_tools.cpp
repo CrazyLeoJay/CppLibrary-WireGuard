@@ -37,7 +37,8 @@ namespace WireGuard {
         close();
     }
 
-    int UDPSocket::initSocketStart(const std::shared_ptr<uint32_t> &port, const std::shared_ptr<IPAddress> &bindAddress) {
+    int UDPSocket::initSocketStart(const std::shared_ptr<uint32_t> &port,
+                                   const std::shared_ptr<IPAddress> &bindAddress) {
         _port = port;
         _bind_address = bindAddress;
 
@@ -123,14 +124,14 @@ namespace WireGuard {
         }
 
         ssize_t ret;
-        if (type == DNS::IPV4 && endpoint.address.family == IPAddress::IPv4) {
+        if (endpoint.address.family == IPAddress::IPv4) {
             sockaddr_in addr{};
             memset(&addr, 0, sizeof(addr)); // 清零
             addr.sin_family = AF_INET;
             addr.sin_port = htons(endpoint.port);
             addr.sin_addr.s_addr = endpoint.address.ip.ipv4;
             ret = sendto(_fd.load(), buf, len, 0, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_in));
-        } else if (type == DNS::IPV6 && endpoint.address.family == IPAddress::IPv6) {
+        } else if (endpoint.address.family == IPAddress::IPv6) {
             // IPv6 支持
             sockaddr_in6 addr{};
             memset(&addr, 0, sizeof(addr)); // 清零
