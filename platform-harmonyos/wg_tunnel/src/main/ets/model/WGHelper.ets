@@ -154,22 +154,22 @@ export namespace WireGuard {
         parameters: {
           id: id,
           config: vpnConf,
-        }
+        },
       })
+        // .catch((e: BusinessError) => {
+        //   // switch (e.code) {
+        //   //   case 15501001:
+        //   //     LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
+        //   //   case 201:
+        //   //     LLog.warn(TAG, { error: e, message: "未授权！" })
+        //   //   default:
+        //   //     LLog.warn(TAG, e)
+        //   // }
+        //   throw new WGAppException({ e: e, message: "VPN启动异常" });
+        // })
         .then(() => {
           LLog.info(TAG, "vpn start notify")
           // statusConfig.setRunningServer(id)
-        })
-        .catch((e: BusinessError) => {
-          switch (e.code) {
-            case 15501001:
-              LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
-            case 201:
-              LLog.warn(TAG, { error: e, message: "未授权！" })
-            default:
-              LLog.warn(TAG, e)
-          }
-          throw new WGAppException({ e: e, message: "VPN启动异常" });
         })
     } else {
       await vpnExtension.stopVpnExtensionAbility({

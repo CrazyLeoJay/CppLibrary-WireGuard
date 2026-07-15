@@ -18,6 +18,7 @@ import { LLog, StreamLogMessage, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
 import VPNEventStatusParams from './entity/VPNEventStatusParams';
 import WGTools from './WGTools';
+import { WGEventThrow, WGEventThrowForString, WGEventThrowParam, WGEventThrowToString } from '../error/WGEventThrow';
 
 /**
  * WireGuard 事件发布
@@ -112,13 +113,17 @@ export class WGSystemEventDef {
     return sub;
   }
 
-  publishVpnThrow(msg?: string) {
-    this.publish(VPN_START_ERROR, msg)
+  publishVpnThrow(msg?: WGEventThrowParam) {
+    this.publish(VPN_START_ERROR, WGEventThrowToString(msg))
   }
 
-  subscribeVpnThrow(invoke: (msg?: string) => void): SubEventCancel {
+  subscribeVpnThrow(invoke: (param: WGEventThrow) => void): SubEventCancel {
     return this.subscribe(VPN_START_ERROR, (data) => {
-      invoke(data.data)
+      if (data.data) {
+        invoke(WGEventThrowForString(data.data))
+      } else {
+        invoke({ type: 'none', message: "为获取到异常数据，需要核查" })
+      }
     })
   }
 
@@ -126,7 +131,6 @@ export class WGSystemEventDef {
     params.status = WireGuard.statusConfig.getConfig()
     this.publish(VPN_STATUS_CHANGE, JSON.stringify(params))
   }
-
 
   subscribeVpnChange(paramsInvoke: (result: VPNEventStatusParams) => void): SubEventCancel {
     return this.subscribe(VPN_STATUS_CHANGE, (data) => {

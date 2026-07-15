@@ -19,6 +19,8 @@ export * from './src/main/ets/model/WGConfig';
 export * from './src/main/ets/model/WGEvent';
 export * from './src/main/ets/model/WGTools';
 export * from './src/main/ets/tools/LLog';
+export * from './src/main/ets/error/WGAppException';
+export * from './src/main/ets/error/WGEventThrow';
 export { default as Tools } from './src/main/ets/tools/tools';
 export * from './src/main/ets/tools/http';
 export * from './src/main/ets/model/entity/napi_entity';

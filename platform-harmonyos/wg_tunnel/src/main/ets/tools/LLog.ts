@@ -23,28 +23,31 @@ class LogImpl {
   defaultPrefix: string = "app:"
 
   private p2s(msg: ErrorParams): string {
-    if (typeof msg === 'string') {
-      return msg
-    } else if ('error' in msg && 'message' in msg) {
-      if (msg.message) {
-        if ('message' in msg.error || `code` in msg.error || 'stack' in msg.error) {
-          return `ERROR(group):${msg.message}\nERROR(${msg.error.code}):${msg.error.message}\n${msg.error.stack}`
-        } else {
-          return `ERROR(group):${msg.message}\nERROR:${msg.error}}`
-        }
-      } else {
-        if (msg.error instanceof Error) {
-          return `ERROR(group):${msg.error.message}\n${msg.error.stack}`
-        } else {
-          return `ERROR(group):${msg.error}}`
-        }
-      }
-    } else if (msg instanceof Error || ('name' in msg && 'message' in msg && 'stack' in msg)) {
-      if (msg instanceof Error) {
+    try {
+      if (typeof msg === 'string') {
+        return msg
+      } else if (msg instanceof Error || ('name' in msg && 'message' in msg && 'stack' in msg)) {
         return `ERROR:${msg.message}\n${msg.stack}`
+      } else if ('error' in msg) {
+        const error = msg.error
+        if (error === null || error === undefined) {
+          return `ERROR(group):${msg.message ?? 'unknown'}\nERROR:null`
+        }
+        if (error instanceof Error || ('message' in error && 'stack' in error)) {
+          const code = 'code' in error ? error.code : 'unknown'
+          return `ERROR(group):${msg.message ?? 'unknown'}\nERROR(${code}):${error.message}\n${error.stack}`
+        } else if (typeof error === 'object') {
+          return `ERROR(group):${msg.message ?? 'unknown'}\nERROR:${JSON.stringify(error)}`
+        } else {
+          return `ERROR(group):${msg.message ?? 'unknown'}\nERROR:${String(error)}`
+        }
+      } else if (typeof msg === 'object') {
+        return JSON.stringify(msg)
       } else {
-        return `ERROR:${msg.error}}`
+        return String(msg)
       }
+    } catch (e) {
+      return `ERROR(unknown):${String(msg)}`
     }
   }
 

@@ -19,6 +19,7 @@ import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
 import { AppStorageV2 } from '@kit.ArkUI';
+import { common } from '@kit.AbilityKit';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
@@ -34,6 +35,10 @@ export default class WGConfigPreViewModel {
    */
   @Trace isVpnOpen: boolean = false;
   @Trace logData: WGStreamLogsData = AppStorageV2.connect(WGStreamLogsData, () => new WGStreamLogsData())!
+  /**
+   * 是否发生为获取参数异常
+   */
+  @Trace isVPNNoGetParamThrow:boolean = false;
 
   constructor() {
     this.updateStatus();
@@ -104,6 +109,8 @@ export default class WGConfigPreViewModel {
    * 改变Vpn配置，启动或停止
    */
   async changeVpnConfig(context: UIContext, isOn: boolean) {
+    // 当点击启动按钮时，需要设置异常标记为false
+    this.isVPNNoGetParamThrow = false;
     try {
       const id = this.params!.id;
       const config = this.data!;
@@ -130,7 +137,7 @@ export default class WGConfigPreViewModel {
       // }
     } catch (e) {
       this.isVpnOpen = false;
-      context.getPromptAction().showToast({ message: `VPN开启失败：${e}}` })
+      context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
       LLog.error(TAG, { error: e, message: "开启VPN异常" });
     }
   }
@@ -140,4 +147,38 @@ export default class WGConfigPreViewModel {
 @ObservedV2
 export class WGStreamLogsData {
   @Trace logs: StreamLogMessage[] = []
+}
+
+export interface IconBtnParam {
+  tag: string
+  res: Resource
+}
+
+@ObservedV2
+export class IconSwitchBtnParam {
+  @Trace on: boolean = false
+  onParam: IconBtnParam
+  offParam: IconBtnParam
+  onChange?: (on: boolean) => void
+
+  constructor(on: boolean, onParam: IconBtnParam, offParam: IconBtnParam, onChange?: (on: boolean) => void) {
+    this.on = on
+    this.onParam = onParam
+    this.offParam = offParam
+    this.onChange = onChange
+  }
+
+  @Computed
+  get param(): IconBtnParam {
+    if (this.on) {
+      return this.onParam
+    } else {
+      return this.offParam;
+    }
+  }
+
+  @Monitor('on')
+  changeListener() {
+    this.onChange?.(this.on)
+  }
 }
