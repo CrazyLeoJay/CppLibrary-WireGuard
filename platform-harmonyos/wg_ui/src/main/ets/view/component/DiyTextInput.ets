@@ -64,7 +64,7 @@ export struct DiyTextInput {
         if (this.inputEnable) {
           TextInput({
             text: this.isInput ? `${this.inputValue}` : undefined,
-            placeholder: !this.isSmailTag ? null : this.placeholder
+            placeholder: !this.isSmailTag ? null : this.placeholder,
           })
             .id(this.inputId)
             .inputStyle()

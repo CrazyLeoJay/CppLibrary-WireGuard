@@ -14,13 +14,23 @@
  * limitations under the License.
  *
  */
-import { ConnectState, WGConfPeer, WGDBConf } from 'wg_tunnel';
+import {
+  MessageType,
+  SiteUrlType,
+  StreamDirection,
+  StreamLogMessage,
+  Timestamp,
+  WGConfPeer,
+  WGDBConf,
+  WGEventThrow
+} from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import WGConfigPreViewModel from '../view_model/WGConfigPreViewModel';
+import WGConfigPreViewModel, { IconSwitchBtnParam } from '../view_model/WGConfigPreViewModel';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { WireGuardNav } from '../../../../Index';
+import { SubEventCancel } from 'wg_tunnel/src/main/ets/model/WGEvent';
 
 const TAG = "配置预览"
 
@@ -33,17 +43,41 @@ function WGConfigPreViewBuilder() {
 @ComponentV2
 export struct WGConfigPreViewNavDest {
   @Local vm: WGConfigPreViewModel = new WGConfigPreViewModel();
+  @Local subTitle: string = "配置预览"
 
   aboutToAppear(): void {
-
   }
 
   build() {
     NavDestination() {
       WGConfigPreView({ vm: this.vm })
+
+      // Swiper() {
+      //   SwiperTitleLineView({
+      //     rightTag: "左滑查看日志"
+      //   }) {
+      //     WGConfigPreView({ vm: this.vm })
+      //   }
+      //
+      //   SwiperTitleLineView({
+      //     leftTag: "右滑回到主页"
+      //   }) {
+      //     WGConfigPreViewStreamLogView({ vm: this.vm })
+      //   }
+      // }
+      // .loop(false)
+      // .width('100%')
+      // .height('100%')
+      // .onSelected((index) => {
+      //   this.subTitle = index == 0 ? "配置预览" : "VPN日志"
+      // })
     }
     // .hideTitleBar(true)
-    .title("WireGuard")
+    .title(`WireGuard：${this.vm.configName}`)
+    // .title({
+    //   main: `WireGuard：${this.vm.configName}`,
+    //   sub: this.subTitle,
+    // })
     .onReady((data) => {
       if (data.pathStack instanceof NavPathStack) {
         this.vm.nav = data.pathStack
@@ -77,9 +111,47 @@ export struct WGConfigPreViewNavDest {
 @ComponentV2
 export default struct WGConfigPreView {
   @Param @Require vm: WGConfigPreViewModel;
+  throwEvent = WireGuard.event.subscribeVpnThrow((param: WGEventThrow) => {
+    LLog.warn(TAG, `接收到VPN异常：${JSON.stringify(param)}}`)
+    if (param.type == 'want_no_get_args') {
+      // 如果时参数为空的异常，需要提示用户重新启动，有可能是系统问题
+      this.vm.isVPNNoGetParamThrow = true
+    }
+  })
+
+  aboutToDisappear(): void {
+    this.throwEvent.cancel()
+  }
 
   build() {
-    List({ space: '32vp' }) {
+    if (this.vm.isVPNNoGetParamThrow) {
+      Column({ space: '8vp' }) {
+        Row() {
+          Text(
+            "启动异常，没有读取到参数。如果您是第一次碰到这个异常，请尝试重新开启是否能解决。后续将不会有这个问题。\n这个异常是第一次启动VPN时，需要用户确认，用户确认后，系统会自动生成新的启动参数导致后台服务接收错误，此时只需要重新开启即可。\n如还有问题，可以通过设置中的指导提交问题反馈。\n点击这个消息可以关闭本消息。")
+            .width('100%')
+            .cardBackgroundStyle()
+            .backgroundColor('#ffff7676')
+            .margin({ left: '16vp', right: '16vp' })
+            .fontColor('#fff')
+            .layoutWeight(1)
+            .onClick(() => {
+              this.vm.isVPNNoGetParamThrow = false
+            })
+        }
+
+        this.buildMain()
+      }
+      .width('100%')
+      .height('100%')
+    } else {
+      this.buildMain()
+    }
+  }
+
+  @Builder
+  buildMain() {
+    List({ space: '16vp' }) {
       ListItem() {
         InterfaceCardView({ vm: this.vm, data: this.vm.client })
       }
@@ -113,12 +185,28 @@ function cardBackgroundStyle() {
 struct InterfaceCardView {
   @Param @Require vm: WGConfigPreViewModel
   @Param @Require data: WGDBConf
-  @Local state: ConnectState = WireGuard.getRunningServer();
   @Local publicKey: string = ""
+  vpnEvent: SubEventCancel = WireGuard.event.subscribeVpnChange((params) => {
+    LLog.info(TAG, `配置发生变化: ${JSON.stringify(params)}`)
+    const status = params.status
+    if (status) {
+      // 更新UI线程配置
+      WireGuard.statusConfig.update(status)
+    }
+    this.vm.updateStatus()
+  })
+  vpnThrow: SubEventCancel = WireGuard.event.subscribeVpnThrow((msg) => {
+    LLog.info(TAG, `VPN 异常：${msg}`)
+  })
 
   async aboutToAppear(): Promise<void> {
     this.publicKey = await WireGuard.genPublicKey(this.data.conf.inter.privateKey)
     this.vm.updateStatus();
+  }
+
+  aboutToDisappear(): void {
+    this.vpnEvent.cancel()
+    this.vpnThrow.cancel()
   }
 
   build() {
@@ -162,8 +250,7 @@ struct InterfaceCardView {
 
       Toggle({
         type: ToggleType.Switch,
-        isOn: this.vm.isVpnOpen!!
-        // isOn: (this.vm.params != undefined && this.state.runningConfigId == this.vm.params?.id)
+        isOn: this.vm.isVpnOpen!!,
       })
         .layoutGravity(LocalizedAlignment.TOP_END)
         .margin({
@@ -171,9 +258,17 @@ struct InterfaceCardView {
           right: '40vp',
         })
         .onChange((isOn) => {
-          this.vm.changeVpnConfig(this.getUIContext(), isOn)
-        })
 
+        })
+        .onClick((event) => {
+          if (!this.vm.isVpnOpen) {
+            LLog.info(TAG, "点击开启VPN")
+            this.vm.changeVpnConfig(this.getUIContext(), true)
+          } else {
+            LLog.info(TAG, "点击关闭VPN")
+            this.vm.changeVpnConfig(this.getUIContext(), false)
+          }
+        })
     }
   }
 }
@@ -230,7 +325,11 @@ struct PeerCardView {
 
       Column() {
         Text(`对端`).width('100%')
-        Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%')
+        if (this.data.endpoint.type == SiteUrlType.IPv6) {
+          Text(`[${this.data.endpoint.ipStrOrDomain}]:${this.data.endpoint.port}`).width('100%')
+        } else {
+          Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%')
+        }
       }
 
       Column() {
@@ -244,3 +343,159 @@ struct PeerCardView {
     .cardBackgroundStyle()
   }
 }
+
+
+@ComponentV2
+struct SwiperTitleLineView {
+  @Param leftTag?: string = undefined
+  @Param rightTag?: string = undefined
+  @BuilderParam childView: () => void
+
+  build() {
+    Column() {
+      Row() {
+        if (this.leftTag) {
+          Row() {
+            SymbolGlyph($r('sys.symbol.left_turn'))
+              .fontColor([$r('app.color.symbol_color')])
+            Text(this.leftTag)
+          }
+        }
+        Blank().layoutWeight(1)
+        if (this.rightTag) {
+          Row() {
+            Text(this.rightTag)
+            SymbolGlyph($r('sys.symbol.right_turn'))
+              .fontColor([$r('app.color.symbol_color')])
+          }
+        }
+      }
+      .width('100%')
+      .padding({
+        left: '16vp',
+        right: '16vp',
+        top: '8vp',
+        bottom: '8vp',
+      })
+      .layoutWeight(0)
+
+      Row() {
+        this.childView()
+      }
+      .width('100%')
+      .height('100%')
+      .layoutWeight(1)
+    }
+  }
+}
+
+const date_format = new Intl.DateTimeFormat('zh-CN', {});
+
+/**
+ * 预览配置界面的 Stream 流 日志
+ */
+@ComponentV2
+export struct WGConfigPreViewStreamLogView {
+  @Param @Require vm: WGConfigPreViewModel;
+  listener = WireGuard.event.subscribeVpnStreamLogs((log) => {
+    if (this.logSort.on) {
+      this.vm.logData.logs.push(log);
+    } else {
+      this.vm.logData.logs.unshift(log);
+    }
+  })
+
+  aboutToDisappear(): void {
+    this.listener.cancel()
+  }
+
+  @Local logSort: IconSwitchBtnParam = new IconSwitchBtnParam(true,
+    { tag: "正序", res: $r('sys.symbol.chevron_down_2_circle') },
+    { tag: "倒叙", res: $r('sys.symbol.chevron_up_2_circle') },
+    (on) => {
+      LLog.info(TAG, `改变排序：${on}`)
+      // this.vm.logData.logs = this.vm.logData.logs.reverse()
+      this.vm.logData.logs.sort((a, b) => {
+        return a.timestamp - b.timestamp;
+      })
+    }
+  )
+
+  build() {
+    Column() {
+      Row() {
+        Blank().layoutWeight(1)
+        this.buildFunItem(this.logSort)
+      }
+      .width('100%')
+      .layoutWeight(0)
+      .padding({ left: '16vp', right: '16vp' })
+
+      if (this.vm.logData.logs.length == 0) {
+        Stack() {
+          Text("还没有获取到日志数据")
+        }
+        .width('100%')
+        .height('100%')
+      } else {
+
+        List() {
+          Repeat(this.vm.logData.logs)
+            .each((item) => {
+              this.buildRow(item.item)
+            })
+            .virtualScroll({ totalCount: this.vm.logData.logs.length })
+        }
+        .width('100%')
+        .height('100%')
+        .layoutWeight(1)
+      }
+    }
+
+  }
+
+  @Builder
+  buildFunItem(param: IconSwitchBtnParam) {
+    Column({ space: '4vp' }) {
+      SymbolGlyph(param.param.res)
+        .fontSize('24fp')
+      Text(param.param.tag)
+        .fontSize('10fp')
+    }
+    .padding('8vp')
+    .onClick(() => {
+      param.on = !param.on;
+    })
+  }
+
+  @Builder
+  buildRow(log: StreamLogMessage) {
+    Row({ space: '8vp' }) {
+      Text(`${Timestamp.from(log.timestamp).format('yyyy-MM-dd HH:mm:ss SSS')}`).layoutWeight(0)
+      Text(`${log.peerIndex + 1}`).layoutWeight(0)
+      Text(`${log.direction == StreamDirection.RECEIVE ? "接收" : "发送"}`).layoutWeight(0)
+      Text(`${this.getMessageTypeString(log.messageType)}`).layoutWeight(0)
+    }
+    .padding({
+      left: '8vp',
+      right: '8vp',
+    })
+  }
+
+  getMessageTypeString(type: MessageType): string {
+    switch (type) {
+      case MessageType.HANDSHAKE_INITIATION:
+        return "握手初始化"
+      case MessageType.HANDSHAKE_RESPONSE:
+        return "握手响应"
+      case MessageType.HANDSHAKE_COOKIE:
+        return "Cookie"
+      case MessageType.DATA:
+        return "数据"
+      default:
+        return "未知数据"
+    }
+  }
+}
+
+

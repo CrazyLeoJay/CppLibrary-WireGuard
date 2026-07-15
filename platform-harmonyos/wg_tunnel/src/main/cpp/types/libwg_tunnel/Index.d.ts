@@ -14,7 +14,7 @@
  * limitations under the License.
  *
  */
-import { DeviceRegisterConfig, KeyPair, WGConf } from '../../../ets/model/entity/napi_entity';
+import { DeviceRegisterConfig, KeyPair, StreamLogMessage, WGConf } from '../../../ets/model/entity/napi_entity';
 
 export const makeKeyPair: () => Promise<KeyPair>;
 
@@ -60,6 +60,9 @@ export function dnsToIp(domain: string): Promise<string>;
  * @author leojay`fu
  */
 export class WireGuardDevice {
+
+  constructor(config: DeviceRegisterConfig);
+
   /**
    * 创建链接，并且获取 socket的描述符
    *
@@ -68,7 +71,15 @@ export class WireGuardDevice {
    * @returns socket 连接符
    */
   // @ts-ignore
-  async initVpn(config: DeviceRegisterConfig, listener: (fd: number) => void): Promise<number>;
+  async initVpn(listener: (fd: number) => void): Promise<number>;
+
+  /**
+   * 添加数据流监听接口
+   * @param listener
+   * @returns
+   */
+  // @ts-ignore
+  async setStreamLogListener(listener: (msg: StreamLogMessage) => void): Promise<void>;
 
   // @ts-ignore
   async start(tunFd: number): Promise<void>;

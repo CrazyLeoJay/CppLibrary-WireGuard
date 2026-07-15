@@ -26,6 +26,7 @@
 #include "WGException.h"
 #include "crypto/crypto.h"
 #include <cstdint>
+#include <vector>
 #include <napi/native_api.h>
 
 /**
@@ -151,7 +152,7 @@ namespace NapiTools {
                 throw WireGuard::WGException("napi调用异常");
             }
 
-
+            // 设置域名或者ip的Str
             napi_value nvIpDomain;
             auto ipStr = wsp.ipStrOrDomain;
             ns = napi_create_string_utf8(env, ipStr.c_str(), ipStr.length(), &nvIpDomain);
@@ -163,7 +164,7 @@ namespace NapiTools {
                 throw WireGuard::WGException("napi调用异常");
             }
 
-
+            // 设置端口
             napi_value nvPort;
             auto port = wsp.port;
             ns = napi_create_int64(env, port, &nvPort);
@@ -175,6 +176,17 @@ namespace NapiTools {
                 throw WireGuard::WGException("napi调用异常");
             }
 
+            // 设置类型 type
+            napi_value nvType;
+            auto type = static_cast<uint32_t>(wsp.type);
+            ns = napi_create_int32(env, type, &nvType);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+            ns = napi_set_named_property(env, result, "type", nvType);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
             return result;
         }
 
@@ -296,12 +308,12 @@ namespace NapiTools {
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
-        char *buf = new char[len + 1];
-        ns = napi_get_value_string_utf8(env, obj, buf, len + 1, &len);
+        std::vector<char> buf(len + 1);
+        ns = napi_get_value_string_utf8(env, obj, buf.data(), len + 1, &len);
         if (ns != napi_ok) {
             throw WireGuard::WGException("napi调用异常");
         }
-        return std::string{buf};
+        return std::string{buf.data(), len};
     }
 
     napi_value makeNapiBool(napi_env &env, const bool &value) {
@@ -320,5 +332,144 @@ namespace NapiTools {
             throw WireGuard::WGException("napi调用异常");
         }
         return nvValue;
+    }
+
+    namespace {
+        napi_value createStreamCalculate(napi_env &env, const WireGuard::StreamLog::StreamCalculate &sc) {
+            napi_status ns;
+            napi_value result;
+            ns = napi_create_object(env, &result);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+
+            napi_value nvLength;
+            ns = napi_create_int64(env, static_cast<int64_t>(sc.length), &nvLength);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+            ns = napi_set_named_property(env, result, "length", nvLength);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+
+            napi_value nvReceiveTotal;
+            ns = napi_create_int64(env, static_cast<int64_t>(sc.receive_total), &nvReceiveTotal);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+            ns = napi_set_named_property(env, result, "receiveTotal", nvReceiveTotal);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+
+            napi_value nvSendTotal;
+            ns = napi_create_int64(env, static_cast<int64_t>(sc.send_total), &nvSendTotal);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+            ns = napi_set_named_property(env, result, "sendTotal", nvSendTotal);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+
+            return result;
+        }
+    } // namespace
+
+    napi_value makeStreamLogMessage(napi_env &env, const WireGuard::StreamLog::Message message) {
+        napi_value nvResult;
+        napi_status ns;
+        ns = napi_create_object(env, &nvResult);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        const auto timestamp = message.timestamp;
+        const auto pk = WireGuard::crypto::bin32Array2Base64(message.publicKey);
+        const auto peerIndex = message.peerIndex;
+        const auto messageType = message.messageType;
+        const auto direction = message.direction;
+        const auto sc = message.sc;
+        const auto success = message.success;
+        const auto msg = message.msg;
+
+        napi_value nvTimestamp;
+        int64_t ms = std::chrono::duration_cast<std::chrono::milliseconds>(timestamp.time_since_epoch()).count();
+        ns = napi_create_int64(env, ms, &nvTimestamp);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "timestamp", nvTimestamp);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        napi_value nvPublicKey;
+        ns = napi_create_string_utf8(env, pk.c_str(), pk.length(), &nvPublicKey);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "publicKey", nvPublicKey);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        napi_value nvPeerIndex;
+        ns = napi_create_int64(env, static_cast<int64_t>(peerIndex), &nvPeerIndex);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "peerIndex", nvPeerIndex);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        napi_value nvMessageType;
+        ns = napi_create_int32(env, static_cast<int32_t>(messageType), &nvMessageType);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "messageType", nvMessageType);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        napi_value nvDirection;
+        ns = napi_create_int32(env, static_cast<int32_t>(direction), &nvDirection);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "direction", nvDirection);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        napi_value nvSc = createStreamCalculate(env, sc);
+        ns = napi_set_named_property(env, nvResult, "sc", nvSc);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        napi_value nvSuccess;
+        ns = napi_get_boolean(env, success, &nvSuccess);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "success", nvSuccess);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        napi_value nvMsg;
+        ns = napi_create_string_utf8(env, msg.c_str(), msg.length(), &nvMsg);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        ns = napi_set_named_property(env, nvResult, "msg", nvMsg);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        return nvResult;
     }
 };

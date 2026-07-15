@@ -309,7 +309,7 @@ namespace WireGuard {
                         if (tunFd < 0 || !isLoopTunRunning.load(std::memory_order_acquire)) {
                             break;
                         }
-                        LOG_ERROR("read tun device error: %{public}d, tunfd: %{public}d", errno, tunFd.load());
+                        LOG_ERROR("read tun device error: %{public}d, tunfd: %{public}d err: %{public}s", errno, tunFd.load(), errno);
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;
@@ -824,7 +824,7 @@ namespace WireGuard {
         }
         const auto rx = peer->getRxBytes(); // 接收总量
         const auto tx = peer->getTxBytes(); // 发送总量
-        const auto now = Clock::now();
+        const auto now = std::chrono::system_clock::now();
         try {
             streamLog({now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, true, "成功发送"});
         } catch (const std::exception &e) {
@@ -841,7 +841,7 @@ namespace WireGuard {
         }
         const auto rx = peer->getRxBytes(); // 接收总量
         const auto tx = peer->getTxBytes(); // 发送总量
-        const auto now = Clock::now();
+        const auto now = std::chrono::system_clock::now();
         try {
             streamLog({now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx}, false, message});
         } catch (const std::exception &e) {

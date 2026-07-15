@@ -23,6 +23,10 @@
     {
       "name": "wg_dialog_background_color",
       "value": "#fff"
+    },
+    {
+      "name": "symbol_color",
+      "value": "#000"
     }
   ]
 }

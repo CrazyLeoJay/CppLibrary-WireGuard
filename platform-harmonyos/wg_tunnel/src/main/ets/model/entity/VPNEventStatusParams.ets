@@ -12,9 +12,17 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
+import { StatusConfig } from '../WGConfig';
 
-export default class ConnectState{
-  runningConfigId?:number
+/**
+ * VPN 状态参数
+ *
+ * Created on 2026/7/10.
+ * @author leojay`fu
+ */
+export default interface VPNEventStatusParams {
+  isOpen: boolean,
+  tag?: string,
+  status?: StatusConfig
 }

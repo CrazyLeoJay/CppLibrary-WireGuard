@@ -17,6 +17,7 @@
 
 import { DeviceConfig, IPAddress, IPAddressArea, PeerConfig, WGConf } from './napi_entity';
 import native from 'libwg_tunnel.so';
+import { SiteUrlType } from '../../../../../Index';
 
 /**
  * 额外补充的vpn配置
@@ -49,42 +50,4 @@ export interface WGDeviceConfig {
 export interface WGDBConf {
   name: string; // 配置名称
   conf: WGConf, // 配置文件，包含了vpn配置
-}
-
-export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDeviceConfig> {
-  // 获取peers 如果有域名 需要将域名转成ip
-  let peers: PeerConfig[] = await Promise.all(conf.conf.peers.map(async (item) => {
-    const value = item.endpoint.ipStrOrDomain;
-    let ip: string;
-    if (await native.isIpAddress(value)) {
-      ip = value;
-    } else {
-      ip = await native.dnsToIp(item.endpoint.ipStrOrDomain);
-    }
-    return {
-      publicKey: item.publicKey,
-      endpoint: {
-        address: {
-          ip: ip,
-          isIpv4: true,
-        },
-        port: item.endpoint.port,
-      },
-      allowedIps: item.allowedIPs,
-      preSharedKey: item.preSharedKey,
-      keepaliveInterval: item.keepaliveInterval
-    } as PeerConfig
-  }))
-  return {
-    name: conf.name,
-    vpn: {
-      vpnIp: conf.conf.inter.ipArea,
-      dns: conf.conf.inter.dns,
-    },
-    device: {
-      privateKey: conf.conf.inter.privateKey,
-      listenerPort: conf.conf.inter.listenerPort,
-    },
-    peers: peers,
-  }
 }

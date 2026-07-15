@@ -14,6 +14,8 @@
  * limitations under the License.
  *
  */
+import { WireGuard } from '../../../../../Index';
+
 /**
  * @author leojay`fu
  */
@@ -22,9 +24,11 @@ export default class PeerEditConfig {
   @Trace publicKey?: string; // 对等节点的PublicKey
   @Trace preSharedKey?: string; // 预共享密钥。可选
   @Trace address?: string;
-  @Trace allowedIpsInput?: string; // 允许访问的IP规则 必须是IP段
+  @Trace allowedIpsInput: string = "0.0.0.0/0"; // 允许访问的IP规则 必须是IP段
   @Trace keepaliveInterval?: number; // 保活时间间隔 s
 
+  @Trace addressCheckMessage: string = "";
+  @Trace addressVerify: boolean = true;
 
   // 允许访问的IP规则
   get allowedIps(): string[] {
@@ -36,6 +40,14 @@ export default class PeerEditConfig {
     } else {
       return [this.allowedIpsInput]
     }
+  }
+
+  @Monitor("address")
+  listenerAddressChange() {
+    const type = WireGuard.regex.peerAddressCheck(this.address)
+    this.addressCheckMessage = type.message
+    this.addressVerify = type.verify
+
   }
 }
 

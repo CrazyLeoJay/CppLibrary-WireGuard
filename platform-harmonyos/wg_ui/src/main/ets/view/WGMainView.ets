@@ -19,7 +19,7 @@ import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } 
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
-import { WGConf } from 'wg_tunnel';
+import { WGConf, WireGuard } from 'wg_tunnel';
 
 const TAG = "WG主页";
 
@@ -47,13 +47,14 @@ export struct WGMainViewNavDest {
     // .title(this.titleView())
     .title({
       main: $r('app.string.app_name'),
-      sub :$r('app.string.sub_title'),
+      sub: $r('app.string.sub_title'),
     })
     .menus([
       {
         value: "刷新",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_2_circlepath')),
         action: () => {
+          WireGuard.event.publishVpnStatusQuery();
           this.vm.loadConfigs()
         }
       },
@@ -132,42 +133,31 @@ export struct WGMainView {
       }
     },
   ];
+  vpnEvent = WireGuard.event.subscribeVpnChange((params) => {
+    LLog.info(TAG, `配置读取: ${JSON.stringify(params)}`)
+    const status = params.status
+    if (status) {
+      // 更新UI线程配置
+      WireGuard.statusConfig.update(status)
+    }
+  })
 
   aboutToAppear(): void {
     this.vm.loadConfigs();
+    WireGuard.event.publishVpnStatusQuery();
+  }
+
+  aboutToDisappear(): void {
+    this.vpnEvent.cancel()
   }
 
   build() {
     Stack() {
-      List() {
-        Repeat(this.vm.wgList)
-          .each((it) => {
-            ListItem() {
-              MainItemView({ data: it.item, index: it.index })
-                .onClick(() => {
-                  WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
-                })
-            }
-            .swipeAction({
-              end: {
-                builder: () => {
-                  this.itemEndFunsView(it);
-                },
-                onAction: () => {
-                  LLog.info(TAG, "item row to end");
-                }
-              },
-              start: undefined,
-            })
-          })
-          .virtualScroll({})
+      if (this.vm.isEmptyList) {
+        this.buildEmptyView()
+      } else {
+        this.buildConfigListView()
       }
-      .width('100%')
-      .height('100%')
-      .divider({
-        strokeWidth: '1vp',
-      })
-
       Button() {
         SymbolGlyph($r('sys.symbol.plus'))
           .fontColor([$r('app.color.wg_float_button_svg_color')])
@@ -190,6 +180,49 @@ export struct WGMainView {
         placement: Placement.Top,
       })
     }
+    .width('100%')
+    .height('100%')
+  }
+
+  @LocalBuilder
+  buildConfigListView() {
+    List() {
+      Repeat(this.vm.wgList)
+        .each((it) => {
+          ListItem() {
+            MainItemView({ data: it.item, index: it.index })
+              .onClick(() => {
+                WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
+              })
+          }
+          .swipeAction({
+            end: {
+              builder: () => {
+                this.itemEndFunsView(it);
+              },
+              onAction: () => {
+                LLog.info(TAG, "item row to end");
+              }
+            },
+            start: undefined,
+          })
+        })
+        .virtualScroll({})
+    }
+    .width('100%')
+    .height('100%')
+    .divider({
+      strokeWidth: '1vp',
+    })
+
+  }
+
+  /**
+   * 空白界面时显示
+   */
+  @LocalBuilder
+  buildEmptyView() {
+    Text("快来添加一个新配置吧")
   }
 
   @LocalBuilder
@@ -209,9 +242,7 @@ export struct WGMainView {
 
   newConfigDialog(wgConf: WGConf) {
     const contentNode = new ComponentContent(this.getUIContext(), wrapBuilder(buildDialog),
-      {
-        wgConf: wgConf
-      } as QRCodeNewConfig
+      { wgConf: wgConf } as QRCodeNewConfig
     );
     this.getUIContext()
       .getPromptAction()

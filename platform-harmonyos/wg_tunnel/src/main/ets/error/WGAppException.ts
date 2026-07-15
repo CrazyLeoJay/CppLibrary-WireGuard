@@ -27,7 +27,11 @@ function toMessage(params?: AppErrorParams): string | undefined {
   if (typeof params === 'string') {
     return params
   } else {
-    return `${params.message ?? params.e.message} \n${params.e.stack}`
+    if (params.e instanceof Error) {
+      return `${params.message ?? params.e.message} \n${params.e.stack}`
+    } else {
+      return `${params.message} error: ${params.e}}`
+    }
   }
 }
 
