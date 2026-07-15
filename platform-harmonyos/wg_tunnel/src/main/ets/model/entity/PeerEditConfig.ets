@@ -14,7 +14,9 @@
  * limitations under the License.
  *
  */
-import { WireGuard } from '../../../../../Index';
+import { LLog, SiteUrlType, WebSitePoint, WireGuard } from '../../../../../Index';
+
+const TAG = "Peer编辑配置"
 
 /**
  * @author leojay`fu
@@ -39,6 +41,18 @@ export default class PeerEditConfig {
       return this.allowedIpsInput.split(',')
     } else {
       return [this.allowedIpsInput]
+    }
+  }
+
+  setAddress(sitePoint: WebSitePoint) {
+    if (sitePoint.type == SiteUrlType.IPv6) {
+      this.address = `[${sitePoint.ipStrOrDomain}]:${sitePoint.port}`
+    } else if (sitePoint.type == SiteUrlType.IPv4) {
+      this.address = `${sitePoint.ipStrOrDomain}:${sitePoint.port}`
+    } else if (sitePoint.type == SiteUrlType.Domain) {
+      this.address = `${sitePoint.ipStrOrDomain}:${sitePoint.port}`
+    } else {
+      LLog.info(TAG, `异常地址类型：${sitePoint.type} value=${sitePoint.ipStrOrDomain}}`)
     }
   }
 

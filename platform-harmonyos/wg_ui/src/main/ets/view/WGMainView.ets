@@ -140,6 +140,8 @@ export struct WGMainView {
       // 更新UI线程配置
       WireGuard.statusConfig.update(status)
     }
+    // 设置开关
+    // this.vm.setActiveConfigId(status);
   })
 
   aboutToAppear(): void {
@@ -277,8 +279,15 @@ struct MainItemView {
 
       Blank().layoutWeight(1)
       // Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
-      //   .onChange((isOn) => {
-      //
+      //   .onClick(()=>{
+      //     this.data.open
+      //     if (!this.data.open) {
+      //       LLog.info(TAG, "点击开启VPN")
+      //       this.data.changeVpnConfig(this.getUIContext(), true)
+      //     } else {
+      //       LLog.info(TAG, "点击关闭VPN")
+      //       this.data.changeVpnConfig(this.getUIContext(), false)
+      //     }
       //   })
     }
     .padding({ left: '16vp', right: '16vp' })

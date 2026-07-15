@@ -44,10 +44,9 @@ export struct WGEditConfigViewNavDest {
       const data = info.pathInfo.param as WGEditConfigParams | undefined
       if (data) {
         // 如果数据存在就去加载
-        this.vm.initEditData(data)
-          .catch((e: BusinessError) => {
-            LLog.warn(TAG, e)
-          })
+        this.vm.initEditData(data).catch((e: BusinessError) => {
+          LLog.warn(TAG, e)
+        })
       }
     })
     .title("创建 WireGuard 隧道")
@@ -274,7 +273,7 @@ struct PeerEditCardView {
         inputValue: this.data.allowedIpsInput!!,
         inputId: `ipArea_${this.index}`,
         tag: "路由的IP地址（段）",
-        inputFilter: this.vm.inputRegex.domainArea,
+        inputFilter: this.vm.inputRegex.noSpace,
       })
       Row() {
         Text($r('app.string.seek_router_value_desc'))

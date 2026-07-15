@@ -20,7 +20,7 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
-import { WGConf } from 'wg_tunnel';
+import { StatusConfig, WGConf, WGDBConf } from 'wg_tunnel';
 import { fileIo, picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
@@ -43,7 +43,7 @@ export default class WGMainViewModel {
     }
   }
 
-  get isEmptyList() : boolean{
+  get isEmptyList(): boolean {
     return this.wgList.length == 0;
   }
 
@@ -128,22 +128,57 @@ export default class WGMainViewModel {
       }
     }
   }
+
+  /**
+   * 设置活跃的配置，即已经开启的配置
+   * @param runningConfigId
+   */
+  setActiveConfigId(config?: StatusConfig) {
+    const running = config?.isOpen() ?? false
+    if (running) {
+      const runId = config!.runningConfigId
+      for (let item of this.wgList) {
+        item.open = (item.id == runId);
+      }
+    } else {
+      for (let item of this.wgList) {
+        item.open = false;
+      }
+    }
+  }
 }
 
 /**
  * 主页每行数据
  */
+@ObservedV2
 export class MainItemData {
   name: string;
-  open: boolean = false;
+  @Trace open: boolean = false;
   data: WgConfigTable
 
   constructor(data: WgConfigTable) {
     this.data = data;
     this.name = data.name!;
+    this.open = WireGuard.statusConfig.isRunning(this.id)
   }
 
   get id(): number {
     return this.data.id!;
+  }
+
+  /**
+   * 改变Vpn配置，启动或停止
+   */
+  async changeVpnConfig(context: UIContext, isOn: boolean) {
+    try {
+      const config = JSON.parse(this.data.config!) as WGDBConf
+      // const config = WireGuard.helper.config.getConfigForId(this.id)!
+      await WireGuard.runWGConfig(this.id, config, isOn)
+    } catch (e) {
+      this.open = false;
+      context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
+      LLog.error(TAG, { error: e, message: "开启VPN异常" });
+    }
   }
 }

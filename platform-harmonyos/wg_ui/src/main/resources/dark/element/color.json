@@ -7,6 +7,9 @@
     {
       "name": "wg_new_card_item_select_color",
       "value": "#FF345FDE"
+    },   {
+      "name": "wg_dialog_background_color",
+      "value": "#FFB5A992"
     },
     {
       "name": "symbol_color",

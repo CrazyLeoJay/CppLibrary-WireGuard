@@ -22,7 +22,6 @@ import { WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
 import { UIContext } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
-import WGAppException from '../error/WGAppException';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { KeyPair, WGConf } from './entity/napi_entity';
 import ParamsRegex from './ParamsRegex';
@@ -142,6 +141,15 @@ export namespace WireGuard {
     const abilityName = 'WGVpnExtAbility'
 
     if (isOne) {
+      // 如果有运行的,需要先停止
+      if (await WGTools.isVpnExtensionRunning()) {
+        await vpnExtension.stopVpnExtensionAbility({
+          deviceId: '',
+          bundleName: packageName,
+          abilityName: abilityName,
+        })
+      }
+
       // 这个配置将会发送到VPN服务进程，去配置、启动VPN服务
       const vpnConf = await makeWGConf2VpnStartConfig(config);
       LLog.info(TAG, `创建VPN配置：${JSON.stringify(vpnConf)}`)
@@ -156,17 +164,17 @@ export namespace WireGuard {
           config: vpnConf,
         },
       })
-        // .catch((e: BusinessError) => {
-        //   // switch (e.code) {
-        //   //   case 15501001:
-        //   //     LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
-        //   //   case 201:
-        //   //     LLog.warn(TAG, { error: e, message: "未授权！" })
-        //   //   default:
-        //   //     LLog.warn(TAG, e)
-        //   // }
-        //   throw new WGAppException({ e: e, message: "VPN启动异常" });
-        // })
+      // .catch((e: BusinessError) => {
+      //   // switch (e.code) {
+      //   //   case 15501001:
+      //   //     LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
+      //   //   case 201:
+      //   //     LLog.warn(TAG, { error: e, message: "未授权！" })
+      //   //   default:
+      //   //     LLog.warn(TAG, e)
+      //   // }
+      //   throw new WGAppException({ e: e, message: "VPN启动异常" });
+      // })
         .then(() => {
           LLog.info(TAG, "vpn start notify")
           // statusConfig.setRunningServer(id)

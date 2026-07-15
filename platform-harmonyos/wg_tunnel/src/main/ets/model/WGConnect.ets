@@ -19,7 +19,8 @@ import { WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
 import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
-import { DeviceRegisterConfig, IPAddressArea, PeerConfig, SiteUrlType, StreamLogMessage } from './entity/napi_entity';
+import { IPAddressArea, PeerConfig, SiteUrlType, StreamLogMessage } from './entity/napi_entity';
+import { WireGuard } from './WGHelper';
 
 const TAG = "WG连接"
 
@@ -146,17 +147,21 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
   let peers: PeerConfig[] = await Promise.all(conf.conf.peers.map(async (item) => {
     const value = item.endpoint.ipStrOrDomain;
     let ip: string;
+    let isIpv4 = item.endpoint.type == SiteUrlType.IPv4
     if (await native.isIpAddress(value)) {
       ip = value;
     } else {
       ip = await native.dnsToIp(item.endpoint.ipStrOrDomain);
+      ip = ip.trim()
+      isIpv4 = await WireGuard.Tools.isIpv4(ip)
     }
+
     return {
       publicKey: item.publicKey,
       endpoint: {
         address: {
           ip: ip,
-          isIpv4: item.endpoint.type == SiteUrlType.IPv4,
+          isIpv4: isIpv4,
         },
         port: item.endpoint.port,
       },

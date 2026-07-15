@@ -65,6 +65,7 @@ export class SubEvent implements SubEventCancel {
         invoke(data)
       } catch (err) {
         LLog.error(TAG, 'err:' + err)
+        LLog.error(TAG, err)
         error?.(err)
       }
     })

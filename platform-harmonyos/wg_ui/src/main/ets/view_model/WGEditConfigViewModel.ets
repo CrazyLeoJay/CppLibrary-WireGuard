@@ -21,7 +21,7 @@ import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddress, IPAddressArea, WGConfPeer, WGDBConf, } from 'wg_tunnel';
+import { IPAddress, IPAddressArea, WGConfPeer, WGDBConf, SiteUrlType } from 'wg_tunnel';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -67,7 +67,7 @@ export default class WGNewConfigViewModel {
       const config = new PeerEditConfig();
       config.publicKey = it.publicKey;
       config.preSharedKey = it.preSharedKey;
-      config.address = `${it.endpoint.ipStrOrDomain}:${it.endpoint.port}`;
+      config.setAddress(it.endpoint);
       config.allowedIpsInput = it.allowedIPs.map((it) => `${it.address.ip}/${it.cidr}`).join(",");
       config.keepaliveInterval = it.keepaliveInterval;
       return config;
@@ -192,21 +192,7 @@ export default class WGNewConfigViewModel {
     }
 
     let ipAddress: IPAddressArea
-    if (Tools.isIpv4OrMark(this.client.vpnAddress)) {
-      const ic = Tools.getIpCidr(this.client.vpnAddress!)
-      if (ic.cidr < -1 || ic.cidr > 32) {
-        throw new WGAppException("ipv4 掩码取值范围为0-32")
-      }
-      ipAddress = { address: { ip: ic.ip, isIpv4: true, }, cidr: ic.cidr }
-    } else if (Tools.isIpv6OrMark(this.client.vpnAddress)) {
-      const ic = Tools.getIpCidr(this.client.vpnAddress!)
-      if (ic.cidr < -1 || ic.cidr > 128) {
-        throw new WGAppException("ipv6 掩码取值范围为0-128")
-      }
-      ipAddress = { address: { ip: ic.ip, isIpv4: false }, cidr: ic.cidr }
-    } else {
-      throw new WGAppException(`局域网Ip地址（${this.client.vpnAddress}）不合法`)
-    }
+    ipAddress = await Tools.readIpArea(this.client.vpnAddress!)
 
     let dns: IPAddress[] = []
     if (this.client.dnsIps?.length ?? 0 > 0) {
@@ -253,15 +239,11 @@ export default class WGNewConfigViewModel {
     if (!config.address) {
       throw new WGAppException("Peer 目标地址为空")
     }
-    // 远程端点
-    const ipPort = Tools.getIpPort(config.address!)
-    const ip = ipPort.ipOrDomain;
-    if (await WireGuard.Tools.isIpAddress(ip) || await WireGuard.Tools.isValidDomain(ip)) {
-      // 是ip或者域名
-    } else {
+    const endpoint = await Tools.readEndpointAddress(config.address!)
+    if (endpoint.type === SiteUrlType.ERROR) {
       throw new WGAppException(`地址格式异常，必须是合法的IP+端口或者域名+端口，value=${config.address}`)
     }
-    if (ipPort.port < 0 || ipPort.port > 65535) {
+    if (endpoint.port < 0 || endpoint.port > 65535) {
       throw new WGAppException("端口取值范围为：0-65535")
     }
 
@@ -270,36 +252,14 @@ export default class WGNewConfigViewModel {
     }
 
     // 路由
-    const allowedIps = config.allowedIps!.map((it) => {
-      let ip: IPAddressArea;
-      if (Tools.isIpv4Mark(it)) {
-        const ic = Tools.getIpCidr(it)
-        if (ic.cidr < -1 || ic.cidr > 32) {
-          throw new WGAppException(`${it} ipv4 掩码取值范围为0-32`)
-        }
-        ip = { address: { ip: ic.ip, isIpv4: true }, cidr: ic.cidr }
-      } else if (Tools.isIpv4OrMark(it)) {
-        throw new WGAppException(`${it} 需要配置掩码`)
-      } else if (Tools.isIpv6Mark(it)) {
-        const ic = Tools.getIpCidr(it)
-        if (ic.cidr < -1 || ic.cidr > 128) {
-          throw new WGAppException(`${it} ipv6 掩码取值范围为0-128`)
-        }
-        ip = { address: { ip: ic.ip, isIpv4: false }, cidr: ic.cidr }
-      } else if (Tools.isIpv6OrMark(it)) {
-        throw new WGAppException(`${it} 需要配置掩码`)
-      } else {
-        throw new WGAppException(`(${it})不合法。必须是带有掩码的IP地址段`)
-      }
-      return ip;
-    })
+    const allowedIps: IPAddressArea[] = []
+    for (const it of config.allowedIps!) {
+      allowedIps.push(await Tools.readIpArea(it));
+    }
 
     return {
       publicKey: config.publicKey!,
-      endpoint: {
-        ipStrOrDomain: ipPort.ipOrDomain,
-        port: ipPort.port
-      },
+      endpoint: endpoint,
       allowedIPs: allowedIps,
       preSharedKey: config.preSharedKey,
       keepaliveInterval: config.keepaliveInterval,
@@ -316,6 +276,6 @@ class InputRegex {
   ipPort = `^\\d{0,3}([.]\\d{0,3}){0,3}(:\\d{0,5})?$` // 报端端口的Ip
   ipArea = `^\\d{0,3}([.]\\d{0,3}){0,3}(/\\d{0,3})?(,\\d{0,3}([.]\\d{0,3}){0,3}(/\\d{0,3})?)?$` // 包含掩码的Ip使用，分割
   dns = `^\\d{0,3}([.]\\d{0,3}){0,3}(,\\d{0,3}([.]\\d{0,3}){0,3})*$` // 纯ip 组 使用，分割
-  noSpace = `^[a-zA-Z0-9.:/,\\-]*$` // 仅允许英文字符、域名、IP、IPv6、端口允许的字符（字母数字、.、:、/、,、-）
+  noSpace = `^[\w.:/,\\-\[\]]*$` // 仅允许英文字符、域名、IP、IPv6、端口允许的字符（字母数字、.、:、/、,、-）
   domainArea = `^[0-9.:/,\\-]*$` // 域名段（包含掩码），使用英文逗号进行多条输入，仅检测输入字符是否合法
 }

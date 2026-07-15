@@ -309,7 +309,6 @@ namespace WireGuard {
                         if (tunFd < 0 || !isLoopTunRunning.load(std::memory_order_acquire)) {
                             break;
                         }
-                        LOG_ERROR("read tun device error: %{public}d, tunfd: %{public}d err: %{public}s", errno, tunFd.load(), errno);
                     }
                     std::this_thread::sleep_for(std::chrono::milliseconds(1));
                     continue;

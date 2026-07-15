@@ -26,6 +26,7 @@ const TAG = "WG状态"
  */
 
 class WGStatusImpl {
+
   /**
    * @returns 获取状态配置
    */
@@ -74,6 +75,11 @@ class WGStatusImpl {
     const c =this.getConfig()
     c.runningConfigId = config.runningConfigId
     c.running = config.running
+  }
+
+  isRunning(id: number): boolean {
+    const config = this.getConfig();
+    return config.running && id == config.runningConfigId;
   }
 }
 
