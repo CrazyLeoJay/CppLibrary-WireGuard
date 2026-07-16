@@ -34,7 +34,7 @@ const WireGuard::PrivateKey client_private{
 const WireGuard::PublicKey client_public{
     WireGuard::crypto::base642Bin32Array("gN9lnPxypH67F7KystwjDdpwNsT007AV8s/MOOc0QGM=")
 };
-const WireGuard::PublicKey server_private{
+const WireGuard::PrivateKey server_private{
     WireGuard::crypto::base642Bin32Array("6CPPJCvfaej0+lwY5amd5pKJ0WLT0JuSv0VyPnMimVE=")
 };
 const WireGuard::PublicKey server_public{

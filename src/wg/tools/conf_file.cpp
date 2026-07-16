@@ -15,6 +15,7 @@
 #include <regex>
 
 #include "WGException.h"
+#include "wg_dns.h"
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
@@ -556,6 +557,44 @@ namespace WireGuard {
             json << "}";
 
             return json.str();
+        }
+
+        DeviceRegisterConfig wgConfToDeviceRegisterConfig(const WGConf &conf) {
+            DeviceRegisterConfig drc{};
+
+            drc.client.device_name = conf.inter.configName;
+            std::memcpy(drc.client.private_key.data(), conf.inter.privateKey.data(), PRIVATE_KEY_LEN);
+            drc.client.listener_port = conf.inter.listenerPort;
+            drc.client.bind_address = std::make_shared<IPAddress>(conf.inter.ipArea.address);
+
+            for (const auto &wgPeer : conf.peers) {
+                PeerConfig pc{};
+                std::memcpy(pc.public_key.data(), wgPeer.publicKey.data(), PUBLIC_KEY_LEN);
+
+                if (wgPeer.endpoint.type == SiteUrlType::IPv4) {
+                    pc.endpoint.address = ipAddressForIpv4(wgPeer.endpoint.ipStrOrDomain);
+                } else if (wgPeer.endpoint.type == SiteUrlType::IPv6) {
+                    pc.endpoint.address = ipAddressForIpv6(wgPeer.endpoint.ipStrOrDomain);
+                } else if (wgPeer.endpoint.type == SiteUrlType::Domain) {
+                    auto ips = DNS::readDomainToIpAll(wgPeer.endpoint.ipStrOrDomain);
+                    if (!ips.empty()) {
+                        pc.endpoint.address = ips[0];
+                    }
+                }
+                pc.endpoint.port = static_cast<uint16_t>(wgPeer.endpoint.port);
+
+                pc.allowedIps = wgPeer.allowedIPs;
+                pc.keepaliveInterval = wgPeer.persistentKeepalive;
+
+                if (wgPeer.preSharedKey) {
+                    pc.pre_share_key = std::make_shared<SymmetricKey>();
+                    std::memcpy(pc.pre_share_key->data(), wgPeer.preSharedKey->data(), SYMMETRIC_KEY_LEN);
+                }
+
+                drc.peers.push_back(pc);
+            }
+
+            return drc;
         }
     }
 } // WireGuardTools

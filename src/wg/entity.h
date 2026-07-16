@@ -204,6 +204,10 @@ namespace WireGuard {
         uint16_t port = 0;
 
         bool operator==(const Endpoint &other) const { return address == other.address && port == other.port; }
+
+        std::string toIpStr() const {
+            return address.toIpStr() + ":" + std::to_string(port);
+        }
     };
 
     struct IPAddressHash {

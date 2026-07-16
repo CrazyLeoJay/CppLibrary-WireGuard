@@ -132,6 +132,8 @@ namespace WireGuard {
         std::string readConfFileToJson(const std::string &content);
 
         std::string wgConfToJson(const WGConf &config);
+
+        DeviceRegisterConfig wgConfToDeviceRegisterConfig(const WGConf &conf);
     }
 } // WireGuardTools
 

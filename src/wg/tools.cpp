@@ -26,6 +26,7 @@
 #include <algorithm>
 
 #include "WGException.h"
+#include "logs.h"
 #include <arpa/inet.h>
 #include <cstddef>
 #include <cstdint>
@@ -261,5 +262,26 @@ namespace WireGuard {
                 return ep;
             }
         }; // namespace IP
+
+        void runWithDuration(std::chrono::seconds duration, 
+                            std::chrono::seconds printInterval, 
+                            const std::string &label) {
+            const auto startTime = std::chrono::steady_clock::now();
+            auto lastPrintTime = startTime;
+            while (true) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(20));
+                const auto elapsed = std::chrono::steady_clock::now() - startTime;
+                const auto timeSinceLastPrint = std::chrono::steady_clock::now() - lastPrintTime;
+                if (timeSinceLastPrint >= printInterval) {
+                    const auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+                    LOG_INFO("%s, elapsed: %{public}lld s, remaining: %{public}lld s", 
+                             label.c_str(), elapsedSeconds, (duration.count() - elapsedSeconds));
+                    lastPrintTime = std::chrono::steady_clock::now();
+                }
+                if (elapsed >= duration) {
+                    break;
+                }
+            }
+        }
     }; // namespace Tools
 }; // namespace WireGuard

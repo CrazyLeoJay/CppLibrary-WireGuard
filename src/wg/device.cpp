@@ -237,10 +237,15 @@ namespace WireGuard {
         std::vector<char> buffer(65536);
         Endpoint endpoint;
         isSocketRunning = true;
-        while (isRunning.load(std::memory_order_acquire) && isSocketRunning.load(std::memory_order_acquire) &&
-               socket.fd() != -1) {
+        int i = 0;
+        while (isRunning.load(std::memory_order_acquire)
+               && isSocketRunning.load(std::memory_order_acquire)
+               && socket.isRunning()
+        ) {
             try {
+                LOG_INFO("socket read for count=%{public}d begin", ++i);
                 const ssize_t received = socket.read(buffer.data(), buffer.size(), endpoint);
+                LOG_INFO("socket read for count=%{public}d red end", i);
                 if (received < 0) {
                     if (!isRunning.load(std::memory_order_acquire) ||
                         !isSocketRunning.load(std::memory_order_acquire)) {
@@ -265,6 +270,7 @@ namespace WireGuard {
                 });
                 // 将读取的数据写出
                 processSocketPacket(buffer.data(), static_cast<size_t>(received), endpoint);
+                LOG_INFO("socket read for count=%{public}d finish", i);
             } catch (const WGException &e) {
                 if (e.type == WGErrType::SOCKET_CLOSE_SING) {
                     // 正常断开，无需打印日志
@@ -290,7 +296,8 @@ namespace WireGuard {
         try {
             socketListenerMessage(type, data, len, endpoint);
         } catch (const std::exception &e) {
-            LOG_WARN("socket 消息异常(%{public}u)：%{public}s", static_cast<uint32_t>(type), e.what());
+            LOG_WARN("socket 接收消息异常(%{public}u target:%{public}s)：%{public}s", static_cast<uint32_t>(type),
+                     endpoint.toIpStr(), e.what());
         }
     }
 
@@ -532,7 +539,7 @@ namespace WireGuard {
         currentPeer->updateEndpoint(endpoint);
 
         try {
-            CookieChecker::verifyMac1(*msg, currentPeer->getPublicKey());
+            CookieChecker::verifyMac1(*msg, content_key_.local_public_key);
         } catch (const std::exception &e) {
             LOG_WARN("MAC1 验证失败： %{public}s", e.what());
             return;
@@ -554,8 +561,9 @@ namespace WireGuard {
             // 发送等待的数据包
             sendStagedPackets(currentPeer);
             LOG_INFO("握手成功 并存储密钥 remoteIndex=%{public}s", crypto::bin2Hex(msg->senderIndex).c_str());
-            // 发送心跳包
-            encryptPacketAndSendSocket(currentPeer, nullptr, 0);
+            // // 发送心跳包
+            // encryptPacketAndSendSocket(currentPeer, nullptr, 0);
+            // LOG_INFO("握手成功 发送心跳包");
         } else {
             LOG_WARN("握手异常：keypair 生成失败");
         }

@@ -174,10 +174,10 @@ namespace WireGuard {
         MessageInitiation msg;
         try {
             Noise::NOISESend send{};
-            send.init(client_private, server_public);
+            send.init(Test51820::client_private, Test51820::server_public);
             send.ephemeral_private_key = ephemeral_private;
             // auto index = crypto::createIndex();
-            auto index = 0;
+            auto index = 2;
             msg = send.encodeHandshakeInitiation(index);
         } catch (const std::exception &e) {
             printf("exception client 加密失败: %s\n", e.what());
@@ -186,8 +186,8 @@ namespace WireGuard {
 
         UDPSocket sock{DNS::IPV4};
         // sock.bind(61113);
-        sock.initSocketStart(std::make_shared<uint32_t>(61113), nullptr);
-        const Endpoint ep = Tools::IP::makeEndpointIpv4("10.3.3.2", 62222);
+        sock.initSocketStart(std::make_shared<uint32_t>(51820));
+        const Endpoint ep = Tools::IP::makeEndpointIpv4("10.3.3.2", 51820);
         sock.write(&msg, sizeof(msg), ep);
         sock.close();
     }
