@@ -131,7 +131,7 @@ namespace WireGuard {
 
     void Device::sendPacket(const uint8_t *data, size_t len) {
         std::lock_guard<std::mutex> lock(_peerMutex);
-        for (const auto &pair : _peers) {
+        for (const auto &pair: _peers) {
             auto peer = pair.second;
             if (peer->isCanSendData()) {
                 encryptPacketAndSendSocket(peer, data, len);
@@ -804,9 +804,9 @@ namespace WireGuard {
         // 保存数据到队列
         peer->queuePacket(data);
         // 子端其他处理
-        if (peer->getIAmInitiator()) {
-            sendInitiation(peer);
-        }
+        // if (peer->getIAmInitiator()) {
+        sendInitiation(peer);
+        // }
     }
 
     uint32_t Device::createNewIndex(std::shared_ptr<Peer> peer) {
