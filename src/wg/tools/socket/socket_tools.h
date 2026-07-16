@@ -46,6 +46,7 @@ namespace WireGuard {
         std::shared_ptr<IPAddress> _bind_address{nullptr};
         mutable std::atomic<int> _fd{-1};
         mutable std::atomic<bool> _initialized{false};
+        mutable std::atomic<bool> _isFinish{false};
 
         int wakeup_pipe_[MAX_WAKEUP_PIP_COUNT]{-1, -1};
         int epoll_fd_ = -1; // epoll 文件描述符

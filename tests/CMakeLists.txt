@@ -3,6 +3,11 @@ project(test_main)
 
 set(CMAKE_CXX_STANDARD 14)
 
+add_compile_definitions(
+        NDEBUG
+        WG_PRINT_SPACE_ENABLE=true
+        #SHOW_DEBUG_LOGS
+)
 
 # 创建测试可执行文件
 add_executable(test_main test_main.cpp
@@ -14,7 +19,7 @@ add_executable(test_main test_main.cpp
         test_dns.cpp
         test_cookie.cpp
         test_allowedips.cpp
-        socket/test_server.cpp
+        test_device.cpp
 )
 
 # 链接被测库 + GTest 主函数
