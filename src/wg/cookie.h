@@ -97,7 +97,8 @@ namespace WireGuard {
          * @return
          */
         static MacData computeMac1(const MessageInitiation &msg, const PublicKey &public_key);
-        static MacData computeMac1(const MessageResponse & msg, const PrivateKey &public_key);
+
+        static MacData computeMac1(const MessageResponse &msg, const PublicKey &public_key);
 
         CookieData computeMac2(const MessageInitiation &msg, const Endpoint &endpoint);
 
@@ -116,7 +117,8 @@ namespace WireGuard {
         /**
          * @brief 创建 Cookie Reply 消息（类型 3）
          */
-        MessageCookie createCookieReply(const MessageInitiation &msg, const Endpoint &endpoint, const PublicKey &public_key);
+        MessageCookie createCookieReply(const MessageInitiation &msg, const Endpoint &endpoint,
+                                        const PublicKey &public_key);
 
         /**
          * @return 判断cookie密钥是否有效
@@ -131,7 +133,7 @@ namespace WireGuard {
          */
         static void verifyMac1(const MessageInitiation &msg, const PublicKey &sendPointPublicKey);
 
-        static void verifyMac1(const MessageResponse & msg, const PrivateKey &public_key);
+        static void verifyMac1(const MessageResponse &msg, const PublicKey &public_key);
 
         static void verifyMac2(const MessageInitiation &msg, const CookieData &last_received_cookie);
 
