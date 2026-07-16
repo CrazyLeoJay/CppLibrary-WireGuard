@@ -356,7 +356,7 @@ namespace WireGuard {
             peer = allowedIps.findPeer(endpoint.address);
             if (!peer) {
                 LOG_WARN(
-                    "ip:(%{public}s/%{public}s) 没有匹配到合适的Peer", endpoint.address.toIpStr().c_str(),
+                    "Tun读取：ip:(%{public}s/%{public}s) 没有匹配到Peer", endpoint.address.toIpStr().c_str(),
                     endpoint.address.toIpHex().c_str()
                 );
                 return;
@@ -681,7 +681,7 @@ namespace WireGuard {
         const auto msg = peer->createHandshakeInitiation(index, force);
         const auto endpoint = peer->getEndpoint();
 
-        LOG_SOCKET(
+        LOG_INFO(
             "发送握手请求到：%{public}s:%{public}d  %{public}s",
             endpoint.address.toIpStr().c_str(),
             endpoint.port,

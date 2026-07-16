@@ -242,7 +242,7 @@ namespace WireGuard {
                                 value.c_str());
                         }
                     }
-                // 判断：冒号数恰好为 1 个，按 IPv4:端口 或 域名:端口 格式解析
+                    // 判断：冒号数恰好为 1 个，按 IPv4:端口 或 域名:端口 格式解析
                 } else if (colonCount == 1) {
                     size_t colonPos = value.rfind(':');
                     host = value.substr(0, colonPos);
@@ -277,7 +277,7 @@ namespace WireGuard {
                     // 判断：冒号前的主机部分是否是合法 IPv4 地址
                     if (isIPv4(host)) {
                         urlType = IPv4;
-                    // 判断：冒号前的主机部分是否是合法域名
+                        // 判断：冒号前的主机部分是否是合法域名
                     } else if (isValidDomain(host)) {
                         urlType = Domain;
                     } else {
@@ -285,7 +285,7 @@ namespace WireGuard {
                             "Endpoint 主机部分既不是合法 IPv4，也不是合法域名，主机值：%s，原值：%s",
                             host.c_str(), value.c_str());
                     }
-                // 冒号数 == 0：按纯 IPv4 或纯域名（无端口，默认 80）解析
+                    // 冒号数 == 0：按纯 IPv4 或纯域名（无端口，默认 80）解析
                 } else {
                     host = value;
                     // 判断：主机字符串 trim 后是否为空
@@ -295,7 +295,7 @@ namespace WireGuard {
                     // 判断：主机是否为合法 IPv4 地址
                     if (isIPv4(host)) {
                         urlType = IPv4;
-                    // 判断：主机是否为合法域名
+                        // 判断：主机是否为合法域名
                     } else if (isValidDomain(host)) {
                         urlType = Domain;
                     } else {
@@ -464,6 +464,8 @@ namespace WireGuard {
                         }
                     } else if (key == "ListenerPort") {
                         conf.inter.listenerPort = std::make_shared<uint32_t>(std::stoi(value));
+                    } else if (key == "ConfigName") {
+                        conf.inter.configName = value;
                     }
                 } else if (inPeer && currentPeer) {
                     if (key == "PublicKey") {

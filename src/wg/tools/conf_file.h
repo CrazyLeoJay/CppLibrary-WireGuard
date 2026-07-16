@@ -52,6 +52,7 @@ namespace WireGuard {
         };
 
         struct WGConfInterface {
+            std::string configName{};
             WGKey privateKey;
             IpAddressArea ipArea;
             std::vector<IPAddress> dns;
