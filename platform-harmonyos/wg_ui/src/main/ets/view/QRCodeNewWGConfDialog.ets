@@ -34,7 +34,7 @@ export interface QRCodeNewConfig {
 @ComponentV2
 export struct QRCodeNewWGConfDialog {
   @Param @Require wgConf: WGConf
-  @Local inputName: string = "";
+  @Local inputName: string = this.wgConf.inter.deviceName ?? "";
 
   aboutToAppear(): void {
     if (!this.wgConf) {

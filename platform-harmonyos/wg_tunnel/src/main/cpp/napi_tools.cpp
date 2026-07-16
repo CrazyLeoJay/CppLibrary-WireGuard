@@ -108,6 +108,17 @@ namespace NapiTools {
                 throw WireGuard::WGException("napi调用异常");
             }
 
+            auto deviceName = inter.configName;
+            napi_value nvDeviceName;
+            ns = napi_create_string_utf8(env, deviceName.c_str(), deviceName.length(), &nvDeviceName);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+            ns = napi_set_named_property(env, result, "deviceName", nvDeviceName);
+            if (ns != napi_ok) {
+                throw WireGuard::WGException("napi调用异常");
+            }
+
             napi_value nvPrivateKey;
             auto privateKey = WireGuard::crypto::bin32Array2Base64(inter.privateKey);
             ns = napi_create_string_utf8(env, privateKey.c_str(), privateKey.length(), &nvPrivateKey);

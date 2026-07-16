@@ -22,6 +22,7 @@ import { WGDeviceConfig } from '../model/entity/WGConfigEntity';
 import { VpnConnHelper } from '../model/WGConnect';
 import { StreamDirection } from '../../../../Index';
 import { WGEventThrowParam } from '../error/WGEventThrow';
+import WGTools from '../model/WGTools';
 
 const TAG = "vpn_ability"
 
@@ -58,8 +59,9 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
       this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context), config)
         .setStreamListener((msg) => {
           const direction = msg.direction == StreamDirection.RECEIVE ? "接收" : "发送"
+          const mtype :string = WGTools.getMessageTypeDesc(msg.messageType);
           LLog.info(TAG,
-            `Peer(${msg.peerIndex}/${msg.messageType}/Result:${msg.success}) ${direction} length:${msg.sc.length} `)
+            `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length} `)
           WireGuard.event.publishVpnStreamLogs(msg)
         });
 

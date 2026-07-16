@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 import { appManager, common } from '@kit.AbilityKit';
+import { MessageType } from '../../../../Index';
 import { LLog } from '../tools/LLog';
 
 /**
@@ -52,18 +53,35 @@ class WGToolsImpl {
 
   // 在 UIAbility 或页面中通过 context 获取
   async checkVpnByContext(context: common.UIAbilityContext): Promise<boolean> {
-  try {
-    const processInfos =
-      await context.getApplicationContext().getRunningProcessInformation();
+    try {
+      const processInfos =
+        await context.getApplicationContext().getRunningProcessInformation();
 
-    return processInfos.some((info: appManager.ProcessInformation) =>
-    info.processName.endsWith(':vpn')
-    );
-  } catch (err) {
-    LLog.error('VpnCheck', '检查失败: %{public}s', JSON.stringify(err));
-    return false;
+      return processInfos.some((info: appManager.ProcessInformation) =>
+      info.processName.endsWith(':vpn')
+      );
+    } catch (err) {
+      LLog.error('VpnCheck', '检查失败: %{public}s', JSON.stringify(err));
+      return false;
+    }
   }
-}
+
+  getMessageTypeDesc(messageType: MessageType): string {
+    switch (messageType) {
+      case MessageType.HANDSHAKE_INITIATION:
+        return "发起握手"
+      case MessageType.HANDSHAKE_RESPONSE:
+        return "握手响应"
+      case MessageType.HANDSHAKE_COOKIE:
+        return "Cookie挑战"
+      case MessageType.DATA:
+        return "数据传输"
+      case MessageType.INVALID:
+        return "未知"
+      default:
+        return "未知"
+    }
+  }
 }
 
 const WGTools = new WGToolsImpl();

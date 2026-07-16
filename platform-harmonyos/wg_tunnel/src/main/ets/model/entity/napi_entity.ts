@@ -66,6 +66,7 @@ export interface WGConf {
 }
 
 export interface WGConfInterface {
+  deviceName: string;
   privateKey: string;
   ipArea: IPAddressArea;
   listenerPort?: number,
