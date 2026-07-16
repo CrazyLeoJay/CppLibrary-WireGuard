@@ -58,6 +58,7 @@ namespace WireGuard {
         mutable std::mutex handshakeMutex_;
         mutable std::mutex mutex_;
         Endpoint endpoint;
+        std::atomic<bool> iAmInitiator{true};
 
         // ========== 握手和密钥管理 ==========
         // T noise;        // 当前握手状态机
@@ -138,6 +139,8 @@ namespace WireGuard {
     public:
         PublicKey getPublicKey() const { return config.public_key; }
         size_t getIndex() const { return index; }
+        bool getIAmInitiator() const { return iAmInitiator.load(std::memory_order_acquire); }
+        void setIAmInitiator(bool value) { iAmInitiator.store(value, std::memory_order_release); }
 
         std::vector<IpAddressArea> getAllowedIps() const { return config.allowedIps; }
 
@@ -152,10 +155,9 @@ namespace WireGuard {
 
         /**
          * 是否可以发送数据
-         * @param iAmInitiator 是否为发起者
          * @return 是否可以发送数据
          */
-        bool isCanSendData(const bool &iAmInitiator);
+        bool isCanSendData();
 
         /**
          * 更新发送心跳包的时间为当前时间

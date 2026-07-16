@@ -54,13 +54,11 @@ namespace WireGuard {
 
     constexpr int TUN_READ_BUFFER_SIZE = 65535; // 65kb
 
-    //    constexpr uint64_t REKEY_AFTER_MESSAGES = 1ULL << 60;
-    constexpr uint64_t REKEY_AFTER_MESSAGES = 1ULL << 20; // 表示最大发送的消息数量，超过需要重新握手或者更新密钥
+    constexpr uint64_t REKEY_AFTER_MESSAGES = 1ULL << 60; // 表示最大发送的消息数量，超过需要重新握手或者更新密钥
     constexpr uint64_t RECEIVING_WINDOW_LEN = 8192ULL; // 接收的重放计数器中，window的长度
     constexpr uint64_t REJECT_AFTER_MESSAGES = UINT64_MAX - RECEIVING_WINDOW_LEN - 1;
     // 时间常量（纳秒）
-    //    constexpr uint64_t REKEY_TIMEOUT = 5000000000ULL;       // 5 秒
-    constexpr uint64_t REKEY_TIMEOUT = 2000000000ULL; // 2 秒
+    constexpr uint64_t REKEY_TIMEOUT = 5000000000ULL; // 5 秒
     constexpr uint64_t REKEY_AFTER_TIME = 120000000000ULL; // 120 秒
     constexpr uint64_t REJECT_AFTER_TIME = 180000000000ULL; // 180 秒
     constexpr uint64_t KEEPALIVE_TIMEOUT = 10000000000ULL; // 10 秒

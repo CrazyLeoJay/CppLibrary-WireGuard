@@ -178,11 +178,11 @@ namespace WireGuard {
                 // 判断发送心跳包还需要等待的时间
                 auto waitTime = peer->heartbeatPacketSendWaitTime();
                 if (waitTime == std::chrono::milliseconds(0)) {
-                    if (!peer->isCanSendData(iAmInitiator)) {
+                    if (!peer->isCanSendData()) {
                         // 如果还没准备好，但触发了心跳，那就发送握手，而不是心跳包
                         LOG_DEBUG(
                             "发现有Peer还未准备好，则发起握手 当前 iAmInitiator=%{public}s",
-                            iAmInitiator ? "发起者" : "接收者"
+                            peer->getIAmInitiator() ? "发起者" : "接收者"
                         );
                         try {
                             sendInitiation(peer);
@@ -221,7 +221,7 @@ namespace WireGuard {
     void Device::loopReceiveForSocket() {
         LOG_INFO("开始Socket读取任务");
 
-        std::vector<char> buffer(3000); // 一般udp的包也就 1450 左右
+        std::vector<char> buffer(65536);
         Endpoint endpoint;
         isSocketRunning = true;
         while (isRunning.load(std::memory_order_acquire) && isSocketRunning.load(std::memory_order_acquire) &&
@@ -354,7 +354,7 @@ namespace WireGuard {
             return;
         }
 
-        if (!peer->isCanSendData(iAmInitiator)) {
+        if (!peer->isCanSendData()) {
             // 当前不可发送，则表示握手还未成功，加入消息队列 并去请求握手
             try {
                 LOG_WARN("peer还未准备好，保存请求，并触发握手协议");
@@ -427,7 +427,6 @@ namespace WireGuard {
         std::lock_guard<std::mutex> guard(_peerMutex);
         // 如果接收到握手请求，则表示当前设备为接收端
         // 如果发送握手协议，则需要设置为true
-        iAmInitiator = false;
         auto *msg = reinterpret_cast<const MessageInitiation *>(data);
 
         // 特殊情况，当CPU使用率比较高时，接收端可以选择开启cookie挑战
@@ -449,8 +448,8 @@ namespace WireGuard {
             return;
         }
         const auto currentPeer = _peers[pk];
+        currentPeer->setIAmInitiator(false);
         currentPeer->updateEndpoint(endpoint);
-        // 发送日志
         printStreamLog(currentPeer, MessageType::HANDSHAKE_INITIATION, StreamLog::RECEIVE, len);
 
         try {
@@ -511,6 +510,8 @@ namespace WireGuard {
         auto *msg = reinterpret_cast<const MessageResponse *>(data);
         // todo 需要判断是否需要cookie验证
 
+        std::lock_guard<std::mutex> guard(_indexMutex);
+
         // 根据 receiver_index 查找发起方 Peer
         if (_receiverIndexPeers.find(msg->receiverIndex) == _receiverIndexPeers.end()) {
             throw WGException("未找到远端Peer");
@@ -521,6 +522,13 @@ namespace WireGuard {
         printStreamLog(currentPeer, MessageType::HANDSHAKE_RESPONSE, StreamLog::RECEIVE, len);
         // 更新端点 (PS:其实我觉得没啥更新必要，按道理，返回的ip地址和端口，应该和请求的一致)
         currentPeer->updateEndpoint(endpoint);
+
+        try {
+            cookieChecker.verifyMac1(*msg, config.private_key);
+        } catch (const std::exception &e) {
+            LOG_WARN("MAC1 验证失败： %{public}s", e.what());
+            return;
+        }
 
         try {
             currentPeer->verifyHandshakeInitiationResponse(*msg);
@@ -551,6 +559,8 @@ namespace WireGuard {
             return;
         }
         auto *msg = reinterpret_cast<const MessageCookie *>(data);
+
+        std::lock_guard<std::mutex> guard(_indexMutex);
 
         // 根据 receiver_index 查找发起方 Peer
         if (_receiverIndexPeers.find(msg->receiverIndex) == _receiverIndexPeers.end()) {
@@ -607,11 +617,27 @@ namespace WireGuard {
         }
         // 记录接收的数据
         currentPeer->addRxBytes(cipherLen);
+        
+        // 根据IP头部提取真实数据长度（去掉加密时添加的零填充）
+        size_t actualLen = result.size();
+        if (result.size() >= 4) {
+            if ((result[0] >> 4) == 4) {
+                // IPv4: 总长度在第2-3字节（big-endian）
+                actualLen = (static_cast<size_t>(result[2]) << 8) | result[3];
+            } else if ((result[0] >> 4) == 6) {
+                // IPv6: 有效载荷长度在第4-5字节（big-endian），不包含40字节头部
+                size_t payloadLen = (static_cast<size_t>(result[4]) << 8) | result[5];
+                actualLen = 40 + payloadLen;
+            }
+        }
+        
         // 将解密的数据写入网卡进行返回
-        sendToLocal(result.data(), result.size());
+        sendToLocal(result.data(), actualLen);
     }
 
     void Device::indexMapClear() {
+        std::lock_guard<std::mutex> guard(_indexMutex);
+
         for (auto it = _receiverIndexPeers.begin(); it != _receiverIndexPeers.end();) {
             if (!it->second->isActive()) {
                 it = _receiverIndexPeers.erase(it);
@@ -636,7 +662,7 @@ namespace WireGuard {
     void Device::sendInitiation(const std::shared_ptr<Peer> &peer, const bool &force) {
         // 先设置当前设备为发起端
         // 如果发送握手协议，则需要设置为true
-        iAmInitiator = true;
+        peer->setIAmInitiator(true);
 
         // 配置 peer 索引
         const auto index = createNewIndex(peer);
@@ -766,7 +792,7 @@ namespace WireGuard {
         // 保存数据到队列
         peer->queuePacket(data);
         // 子端其他处理
-        if (iAmInitiator) {
+        if (peer->getIAmInitiator()) {
             sendInitiation(peer);
         }
     }
