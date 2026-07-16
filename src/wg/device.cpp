@@ -189,7 +189,8 @@ namespace WireGuard {
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 一般是创建的太频繁，这里等2秒再循环 或者直接调用握手
-                            LOG_WARN("发送握手初始化失败 peerIndex=%{public}zu err=%{public}s，2秒后重试", peer->getIndex(), e.what());
+                            LOG_WARN("发送握手初始化失败 peerIndex=%{public}zu err=%{public}s，2秒后重试", peer->getIndex(),
+                                     e.what());
                             nextSleepDuration = std::chrono::seconds(2);
                         }
                     } else {
@@ -198,7 +199,8 @@ namespace WireGuard {
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 如果发送发生异常，就设置一个小的等待时间，再次尝试
-                            LOG_WARN("心跳发送数据包失败 peerIndex=%{public}zu err=%{public}s，1秒后重试", peer->getIndex(), e.what());
+                            LOG_WARN("心跳发送数据包失败 peerIndex=%{public}zu err=%{public}s，1秒后重试", peer->getIndex(),
+                                     e.what());
                             nextSleepDuration = std::chrono::seconds(1);
                         }
                     }
@@ -508,7 +510,7 @@ namespace WireGuard {
 
         LOG_INFO("握手响应");
         auto *msg = reinterpret_cast<const MessageResponse *>(data);
-        // todo 需要判断是否需要cookie验证
+        // 需要判断是否需要cookie验证
 
         std::lock_guard<std::mutex> guard(_indexMutex);
 
@@ -524,7 +526,7 @@ namespace WireGuard {
         currentPeer->updateEndpoint(endpoint);
 
         try {
-            cookieChecker.verifyMac1(*msg, config.private_key);
+            CookieChecker::verifyMac1(*msg, currentPeer->getPublicKey());
         } catch (const std::exception &e) {
             LOG_WARN("MAC1 验证失败： %{public}s", e.what());
             return;
@@ -617,7 +619,7 @@ namespace WireGuard {
         }
         // 记录接收的数据
         currentPeer->addRxBytes(cipherLen);
-        
+
         // 根据IP头部提取真实数据长度（去掉加密时添加的零填充）
         size_t actualLen = result.size();
         if (result.size() >= 4) {
@@ -630,7 +632,7 @@ namespace WireGuard {
                 actualLen = 40 + payloadLen;
             }
         }
-        
+
         // 将解密的数据写入网卡进行返回
         sendToLocal(result.data(), actualLen);
     }
@@ -681,7 +683,7 @@ namespace WireGuard {
             str += "端点为空（" + endpoint.address.toIpStr() + ":" + std::to_string(endpoint.port) + "），跳过握手发送。";
             str += "请确认是否已收到对端握手包或是否配置了 Endpoint";
             printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), str);
-            LOG_WARN("%{public}s",str.c_str());
+            LOG_WARN("%{public}s", str.c_str());
             return;
         }
 
