@@ -202,7 +202,7 @@ namespace WireGuard {
 
     bool Peer::handleHandshakeInitiation(const MessageInitiation &msg) {
         std::lock_guard<std::mutex> guard(handshakeMutex_);
-        noiseReceive.decodeCheckHandshakeInitiation(msg, config.public_key);
+        noiseReceive.decodeCheckHandshakeInitiation(msg);
         lastReceivedHandshake_ = Clock::now();
         return true;
     }

@@ -95,6 +95,7 @@ namespace WireGuard {
     void Device::close() {
         LOG_INFO("device close 通知停止所有任务");
         isRunning.store(false, std::memory_order_release);
+        isSocketRunning.store(false, std::memory_order_release);
         pipWaitForHeartbeatTask.notify(); // 通知心跳任务停止阻塞
         socket.close(); // 关闭 socket
 
@@ -245,21 +246,16 @@ namespace WireGuard {
                         !isSocketRunning.load(std::memory_order_acquire)) {
                         break;
                     }
+                    if (received == -2) {
+                        break;
+                    }
                     if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        // 没有数据，休眠后继续循环
-                        // 表示当前没有数据可读（通常发生在非阻塞 socket 上）。
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
                     }
-                    // 关闭屏幕时，也会停止，应该要重新链接
-                    // 异常，直接跳出
-                    //                    LOG_WARN("socket 读取异常，跳出。");
-                    // 需要重新建立socket
-                    // 由于socket创建fd后需要系统标记保护，需要外部触发。或者创建回调
-                    //                    break; // 套接字错误
-                    auto fd = socket.resetSocketFd(); // 重新创建套接字然后去通信，需要重新握手 并且需要通知客户端
+                    auto fd = socket.resetSocketFd();
                     LOG_SOCKET("更换Socket fd=%{public}d", fd);
-                    socketNewFd(fd); // 通知fd更换
+                    socketNewFd(fd);
                     continue;
                 }
                 Logs::print_space([&]() {

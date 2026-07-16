@@ -102,9 +102,8 @@ namespace WireGuard {
              * 从头计算握手协议，并且解析验证
              *
              * @param msg
-             * @param peer_public_key 对端公钥，用于验证 MAC1
              */
-            void decodeCheckHandshakeInitiation(const MessageInitiation &msg, const PublicKey &peer_public_key) const;
+            void decodeCheckHandshakeInitiation(const MessageInitiation &msg) const;
 
 
             /**

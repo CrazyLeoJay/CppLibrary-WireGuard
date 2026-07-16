@@ -256,7 +256,8 @@ namespace WireGuard {
                 Endpoint ep{};
                 ep.address.family = IPAddress::IPv4;
                 inet_pton(AF_INET, ip.c_str(), &ep.address.ip.ipv4);
-                ep.port = htons(port);
+                // ep.port = htons(port);
+                ep.port = port;
                 return ep;
             }
         }; // namespace IP

@@ -145,10 +145,10 @@ namespace WireGuard {
         return remote_public;
     }
 
-    void Noise::NOISEReceive::decodeCheckHandshakeInitiation(const MessageInitiation &msg, const PublicKey &peer_public_key) const {
+    void Noise::NOISEReceive::decodeCheckHandshakeInitiation(const MessageInitiation &msg) const {
         std::lock_guard<std::mutex> lock(_noiseMutex);
         // 验证mac1
-        CookieChecker::verifyMac1(msg, peer_public_key);
+        CookieChecker::verifyMac1(msg, local_public);
 
         remote_index = msg.senderIndex;
         // 获取对端的临时公钥
@@ -309,7 +309,7 @@ namespace WireGuard {
         Logs::print_space([&]() { LOG_DEBUG("加密证完成"); });
 
         // 处理mac1
-        const auto mac1 = CookieChecker::computeMac1(msg, local_public);
+        const auto mac1 = CookieChecker::computeMac1(msg, remote_public);
         std::memcpy(msg.mac1, mac1.data(), COOKIE_LEN);
 
         // 处理mac2
@@ -410,7 +410,7 @@ namespace WireGuard {
         });
 
         // 生成 mac1
-        initHandshakeMac1 = CookieChecker::computeMac1(msg, local_public);
+        initHandshakeMac1 = CookieChecker::computeMac1(msg, remote_public);
         std::memcpy(msg.mac1, initHandshakeMac1.data(), COOKIE_LEN);
 
         if (last_received_cookie) {
@@ -437,7 +437,7 @@ namespace WireGuard {
         // }
         // 验证 mac1 证明该响应是服务端专门为你这次握手生成的，防止伪造和重放。
         // 如果mac1 不一致，表示服务端有问题，不是目标
-        CookieChecker::verifyMac1(msg, remote_public);
+        CookieChecker::verifyMac1(msg, local_public);
 
         // 需要判断当前状态，是否为刚握手完成，否则应该抛出异常重新握手
         if (state != NOISEState::send_created_handshake_initiation_msg) {
