@@ -297,7 +297,7 @@ namespace WireGuard {
             socketListenerMessage(type, data, len, endpoint);
         } catch (const std::exception &e) {
             LOG_WARN("socket 接收消息异常(%{public}u target:%{public}s)：%{public}s", static_cast<uint32_t>(type),
-                     endpoint.toIpStr(), e.what());
+                     endpoint.toIpStr().c_str(), e.what());
         }
     }
 
