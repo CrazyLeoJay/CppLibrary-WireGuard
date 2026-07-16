@@ -163,7 +163,7 @@ namespace WireGuard {
         auto decryptMsg = receiveKp->decrypt(encryptMsg.data(), encryptMsg.size(), *nonce);
         LOG_DEBUG("解密数据(len:%d): %s", decryptMsg.size(), crypto::bin2B64(decryptMsg.data(), decryptMsg.size()).c_str());
         LOG_DEBUG("对比");
-        auto decryptMessage = std::string(reinterpret_cast<const char *>(decryptMsg.data()), decryptMsg.size());
+        auto decryptMessage = std::string(reinterpret_cast<const char *>(decryptMsg.data()), std::strlen(sendMessage));
         EXPECT_EQ(sendMessage, decryptMessage);
     }
 

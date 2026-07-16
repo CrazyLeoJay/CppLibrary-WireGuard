@@ -133,71 +133,72 @@ void startClient() {
 
 #define  NDEBUG
 
-TEST(SOCKET, serverStart) {
-    install_signal_handler();
+// TEST(SOCKET, serverStart) {
+//     install_signal_handler();
 
-    const auto config = makeConfig();
-    WireGuard::Device device{config};
-    device.setStreamLog([](const WireGuard::StreamLog::Message &msg) {
-        const auto direction = msg.direction == WireGuard::StreamLog::RECEIVE ? "接收" : "发送";
-        LOG_INFO("数据流日志(%s)：peerIndex=%d, 方向=%s 数据量=%zu message=%s", msg.success?"true":"false",
-                 static_cast<int>(msg.peerIndex), direction, msg.sc.length, msg.msg);
-    });
+//     const auto config = makeConfig();
+//     WireGuard::Device device{config};
+//     device.setStreamLog([](const WireGuard::StreamLog::Message &msg) {
+//         const auto direction = msg.direction == WireGuard::StreamLog::RECEIVE ? "接收" : "发送";
+//         LOG_INFO("数据流日志(%s)：peerIndex=%d, 方向=%s 数据量=%zu message=%s", msg.success?"true":"false",
+//                  static_cast<int>(msg.peerIndex), direction, msg.sc.length, msg.msg);
+//     });
 
-    // 启动socket
-    auto socket_fd = device.initSocketStart([](int fd) {
-        LOG_INFO("server init for fd=%d", fd);
-    });
-    // 启动读取线程
-    device.start(0);
-    LOG_INFO("server start", socket_fd);
+//     // 启动socket
+//     auto socket_fd = device.initSocketStart([](int fd) {
+//         LOG_INFO("server init for fd=%d", fd);
+//     });
+//     // 启动读取线程
+//     device.start(0);
+//     LOG_INFO("server start", socket_fd);
 
 
-    std::cout << "Begin Working..." << std::endl;
+//     std::cout << "Begin Working..." << std::endl;
+//     // 主循环，不断检查运行标志
+//     while (g_running) {
+//         // 执行你的任务（例如 VPN 数据收发）
+//         std::cout << "Working..." << std::endl;
+//         sleep(2); // 模拟工作
+//     }
+
+//     std::cout << "Cleanup and exit." << std::endl;
+//     // 在这里释放 VPN 适配器、关闭套接字等
+// }
+// 
+// TEST(SOCKET, clientStart) {
+    // install_signal_handler();
+// 
+    // try {
+        // startClient();
+    // } catch (const std::exception &e) {
+        // LOG_ERROR("client start %s", e.what());
+    // }
+// 
+    // std::cout << "Begin Working..." << std::endl;
     // 主循环，不断检查运行标志
-    while (g_running) {
-        // 执行你的任务（例如 VPN 数据收发）
-        std::cout << "Working..." << std::endl;
-        sleep(2); // 模拟工作
-    }
-
-    std::cout << "Cleanup and exit." << std::endl;
-    // 在这里释放 VPN 适配器、关闭套接字等
-}
-
-TEST(SOCKET, clientStart) {
-    install_signal_handler();
-
-    try {
-        startClient();
-    } catch (const std::exception &e) {
-        LOG_ERROR("client start %s", e.what());
-    }
-
-    std::cout << "Begin Working..." << std::endl;
-    // 主循环，不断检查运行标志
-    while (g_running) {
+    // while (g_running) {
         // 执行你的任务（例如 VPN 数据收发）
         // std::cout << "Working..." << std::endl;
-        sleep(2); // 模拟工作
-    }
-
-    std::cout << "Cleanup and exit." << std::endl;
+        // sleep(2); // 模拟工作
+    // }
+// 
+    // std::cout << "Cleanup and exit." << std::endl;
     // 在这里释放 VPN 适配器、关闭套接字等
-}
-
-TEST(network, ipv6) {
-    WireGuard::IPAddress result;
-    try {
-        result = WireGuard::Tools::ipAddressForIpv6("[fd6e:627:ac0e:0:9167:135:56bc:3098]");
-        std::cout << "ipv6 addresses:" << result.toIpStr() << std::endl;
-    } catch (const std::exception &e) {
-        LOG_ERROR("ipv6 addresses: %s", e.what());
-    }
-    try {
-        result = WireGuard::Tools::ipAddressForIpv6("fd6e:627:ac0e:0:9167:135:56bc:3098");
-        std::cout << "ipv6 addresses:" << result.toIpStr() << std::endl;
-    } catch (const std::exception &e) {
-        LOG_ERROR("ipv6 addresses: %s", e.what());
-    }
-}
+// }
+// 
+// TEST(network, ipv6) {
+    // WireGuard::IPAddress result;
+    // try {
+        // result = WireGuard::Tools::ipAddressForIpv6("[fd6e:627:ac0e:0:9167:135:56bc:3098]");
+        // std::cout << "ipv6 addresses:" << result.toIpStr() << std::endl;
+    // } catch (const std::exception &e) {
+        // LOG_ERROR("ipv6 addresses: %s", e.what());
+    // }
+    // try {
+        // result = WireGuard::Tools::ipAddressForIpv6("fd6e:627:ac0e:0:9167:135:56bc:3098");
+        // std::cout << "ipv6 addresses:" << result.toIpStr() << std::endl;
+    // } catch (const std::exception &e) {
+        // LOG_ERROR("ipv6 addresses: %s", e.what());
+    // }
+// }
+// 

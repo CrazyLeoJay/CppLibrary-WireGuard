@@ -51,8 +51,6 @@ namespace WireGuard {
         ~Device();
 
     protected: // 确定参数
-        bool iAmInitiator{true}; // 是否为发起者。默认是，会率先主动发起握手
-
         const ContentKey content_key_;
         const DeviceConfig config;
         UDPSocket socket{DNS::IPV6};
