@@ -129,6 +129,16 @@ namespace WireGuard {
         LOG_INFO("关闭设备通信并清除数据");
     }
 
+    void Device::sendPacket(const uint8_t *data, size_t len) {
+        std::lock_guard<std::mutex> lock(_peerMutex);
+        for (const auto &pair : _peers) {
+            auto peer = pair.second;
+            if (peer->isCanSendData()) {
+                encryptPacketAndSendSocket(peer, data, len);
+            }
+        }
+    }
+
     void Device::initPeers(const std::vector<PeerConfig> &peers) {
         // 每次初始化先关闭清理资源
         //        close();

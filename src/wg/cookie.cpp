@@ -57,15 +57,13 @@ namespace WireGuard {
     }
 
     MacData CookieChecker::computeMac1(const MessageInitiation &msg, const PublicKey &public_key) {
-        constexpr size_t mac1_input_length = sizeof(MessageInitiation) - COOKIE_LEN * 2;
-        // 转为 const uint8_t*（只读）
+        constexpr size_t mac1_input_length = offsetof(MessageInitiation, mac1);
         const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
         return crypto::MAC(crypto::mixHash(crypto::LABEL_MAC1, public_key), bytes, mac1_input_length);
     }
 
-    MacData CookieChecker::computeMac1(const MessageResponse &msg, const PrivateKey &public_key) {
-        constexpr size_t mac1_input_length = sizeof(MessageResponse) - COOKIE_LEN * 2;
-        // 转为 const uint8_t*（只读）
+    MacData CookieChecker::computeMac1(const MessageResponse &msg, const PublicKey &public_key) {
+        constexpr size_t mac1_input_length = offsetof(MessageResponse, mac1);
         const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
         return crypto::MAC(crypto::mixHash(crypto::LABEL_MAC1, public_key), bytes, mac1_input_length);
     }
@@ -149,13 +147,11 @@ namespace WireGuard {
         }
     }
 
-    void CookieChecker::verifyMac1(const MessageResponse &msg, const PrivateKey &public_key) {
+    void CookieChecker::verifyMac1(const MessageResponse &msg, const PublicKey &public_key) {
         if (cookie::isEmpty(msg.mac1)) {
             throw WGException("Mac1 不存在");
         }
         const auto verifyCookie = computeMac1(msg, public_key);
-        // 判断两个 cookie 是否一致 一致表示有效
-        // return std::memcmp(verifyCookie.data(), msg.mac1, COOKIE_LEN) == 0;
         if (crypto_verify_16(msg.mac1, verifyCookie.data()) != 0) {
             throw WGException(
                 "mac1 验证失败 \nmsg.mac1=%s \nc_mac1  =%s",

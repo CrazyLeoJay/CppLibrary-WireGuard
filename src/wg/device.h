@@ -121,6 +121,13 @@ namespace WireGuard {
          */
         void close();
 
+        /**
+         * 发送数据包到所有已建立连接的Peer
+         * @param data 数据指针
+         * @param len 数据长度
+         */
+        void sendPacket(const uint8_t *data, size_t len);
+
     private: // 被动操作 初始化、轮询、监听等
         void initPeers(const std::vector<PeerConfig> &peer);
 
