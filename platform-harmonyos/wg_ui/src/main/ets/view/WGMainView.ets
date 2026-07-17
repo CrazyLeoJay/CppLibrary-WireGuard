@@ -55,7 +55,15 @@ export struct WGMainViewNavDest {
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_2_circlepath')),
         action: () => {
           WireGuard.event.publishVpnStatusQuery();
-          this.vm.loadConfigs()
+          this.vm.loadConfigs().then(() => {
+            try {
+              this.getUIContext().getPromptAction().showToast({
+                message: `加载了 ${this.vm.wgList.length} 条数据`,
+              })
+            } catch (error) {
+              LLog.error(TAG, error)
+            }
+          })
         }
       },
       // {
@@ -69,7 +77,8 @@ export struct WGMainViewNavDest {
       // },
       {
         value: "设置",
-        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.dot_grid_1x2')),
+        // symbolIcon: new SymbolGlyphModifier($r('sys.symbol.dot_grid_1x2')),
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')),
         action: () => {
           WireGuardNav.navDescToWGSettingPreView(this.nav)
         }
@@ -273,13 +282,19 @@ struct MainItemView {
   build() {
     Row() {
       Column() {
-        Text(`(${this.index + 1}) ${this.data.name}`)
+        Text(`${this.data.name}`)
+          .fontSize('18fp')
         Text(`createAt: ${this.data.data.createdAt}`)
+          .fontSize('12fp')
       }
       .alignItems(HorizontalAlign.Start)
 
       Blank().layoutWeight(1)
       Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
+        .size({
+          width: '50vp',
+          height: '28vp',
+        })
         .onClick(() => {
           // 关闭其他开关
           this.vm.closeOther(this.data.id)

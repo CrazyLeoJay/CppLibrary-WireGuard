@@ -16,7 +16,6 @@
  */
 import { ORM } from '@ibestservices/ibest-orm';
 import { JSON } from '@kit.ArkTS';
-import { LLog, Tools } from '../../../../../Index';
 import { WGDBConf } from '../entity/WGConfigEntity';
 import WgConfigTable from './table/WgConfigTable';
 
@@ -70,5 +69,16 @@ export default class WGDao {
 
   deleteConfig(id: number) {
     this.orm.deleteById(WgConfigTable, id);
+  }
+
+  /**
+   * 计数这个名称在配置中出现的次数
+   *
+   * @param inputName
+   */
+  getCountForName(inputName: string): number {
+    return this.orm.query(WgConfigTable)
+      .where({ name: inputName })
+      .count()
   }
 }
