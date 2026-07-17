@@ -55,7 +55,7 @@ namespace WireGuard {
             if (inet_ntop(AF_INET6, &ip.ipv6, buf, INET6_ADDRSTRLEN) == nullptr) {
                 return "";
             }
-            return std::string(buf);
+            return "[" + std::string(buf) + "]";
         }
     }
 
