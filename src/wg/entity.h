@@ -241,6 +241,16 @@ namespace WireGuard {
     struct IpAddressArea {
         IPAddress address;
         uint8_t cidr = -1; // -1表示没有掩码
+
+        std::string toIpStr() const {
+            if (cidr > 0) {
+                return address.toIpStr() + "/" + std::to_string(cidr);
+            }
+            if (address.family == IPAddress::IPv4) {
+                return address.toIpStr() + "/32";
+            }
+            return address.toIpStr() + "/128";
+        }
     };
 
     constexpr uint8_t IPv4HeaderLen = 20;
