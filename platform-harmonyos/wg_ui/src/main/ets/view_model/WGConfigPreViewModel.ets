@@ -18,8 +18,7 @@ import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
-import { AppStorageV2 } from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
+import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
@@ -38,7 +37,7 @@ export default class WGConfigPreViewModel {
   /**
    * 是否发生为获取参数异常
    */
-  @Trace isVPNNoGetParamThrow:boolean = false;
+  @Trace isVPNNoGetParamThrow: boolean = false;
 
   constructor() {
     this.updateStatus();
@@ -140,6 +139,26 @@ export default class WGConfigPreViewModel {
       context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
       LLog.error(TAG, { error: e, message: "开启VPN异常" });
     }
+  }
+
+
+  isSwitchClick: boolean = false;
+
+  onSwitchChange(context: UIContext, isOn: boolean) {
+    if (this.isSwitchClick) {
+      if (isOn) {
+        LLog.info(TAG, "点击开启VPN")
+        this.changeVpnConfig(context, true)
+      } else {
+        LLog.info(TAG, "点击关闭VPN")
+        this.changeVpnConfig(context, false)
+      }
+    }
+    this.isSwitchClick = false
+  }
+
+  setSwitchClick() {
+    this.isSwitchClick = true
   }
 }
 

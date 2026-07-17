@@ -37,10 +37,8 @@ const TAG = "wgHelper"
  * @author leojay`fu
  */
 class WGHelper {
-  db = new DatabaseHelper();
-
   get config() {
-    return new WGDao(this.db.orm)
+    return new WGDao(WireGuard.db.orm)
   }
 }
 
@@ -53,7 +51,7 @@ export namespace WireGuard {
    * @param context
    */
   export function init(context: Context) {
-    helper.db.init(context);
+    db.init(context);
   }
 
   /**
@@ -71,6 +69,8 @@ export namespace WireGuard {
   }
 
   export const helper = new WGHelper();
+
+  export const db = new DatabaseHelper();
 
   export const regex = new ParamsRegex();
 

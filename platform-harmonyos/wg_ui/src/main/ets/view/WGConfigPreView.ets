@@ -258,16 +258,10 @@ struct InterfaceCardView {
           right: '40vp',
         })
         .onChange((isOn) => {
-
+          this.vm.onSwitchChange(this.getUIContext(), isOn)
         })
         .onClick((event) => {
-          if (this.vm.isVpnOpen) {
-            LLog.info(TAG, "点击开启VPN")
-            this.vm.changeVpnConfig(this.getUIContext(), true)
-          } else {
-            LLog.info(TAG, "点击关闭VPN")
-            this.vm.changeVpnConfig(this.getUIContext(), false)
-          }
+          this.vm.setSwitchClick();
         })
     }
   }

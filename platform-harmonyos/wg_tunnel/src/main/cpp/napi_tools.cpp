@@ -152,6 +152,18 @@ namespace NapiTools {
             if (ns != napi_ok) {
                 throw WireGuard::WGException("napi调用异常");
             }
+
+            if (inter.ListenPort) {
+                napi_value nvListenPort;
+                ns = napi_create_uint32(env, *inter.ListenPort, &nvListenPort);
+                if (ns != napi_ok) {
+                    throw WireGuard::WGException("napi调用异常");
+                }
+                ns = napi_set_named_property(env, result, "listenerPort", nvListenPort);
+                if (ns != napi_ok) {
+                    throw WireGuard::WGException("napi调用异常");
+                }
+            }
             return result;
         }
 

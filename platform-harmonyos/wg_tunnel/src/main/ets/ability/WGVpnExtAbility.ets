@@ -87,18 +87,16 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
   override onDestroy(): void {
     super.onDestroy();
     LLog.info(TAG, "WG VPN onDestroy")
+    // 清空正在运行的服务id
+    VPNChangeHelper.stopVpn()
     this.vpnConnection?.stopServer()
       .then(() => {
         LLog.info(TAG, "停止VPN成功")
       })
       .catch((err: BusinessError) => {
-        VPNChangeHelper.stopVpn()
         LLog.error(TAG, err)
       })
-      .finally(() => {
-        // 清空正在运行的服务id
-        VPNChangeHelper.stopVpn()
-      })
+      .finally(() => {})
   }
 }
 
