@@ -49,7 +49,7 @@ export default class WGMainViewModel {
 
   async loadConfigs() {
     this.wgList = WireGuard.helper.config.allConfig().map((it) => {
-      return new MainItemData(it);
+      return new MainItemData(this, it);
     })
     LLog.info(TAG, `加载 ${this.wgList.length} 条数据`)
   }
@@ -113,7 +113,7 @@ export default class WGMainViewModel {
     let file: fileIo.File | undefined
     try {
       file = await fileIo.open(resUrl, fileIo.OpenMode.READ_ONLY)
-      // todo 一般情况下 1m 的内存足够配置，后续还是要在c++处构建可以通过流写入的方式
+      // 一般情况下 1m 的内存足够配置，后续还是要在c++处构建可以通过流写入的方式
       const buf = new ArrayBuffer(1024 * 1024)
       const readLen = await fileIo.read(file.fd, buf)
       if (readLen <= 0) {
@@ -133,17 +133,54 @@ export default class WGMainViewModel {
    * 设置活跃的配置，即已经开启的配置
    * @param runningConfigId
    */
-  setActiveConfigId(config?: StatusConfig) {
+  setActiveConfigId(config: StatusConfig) {
     const running = config?.isOpen() ?? false
+    this.lastOpenConfigId = config?.runningConfigId ?? -1
     if (running) {
-      const runId = config!.runningConfigId
       for (let item of this.wgList) {
-        item.open = (item.id == runId);
+        item.open = (item.id == this.lastOpenConfigId);
       }
     } else {
       for (let item of this.wgList) {
         item.open = false;
       }
+    }
+  }
+
+  closeOther(id: number) {
+    for (let item of this.wgList) {
+      if (item.id != id) {
+        // if (item.id == this.lastOpenConfigId) {
+        item.open = false;
+      }
+    }
+  }
+
+  lastOpenConfigId: number = +1;
+
+  /**
+   * 改变Vpn配置，启动或停止
+   */
+  async changeVpnConfig(context: UIContext, item: MainItemData, isOn: boolean) {
+    // 如果是
+    if (isOn && this.lastOpenConfigId == item.id) {
+      // 如果是开启状态，且id一致，就不做处理
+      return;
+    }
+    if (isOn) {
+      this.lastOpenConfigId = item.id
+    } else {
+      // 关闭时，设置为-1
+      this.lastOpenConfigId = -1
+    }
+    try {
+      const config = JSON.parse(item.data.config!) as WGDBConf
+      // const config = WireGuard.helper.config.getConfigForId(this.id)!
+      await WireGuard.runWGConfig(item.id, config, isOn)
+    } catch (e) {
+      item.open = false;
+      context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
+      LLog.error(TAG, { error: e, message: "开启VPN异常" });
     }
   }
 }
@@ -153,11 +190,14 @@ export default class WGMainViewModel {
  */
 @ObservedV2
 export class MainItemData {
+  private vm: WGMainViewModel
   name: string;
   @Trace open: boolean = false;
   data: WgConfigTable
+  private isClick = false
 
-  constructor(data: WgConfigTable) {
+  constructor(vm: WGMainViewModel, data: WgConfigTable) {
+    this.vm = vm;
     this.data = data;
     this.name = data.name!;
     this.open = WireGuard.statusConfig.isRunning(this.id)
@@ -167,18 +207,20 @@ export class MainItemData {
     return this.data.id!;
   }
 
-  /**
-   * 改变Vpn配置，启动或停止
-   */
-  async changeVpnConfig(context: UIContext, isOn: boolean) {
-    try {
-      const config = JSON.parse(this.data.config!) as WGDBConf
-      // const config = WireGuard.helper.config.getConfigForId(this.id)!
-      await WireGuard.runWGConfig(this.id, config, isOn)
-    } catch (e) {
-      this.open = false;
-      context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
-      LLog.error(TAG, { error: e, message: "开启VPN异常" });
+  onClick() {
+    this.isClick = true
+  }
+
+  openChange(context:UIContext,isOn: boolean) {
+    if (this.isClick) {
+      if (isOn) {
+        LLog.info(TAG, "点击开启VPN")
+        this.vm.changeVpnConfig(context, this, true)
+      } else {
+        LLog.info(TAG, "点击关闭VPN")
+        this.vm.changeVpnConfig(context, this, false)
+      }
+      this.isClick = false
     }
   }
 }

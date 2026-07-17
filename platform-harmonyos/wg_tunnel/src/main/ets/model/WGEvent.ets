@@ -18,6 +18,7 @@ import { LLog, StreamLogMessage, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
 import VPNEventStatusParams from './entity/VPNEventStatusParams';
 import WGTools from './WGTools';
+import { StatusConfig } from './WGConfig';
 import { WGEventThrow, WGEventThrowForString, WGEventThrowParam, WGEventThrowToString } from '../error/WGEventThrow';
 
 /**
@@ -64,7 +65,6 @@ export class SubEvent implements SubEventCancel {
       try {
         invoke(data)
       } catch (err) {
-        LLog.error(TAG, 'err:' + err)
         LLog.error(TAG, err)
         error?.(err)
       }
@@ -106,8 +106,11 @@ export class WGSystemEventDef {
     }
   }
 
-  private subscribe(tag: string, invoke: (data: commonEventManager.CommonEventData) => void,
-    error?: (err: BusinessError) => void): SubEventCancel {
+  private subscribe(
+    tag: string,
+    invoke: (data: commonEventManager.CommonEventData) => void,
+    error?: (err: BusinessError) => void
+  ): SubEventCancel {
     const sub = new SubEvent(tag);
     sub.subscribe(invoke, error)
     LLog.info(TAG, `注册全局 ${tag} 事件监听`)
@@ -137,7 +140,17 @@ export class WGSystemEventDef {
     return this.subscribe(VPN_STATUS_CHANGE, (data) => {
       if (data.data) {
         const result = JSON.parse(data.data) as VPNEventStatusParams
-        paramsInvoke(result)
+        const vsp: VPNEventStatusParams = {
+          isOpen: result.isOpen,
+          tag: result.tag,
+        }
+        if (result.status) {
+          const sc = new StatusConfig()
+          sc.runningConfigId = result.status?.runningConfigId
+          sc.running = result.status.running
+          vsp.status = sc
+        }
+        paramsInvoke(vsp)
       }
     })
   }

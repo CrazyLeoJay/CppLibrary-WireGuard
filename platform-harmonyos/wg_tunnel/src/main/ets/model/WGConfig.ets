@@ -26,7 +26,6 @@ const TAG = "WG状态"
  */
 
 class WGStatusImpl {
-
   /**
    * @returns 获取状态配置
    */
@@ -40,7 +39,6 @@ class WGStatusImpl {
     })!;
     // return preferences.getPreferencesSync()
   }
-
 
   /**
    * vpn开始运行
@@ -71,8 +69,8 @@ class WGStatusImpl {
     LLog.info(TAG, `更新状态:${JSON.stringify(this.getConfig())}`)
   }
 
-  update(config:StatusConfig){
-    const c =this.getConfig()
+  update(config: StatusConfig) {
+    const c = this.getConfig()
     c.runningConfigId = config.runningConfigId
     c.running = config.running
   }
@@ -85,7 +83,7 @@ class WGStatusImpl {
 
 
 export class StatusConfig {
-  runningConfigId?: number;
+  runningConfigId?: number = undefined;
   running: boolean = false;
 
   isOpen(): boolean {

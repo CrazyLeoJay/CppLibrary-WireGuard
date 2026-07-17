@@ -261,7 +261,7 @@ struct InterfaceCardView {
 
         })
         .onClick((event) => {
-          if (!this.vm.isVpnOpen) {
+          if (this.vm.isVpnOpen) {
             LLog.info(TAG, "点击开启VPN")
             this.vm.changeVpnConfig(this.getUIContext(), true)
           } else {

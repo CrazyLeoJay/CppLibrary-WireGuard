@@ -139,9 +139,9 @@ export struct WGMainView {
     if (status) {
       // 更新UI线程配置
       WireGuard.statusConfig.update(status)
+      // 设置开关
+      this.vm.setActiveConfigId(status);
     }
-    // 设置开关
-    // this.vm.setActiveConfigId(status);
   })
 
   aboutToAppear(): void {
@@ -192,7 +192,7 @@ export struct WGMainView {
       Repeat(this.vm.wgList)
         .each((it) => {
           ListItem() {
-            MainItemView({ data: it.item, index: it.index })
+            MainItemView({ vm: this.vm, data: it.item, index: it.index })
               .onClick(() => {
                 WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
               })
@@ -266,6 +266,7 @@ export struct WGMainView {
 
 @ComponentV2
 struct MainItemView {
+  @Param @Require vm: WGMainViewModel
   @Param @Require data: MainItemData;
   @Param @Require index: number;
 
@@ -278,17 +279,15 @@ struct MainItemView {
       .alignItems(HorizontalAlign.Start)
 
       Blank().layoutWeight(1)
-      // Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
-      //   .onClick(()=>{
-      //     this.data.open
-      //     if (!this.data.open) {
-      //       LLog.info(TAG, "点击开启VPN")
-      //       this.data.changeVpnConfig(this.getUIContext(), true)
-      //     } else {
-      //       LLog.info(TAG, "点击关闭VPN")
-      //       this.data.changeVpnConfig(this.getUIContext(), false)
-      //     }
-      //   })
+      Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
+        .onClick(() => {
+          // 关闭其他开关
+          this.vm.closeOther(this.data.id)
+          this.data.onClick();
+        })
+        .onChange((isOn: boolean) => {
+          this.data.openChange(this.getUIContext(), isOn);
+        })
     }
     .padding({ left: '16vp', right: '16vp' })
     .width('100%')
