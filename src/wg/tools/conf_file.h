@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "entity.h"
+#include "wg_dns.h"
 
 namespace WireGuard {
     namespace Tools {
@@ -49,6 +50,16 @@ namespace WireGuard {
             std::string ipStrOrDomain; // ip地址或者域名
             uint32_t port; // 远程端口，没有默认80
             SiteUrlType type{ERROR};
+
+            std::string toIpStr() const {
+                if (type == SiteUrlType::IPv6) {
+                    if (!ipStrOrDomain.empty() && ipStrOrDomain.front() == '[' && ipStrOrDomain.back() == ']') {
+                        return ipStrOrDomain + ":" + std::to_string(port);
+                    }
+                    return "[" + ipStrOrDomain + "]" + ":" + std::to_string(port);
+                }
+                return ipStrOrDomain + ":" + std::to_string(port);
+            }
         };
 
         struct WGConfInterface {
@@ -56,7 +67,7 @@ namespace WireGuard {
             WGKey privateKey;
             IpAddressArea ipArea;
             std::vector<IPAddress> dns;
-            std::shared_ptr<uint32_t> listenerPort; // 监听端口
+            std::shared_ptr<uint32_t> ListenPort; // 监听端口
         };
 
         struct WGConfPeer {
@@ -134,6 +145,15 @@ namespace WireGuard {
         std::string wgConfToJson(const WGConf &config);
 
         DeviceRegisterConfig wgConfToDeviceRegisterConfig(const WGConf &conf);
+
+        /**
+         * 将读取的配置实体转换为官方配置文件格式
+         *
+         * @return 官方配置规则文件
+         */
+        std::string wgConfToOfficialConfigStr(const WGConf &conf);
+
+        std::string peerToOfficialConfigStr(const WGConfPeer &peer);
     }
 } // WireGuardTools
 
