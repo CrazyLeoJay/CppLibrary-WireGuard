@@ -304,7 +304,7 @@ namespace WireGuard {
 
 
     struct ContentKey {
-        PublicKey local_private_key{};
+        PrivateKey local_private_key{};
         PublicKey local_public_key{};
         /**
          * @param private_key 本地私钥，根据发送端和接收端不同

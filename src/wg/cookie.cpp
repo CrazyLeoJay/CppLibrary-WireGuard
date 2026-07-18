@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include "WGException.h"
 #include "crypto/crypto.h"
@@ -208,12 +209,14 @@ namespace WireGuard {
             // 构造输入：peer_addr || port
             std::vector<uint8_t> input(4 + sizeof(endpoint.port));
             memcpy(input.data(), &endpoint.address.ip.ipv4, 4);
-            memcpy(input.data() + 4, &endpoint.port, sizeof(endpoint.port));
+            uint16_t portNetwork = htons(endpoint.port);
+            memcpy(input.data() + 4, &portNetwork, sizeof(portNetwork));
             cookie = crypto::MAC(secret_, input.data(), input.size());
         } else {
             std::vector<uint8_t> input(16 + sizeof(endpoint.port));
             memcpy(input.data(), endpoint.address.ip.ipv6, 16);
-            memcpy(input.data() + 16, &endpoint.port, sizeof(endpoint.port));
+            uint16_t portNetwork = htons(endpoint.port);
+            memcpy(input.data() + 16, &portNetwork, sizeof(portNetwork));
             cookie = crypto::MAC(secret_, input.data(), input.size());
         }
         return cookie;

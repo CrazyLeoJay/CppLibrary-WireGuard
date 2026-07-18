@@ -251,8 +251,8 @@ namespace WireGuard {
 
         MessageResponse msg{};
         // 转为网络字节序
-        msg.receiverIndex = remote_index;
-        msg.senderIndex = senderIndex;
+        msg.receiverIndex = htonl(remote_index);
+        msg.senderIndex = htonl(senderIndex);
 
         // 写入公钥 并且混合 hash 和 chain_key
         std::memcpy(msg.ephemeral, ephemeral_public_key.data(), PUBLIC_KEY_LEN);
@@ -349,7 +349,7 @@ namespace WireGuard {
         // 计算 临时 私钥 公钥对
         crypto::generatePublicKey(ephemeral_public_key, ephemeral_private_key);
         MessageInitiation msg;
-        msg.senderIndex = senderIndex;
+        msg.senderIndex = htonl(senderIndex);
         // 写入临时公钥
         std::memcpy(msg.ephemeral, ephemeral_public_key.data(), PUBLIC_KEY_LEN);
 
@@ -448,8 +448,8 @@ namespace WireGuard {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
         });
-        // 记录当前索引
-        remote_index = msg.senderIndex;
+        // 记录当前索引（需要转换为本地字节序）
+        remote_index = ntohl(msg.senderIndex);
 
         // e: 读取临时公钥（服务端的临时公钥）
         PublicKey e;

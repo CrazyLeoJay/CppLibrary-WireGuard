@@ -24,6 +24,7 @@
 #include "device.h"
 
 #include <algorithm>
+#include <arpa/inet.h>
 
 #include "WGException.h"
 #include "pipwait.h"
@@ -245,7 +246,7 @@ namespace WireGuard {
             try {
                 LOG_INFO("socket read for count=%{public}d begin", ++i);
                 const ssize_t received = socket.read(buffer.data(), buffer.size(), endpoint);
-                LOG_INFO("socket read for count=%{public}d red end", i);
+                LOG_INFO("socket read for count=%{public}d red end, received=%{public}zd", i, received);
                 if (received < 0) {
                     if (!isRunning.load(std::memory_order_acquire) ||
                         !isSocketRunning.load(std::memory_order_acquire)) {
@@ -480,8 +481,8 @@ namespace WireGuard {
             return;
         }
 
-        // 记录客户端索引
-        _receiverIndexPeers[msg->senderIndex] = currentPeer;
+        // 记录客户端索引（需要转换为本地字节序）
+        _receiverIndexPeers[ntohl(msg->senderIndex)] = currentPeer;
         // 创建新索引
         const auto newIndex = createNewIndex(currentPeer);
 
@@ -527,12 +528,13 @@ namespace WireGuard {
 
         std::lock_guard<std::mutex> guard(_indexMutex);
 
-        // 根据 receiver_index 查找发起方 Peer
-        if (_receiverIndexPeers.find(msg->receiverIndex) == _receiverIndexPeers.end()) {
+        // 根据 receiver_index 查找发起方 Peer（需要转换为本地字节序）
+        const uint32_t receiverIndex = ntohl(msg->receiverIndex);
+        if (_receiverIndexPeers.find(receiverIndex) == _receiverIndexPeers.end()) {
             throw WGException("未找到远端Peer");
         }
         // 获取到当前 peer
-        const auto currentPeer = _receiverIndexPeers[msg->receiverIndex];
+        const auto currentPeer = _receiverIndexPeers[receiverIndex];
         // 发送数据流日志
         printStreamLog(currentPeer, MessageType::HANDSHAKE_RESPONSE, StreamLog::RECEIVE, len);
         // 更新端点 (PS:其实我觉得没啥更新必要，按道理，返回的ip地址和端口，应该和请求的一致)
@@ -578,12 +580,13 @@ namespace WireGuard {
 
         std::lock_guard<std::mutex> guard(_indexMutex);
 
-        // 根据 receiver_index 查找发起方 Peer
-        if (_receiverIndexPeers.find(msg->receiverIndex) == _receiverIndexPeers.end()) {
+        // 根据 receiver_index 查找发起方 Peer（需要转换为本地字节序）
+        const uint32_t receiverIndex = ntohl(msg->receiverIndex);
+        if (_receiverIndexPeers.find(receiverIndex) == _receiverIndexPeers.end()) {
             throw WGException("未找到远端Peer");
         }
         // 获取到当前 peer
-        const std::shared_ptr<Peer> currentPeer = _receiverIndexPeers[msg->receiverIndex];
+        const std::shared_ptr<Peer> currentPeer = _receiverIndexPeers[receiverIndex];
         // 发送数据流日志
         printStreamLog(currentPeer, MessageType::HANDSHAKE_COOKIE, StreamLog::RECEIVE, len);
         // 处理cookie消息，并且保存cookie到peer中，再次发送握手时，会携带cookie加密后的mac2
@@ -686,10 +689,11 @@ namespace WireGuard {
         const auto endpoint = peer->getEndpoint();
 
         LOG_INFO(
-            "发送握手请求到：%{public}s:%{public}d  %{public}s",
+            "发送握手请求到：%{public}s:%{public}d  %{public}s, msg_size=%{public}zu",
             endpoint.address.toIpStr().c_str(),
             endpoint.port,
-            endpoint.address.toIpHex().c_str()
+            endpoint.address.toIpHex().c_str(),
+            sizeof(msg)
         );
 
         if (endpoint.port == 0) {
@@ -701,6 +705,8 @@ namespace WireGuard {
             return;
         }
 
+        LOG_INFO("握手消息内容 - header.type=%hhu, senderIndex=%u, msg_size=%zu", 
+                 msg.header.type, ntohl(msg.senderIndex), sizeof(msg));
         const auto result = socket.write(&msg, sizeof(msg), endpoint);
         if (result < 0) {
             std::string error;
@@ -709,6 +715,9 @@ namespace WireGuard {
             printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), error);
             throw WGException(error);
         }
+        LOG_INFO("握手请求发送成功，result=%{public}zd", result);
+        LOG_INFO("socket fd=%{public}d, isRunning=%{public}s, isSocketRunning=%{public}s", 
+                 socket.fd(), socket.isRunning() ? "true" : "false", isSocketRunning.load() ? "true" : "false");
         // 发送数据流日志
         printStreamLog(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg));
     }
