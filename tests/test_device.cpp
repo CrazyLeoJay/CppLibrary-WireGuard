@@ -27,23 +27,46 @@
 #include "tools/conf_file.h"
 #include "tools.h"
 
-WireGuard::DeviceRegisterConfig makeConfig() {
+WireGuard::DeviceRegisterConfig makeConfig(std::string path = "wg.内网ipto.61234.conf") {
     std::string configPath = TEST_DATA_DIR;
-    configPath += "/wg.内网ipto.61234.conf";
+    configPath += "/" + path;
 
+    LOG_INFO("配置文件路径: %s", configPath.c_str());
     std::ifstream file(configPath);
-    // ASSERT_TRUE(file.is_open()) << "配置文件打开失败: " << configPath;
+    if (!file.is_open()) {
+        LOG_ERROR("配置文件打开失败: %s", configPath.c_str());
+        throw std::runtime_error("配置文件打开失败: " + configPath);
+    }
     std::string content((std::istreambuf_iterator<char>(file)),
                         std::istreambuf_iterator<char>());
     file.close();
 
+    LOG_INFO("配置文件内容:\n%s", content.c_str());
+
     WireGuard::Tools::WGConf conf = WireGuard::Tools::readConfFileToEntity(content);
-    return WireGuard::Tools::wgConfToDeviceRegisterConfig(conf);
+    
+    for (const auto& peer : conf.peers) {
+        LOG_INFO("Peer endpoint: type=%d, host=%s, port=%d", 
+                 static_cast<int>(peer.endpoint.type), 
+                 peer.endpoint.ipStrOrDomain.c_str(), 
+                 peer.endpoint.port);
+    }
+    
+    auto config = WireGuard::Tools::wgConfToDeviceRegisterConfig(conf);
+    
+    for (const auto& peer : config.peers) {
+        LOG_INFO("Parsed endpoint: %s:%d", 
+                 peer.endpoint.address.toIpStr().c_str(), 
+                 peer.endpoint.port);
+    }
+    
+    return config;
 }
 
 
 TEST(DEVICE_TEST, default_test) {
-    const auto config = makeConfig();
+    // const auto config = makeConfig(); // 连接openwrt服务。握手正常
+    const auto config = makeConfig("test.local.tmp.conf"); // 连接 Ubuntu 的 WireGuard服务，无法获取到返回日志
     WireGuard::Device device{config};
     device.initSocketStart([](int fd) {
     });

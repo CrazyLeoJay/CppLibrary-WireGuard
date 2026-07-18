@@ -20,6 +20,8 @@
 #include <cstring>
 #include <stdexcept>
 
+#include "WGException.h"
+
 namespace WireGuard {
     namespace Base64 {
         // Base64 编码表（常量表达式）
@@ -102,7 +104,7 @@ namespace WireGuard {
 
             // 验证长度和填充字符
             if (base64.length() != WG_KEY_LEN_BASE64 - 1 || base64[WG_KEY_LEN_BASE64 - 2] != '=') {
-                throw std::invalid_argument("Invalid base64 length or padding");
+                throw WGException("长度不对，不是Key值Base64的长度(%d): %s", base64.length(), base64.c_str());
             }
 
             volatile uint8_t ret = 0;

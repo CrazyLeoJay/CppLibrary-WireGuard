@@ -128,23 +128,37 @@ namespace WireGuard {
         }
 
         ssize_t ret;
-        if (endpoint.address.family == IPAddress::IPv4) {
+        if (type == DNS::IPV4) {
             sockaddr_in addr{};
-            memset(&addr, 0, sizeof(addr)); // 清零
+            memset(&addr, 0, sizeof(addr));
             addr.sin_family = AF_INET;
             addr.sin_port = htons(endpoint.port);
             addr.sin_addr.s_addr = endpoint.address.ip.ipv4;
             ret = sendto(_fd.load(), buf, len, 0, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_in));
-        } else if (endpoint.address.family == IPAddress::IPv6) {
-            // IPv6 支持
+        } else {
             sockaddr_in6 addr{};
-            memset(&addr, 0, sizeof(addr)); // 清零
+            memset(&addr, 0, sizeof(addr));
             addr.sin6_family = AF_INET6;
             addr.sin6_port = htons(endpoint.port);
-            std::memcpy(&addr.sin6_addr, endpoint.address.ip.ipv6, 16);
+            
+            if (endpoint.address.family == IPAddress::IPv4) {
+                addr.sin6_addr.s6_addr[0] = 0;
+                addr.sin6_addr.s6_addr[1] = 0;
+                addr.sin6_addr.s6_addr[2] = 0;
+                addr.sin6_addr.s6_addr[3] = 0;
+                addr.sin6_addr.s6_addr[4] = 0;
+                addr.sin6_addr.s6_addr[5] = 0;
+                addr.sin6_addr.s6_addr[6] = 0;
+                addr.sin6_addr.s6_addr[7] = 0;
+                addr.sin6_addr.s6_addr[8] = 0;
+                addr.sin6_addr.s6_addr[9] = 0;
+                addr.sin6_addr.s6_addr[10] = 0xFF;
+                addr.sin6_addr.s6_addr[11] = 0xFF;
+                std::memcpy(addr.sin6_addr.s6_addr + 12, &endpoint.address.ip.ipv4, 4);
+            } else {
+                std::memcpy(&addr.sin6_addr, endpoint.address.ip.ipv6, 16);
+            }
             ret = sendto(_fd.load(), buf, len, 0, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_in6));
-        } else {
-            throw WGException("特殊数据类型，ipv? type=%d family=%d", type, endpoint.address.family);
         }
         if (ret != len) {
             std::string error;
@@ -175,19 +189,19 @@ namespace WireGuard {
 
         if (_fd != -1) {
             ::close(_fd);
-            _fd = -1;
+            // _fd = -1;
         }
 
         if (epoll_fd_ != -1) {
             ::close(epoll_fd_);
-            epoll_fd_ = -1;
+            // epoll_fd_ = -1;
         }
         // 关闭唤醒通道
         for (int &i: wakeup_pipe_) {
             const auto wp_fd = i;
             if (wp_fd != -1) {
                 ::close(wp_fd);
-                i = -1;
+                // i = -1;
             }
         }
         _initialized = false;
@@ -336,36 +350,34 @@ namespace WireGuard {
     }
 
     ssize_t UDPSocket::pip_read_socket(char *buf, size_t len, Endpoint &endpoint) const {
-        ssize_t ret;
-        if (type == DNS::IPV4) {
-            sockaddr_in addr{};
-            socklen_t addrLen = sizeof(addr);
-            ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
-            if (ret < 0) {
-                //            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                //                return -1; // 没有数据（或暂时无法写入）或标记为“可稍后重试”
-                //            }
-                // 未读取到
-                return -1;
+            ssize_t ret;
+            if (type == DNS::IPV4) {
+                sockaddr_in addr{};
+                socklen_t addrLen = sizeof(addr);
+                ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
+                if (ret < 0) {
+                    return -1;
+                }
+                endpoint.port = ntohs(addr.sin_port);
+                endpoint.address.family = IPAddress::IPv4;
+                endpoint.address.ip.ipv4 = addr.sin_addr.s_addr;
+            } else {
+                sockaddr_in6 addr{};
+                socklen_t addrLen = sizeof(addr);
+                ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
+                if (ret < 0) {
+                    return -1;
+                }
+                endpoint.port = ntohs(addr.sin6_port);
+                
+                if (IN6_IS_ADDR_V4MAPPED(&addr.sin6_addr)) {
+                    endpoint.address.family = IPAddress::IPv4;
+                    endpoint.address.ip.ipv4 = ntohl(*reinterpret_cast<const uint32_t *>(addr.sin6_addr.s6_addr + 12));
+                } else {
+                    endpoint.address.family = IPAddress::IPv6;
+                    memcpy(endpoint.address.ip.ipv6, &addr.sin6_addr, sizeof(addr.sin6_addr));
+                }
             }
-            endpoint.port = ntohs(addr.sin_port);
-            endpoint.address.family = IPAddress::IPv4;
-            endpoint.address.ip.ipv4 = addr.sin_addr.s_addr;
-        } else {
-            sockaddr_in6 addr{};
-            socklen_t addrLen = sizeof(addr);
-            ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
-            if (ret < 0) {
-                // if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                //     return -1; // 没有数据（或暂时无法写入）或标记为“可稍后重试”
-                // }
-                // 未读取到
-                return -1;
-            }
-            endpoint.port = ntohs(addr.sin6_port);
-            endpoint.address.family = IPAddress::IPv6;
-            memcpy(endpoint.address.ip.ipv6, &addr.sin6_addr, sizeof(addr.sin6_addr));
+            return ret;
         }
-        return ret;
-    }
 } // WireGuard

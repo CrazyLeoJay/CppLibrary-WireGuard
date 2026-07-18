@@ -87,7 +87,7 @@ namespace WireGuard {
         CookieChecker cookieChecker{content_key_};
 
         // =============== 日志打印 ===============
-        StreamLog::StreamLogPrint streamLog {
+        StreamLog::StreamLogPrint streamLog{
             [](StreamLog::Message msg) {
                 // const auto direction = msg.direction == WireGuard::StreamLog::RECEIVE ? "接收" : "发送";
                 // LOG_INFO("Device in [streamLog]：peerIndex=%d, 方向=%s 数据量=%zu", static_cast<int>(msg.peerIndex),
@@ -289,7 +289,8 @@ namespace WireGuard {
          */
         void sendToLocal(const uint8_t *data, size_t len) const;
 
-        void printStreamLog(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len) const;
+        void printStreamLog(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,
+                            size_t len) const;
 
         /**
          * 异常打印
@@ -300,7 +301,9 @@ namespace WireGuard {
          * @param len
          * @param message
          */
-        void printStreamLogThrow(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len, const std::string &message = "") const;
+        void printStreamLogThrow(const std::shared_ptr<Peer> &peer, MessageType type,
+                                 StreamLog::StreamDirection direction, size_t len,
+                                 const std::string &message = "") const;
     };
 }; // namespace WireGuard
 #endif // WIREGUARD_DEVICE_H

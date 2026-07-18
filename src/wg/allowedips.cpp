@@ -86,12 +86,10 @@ namespace WireGuard {
         std::vector<IpAddressArea> allowedIps = peer->getAllowedIps();
         for (IpAddressArea item: allowedIps) {
             if (item.address.family == IPAddress::IPv4) {
-                LOG_INFO("ip bin: %{public}s", item.address.toIpHex().c_str());
                 // CIDR=255（uint8_t -1）表示未设置掩码，使用默认值 /32
                 const uint32_t cidr = item.cidr != 255 ? item.cidr : (4 * 8);
                 uint8_t maskedIp[4];
                 applyMask(reinterpret_cast<const uint8_t *>(&item.address.ip.ipv4), 4, cidr, maskedIp);
-                LOG_INFO("ip bin ipBytes: %{public}s", crypto::bin2Hex(maskedIp, 4).c_str());
                 insertTrieNode(ipv4Root, maskedIp, sizeof(uint32_t), cidr, peer);
             } else {
                 // CIDR=255（uint8_t -1）表示未设置掩码，使用默认值 /128
