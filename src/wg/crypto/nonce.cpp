@@ -150,7 +150,7 @@ namespace WireGuard {
         // 验证mac1
         CookieChecker::verifyMac1(msg, local_public);
 
-        remote_index = msg.senderIndex;
+        remote_index = ntohl(msg.senderIndex);
         // 获取对端的临时公钥
         // PublicKey remote_ephemeral_public_key{};
         std::memcpy(remote_ephemeral_public_key.data(), msg.ephemeral, PUBLIC_KEY_LEN);

@@ -20,6 +20,7 @@ add_executable(test_main test_main.cpp
         test_cookie.cpp
         test_allowedips.cpp
         test_device.cpp
+        test_byteorder.cpp
 )
 
 # 链接被测库 + GTest 主函数
