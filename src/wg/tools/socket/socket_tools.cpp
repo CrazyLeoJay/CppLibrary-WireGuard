@@ -130,14 +130,14 @@ namespace WireGuard {
         ssize_t ret;
         if (type == DNS::IPV4) {
             sockaddr_in addr{};
-            memset(&addr, 0, sizeof(addr));
+            memset(&addr, 0, sizeof(addr)); // 清零
             addr.sin_family = AF_INET;
             addr.sin_port = htons(endpoint.port);
             addr.sin_addr.s_addr = endpoint.address.ip.ipv4;
             ret = sendto(_fd.load(), buf, len, 0, reinterpret_cast<sockaddr *>(&addr), sizeof(sockaddr_in));
         } else {
             sockaddr_in6 addr{};
-            memset(&addr, 0, sizeof(addr));
+            memset(&addr, 0, sizeof(addr)); // 清零
             addr.sin6_family = AF_INET6;
             addr.sin6_port = htons(endpoint.port);
             
@@ -372,7 +372,7 @@ namespace WireGuard {
                 
                 if (IN6_IS_ADDR_V4MAPPED(&addr.sin6_addr)) {
                     endpoint.address.family = IPAddress::IPv4;
-                    endpoint.address.ip.ipv4 = ntohl(*reinterpret_cast<const uint32_t *>(addr.sin6_addr.s6_addr + 12));
+                    endpoint.address.ip.ipv4 = *reinterpret_cast<const uint32_t *>(addr.sin6_addr.s6_addr + 12);
                 } else {
                     endpoint.address.family = IPAddress::IPv6;
                     memcpy(endpoint.address.ip.ipv6, &addr.sin6_addr, sizeof(addr.sin6_addr));

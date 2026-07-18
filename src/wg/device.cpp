@@ -559,7 +559,7 @@ namespace WireGuard {
         const auto keypair = currentPeer->beginSession(true);
         if (keypair) {
             // keypair 建立索引
-            _keypairIndexPeers[msg->receiverIndex] = keypair;
+            _keypairIndexPeers[ntohl(msg->receiverIndex)] = keypair;
             // 发送等待的数据包
             sendStagedPackets(currentPeer);
             LOG_INFO("握手成功 并存储密钥 remoteIndex=%{public}s", crypto::bin2Hex(msg->senderIndex).c_str());
@@ -610,20 +610,21 @@ namespace WireGuard {
         auto *msg = reinterpret_cast<const MessageData *>(data);
         std::lock_guard<std::mutex> guard(_indexMutex);
         // 简化处理：遍历所有 Peer
-        if (_receiverIndexPeers.find(msg->keyIndex) == _receiverIndexPeers.end()) {
+        const uint32_t keyIndex = ntohl(msg->keyIndex);
+        if (_receiverIndexPeers.find(keyIndex) == _receiverIndexPeers.end()) {
             throw WGException("未找到远端Peer");
         }
-        if (_keypairIndexPeers.find(msg->keyIndex) == _keypairIndexPeers.end()) {
+        if (_keypairIndexPeers.find(keyIndex) == _keypairIndexPeers.end()) {
             throw WGException("未找到远端KeyPair index=0x%s", crypto::bin2Hex(msg->keyIndex).c_str());
         }
         //        // 获取到当前 peer
-        const auto currentPeer = _receiverIndexPeers[msg->keyIndex];
+        const auto currentPeer = _receiverIndexPeers[keyIndex];
         // 发送数据流日志
         printStreamLog(currentPeer, MessageType::DATA, StreamLog::RECEIVE, len);
         //        // 解密数据流
         //        auto result = currentPeer->decryptPacket(msg, len);
         //        // 获取密钥对
-        const auto kp = _keypairIndexPeers[msg->keyIndex];
+        const auto kp = _keypairIndexPeers[keyIndex];
         if (kp.expired()) {
             sendInitiation(currentPeer); // 如果当前是接收端，这里便会转变角色变成发送端
             throw WGException("keyPair 不存在，需要重新握手");
@@ -760,7 +761,7 @@ namespace WireGuard {
             throw WGException("发送cookie挑战失败");
         }
         // 发送数据流日志
-        auto it = _receiverIndexPeers.find(msg.senderIndex);
+        auto it = _receiverIndexPeers.find(ntohl(msg.senderIndex));
         const std::shared_ptr<Peer> peer = (it != _receiverIndexPeers.end()) ? it->second : nullptr;
         printStreamLog(peer, MessageType::HANDSHAKE_COOKIE, StreamLog::SEND, sizeof(cookieMsg));
     }

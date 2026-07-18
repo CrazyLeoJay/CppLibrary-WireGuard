@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <netinet/in.h>
 
 namespace WireGuard {
     // ============================================================================
@@ -148,7 +149,7 @@ namespace WireGuard {
         msg->header.type = static_cast<uint8_t>(MessageType::DATA);
         memset(msg->reserved_zero, 0, 3);
         // 设置正确的 keyIndex
-        msg->keyIndex = remoteIndex;
+        msg->keyIndex = htonl(remoteIndex);
         msg->counter = *nonceOpt.get(); // 从密钥对获取
         memcpy(msg->encryptedData, result.data(), result.size());
         return message;

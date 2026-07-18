@@ -105,7 +105,7 @@ namespace WireGuard {
 
         // 生成cookie消息
         MessageCookie cookieMsg{};
-        cookieMsg.receiverIndex = msg.senderIndex;
+        cookieMsg.receiverIndex = htonl(msg.senderIndex);
         // cookieMsg.nonce
         crypto::randombytes(cookieMsg.nonce, NONCE_LEN);
         Logs::print_space([&]() { LOG_DEBUG("生成NONE，开始将Cookie加密入消息"); });

@@ -187,7 +187,7 @@ namespace WireGuard {
         UDPSocket sock{DNS::IPV4};
         // sock.bind(61113);
         sock.initSocketStart(std::make_shared<uint32_t>(51820));
-        const Endpoint ep = Tools::IP::makeEndpointIpv4("10.3.3.2", 51820);
+        const Endpoint ep = Tools::IP::makeEndpointIpv4("10.0.0.2", 51820);
         sock.write(&msg, sizeof(msg), ep);
         sock.close();
     }
