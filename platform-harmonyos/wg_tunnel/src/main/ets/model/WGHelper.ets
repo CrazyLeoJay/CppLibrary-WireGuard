@@ -226,4 +226,26 @@ export namespace WireGuard {
       return await native.isValidDomain(domain);
     }
   }
+
+  export namespace Paths {
+    /**
+     * 缓存目录
+     */
+    export const dir_cache = "cache"
+
+    /**
+     * zip文件处理缓存目录
+     */
+    // export const zip_cache = `${dir_cache}/zip`
+    export const zip_cache = `zip`
+
+    /**
+     * @returns 获取到临时的zip解压地址（用后需要删除）
+     */
+    export function getZipDecodeTmpDir(context: Context): string {
+      const root = context.cacheDir
+      return `${root}/${zip_cache}/decompress/${Date.now()}`
+    }
+  }
+
 }

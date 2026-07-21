@@ -49,12 +49,23 @@ export default class WGDao {
     return JSON.parse(result.config) as WGDBConf
   }
 
-  insertNewConfig(config: WGDBConf) {
-    let cStr = JSON.stringify(config);
-    const table = new WgConfigTable();
-    table.name = config.name;
-    table.config = cStr;
-    this.orm.insert(table);
+  insertNewConfig(config: WGDBConf | WGDBConf[]) {
+    if (config instanceof Array) {
+      const all = config.map((it) => {
+        let cStr = JSON.stringify(it);
+        const table = new WgConfigTable();
+        table.name = it.name;
+        table.config = cStr;
+        return table
+      })
+      this.orm.insert(all);
+    } else {
+      let cStr = JSON.stringify(config);
+      const table = new WgConfigTable();
+      table.name = config.name;
+      table.config = cStr;
+      this.orm.insert(table);
+    }
   }
 
   updateConfig(id: number, config: WGDBConf) {

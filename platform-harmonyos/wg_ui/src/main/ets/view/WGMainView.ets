@@ -20,6 +20,7 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
 import { WGConf, WireGuard } from 'wg_tunnel';
+import { AppErrorCode } from 'wg_tunnel/src/main/ets/error/AppErrorCode';
 
 const TAG = "WG主页";
 
@@ -109,15 +110,28 @@ export struct WGMainView {
   @Local isShow: boolean = true;
   funcBtn: MenuElement[] = [
     {
-      value: "导入配置",
+      value: "选择conf或者zip文件导入配置",
       action: () => {
         // 通过文件系统，读取配置文件，识别后添加到数据列表
         this.vm.readWGConfForSystemFile(this.getUIContext())
           .then((wgConf) => {
-            this.newConfigDialog(wgConf);
+            if (wgConf instanceof Array) {
+              LLog.info(TAG, `成功导入 ${wgConf.length} 个配置，无需弹窗。`)
+              try {
+                this.getUIContext().getPromptAction()
+                  .showToast({
+                    message: `成功导入 ${wgConf.length} 个配置。`
+                  })
+              } catch (error) {
+                LLog.error(TAG, error)
+              }
+            } else {
+              this.newConfigDialog(wgConf);
+            }
+            this.vm.loadConfigs()
           })
           .catch((e: BusinessError) => {
-            LLog.error(TAG, e)
+            LLog.warn(TAG, e)
           })
       }
     },
@@ -129,7 +143,14 @@ export struct WGMainView {
             this.newConfigDialog(wgConf);
           })
           .catch((e: BusinessError) => {
-            LLog.error(TAG, e)
+            if (e.code == 1000500002) {
+              LLog.info(TAG, "用户去取消了二维码扫描")
+              return
+            }
+            LLog.error(TAG, {
+              message: `code=${e.code}`
+            , error: e
+            })
           })
       }
     },
