@@ -13,7 +13,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { LLog } from 'wg_tunnel';
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
+
+const TAG = "设置界面"
 
 /**
  * 设置界面
@@ -100,6 +103,24 @@ struct WGSettingView {
       }
 
       ListItem() {
+        Column({ space: '4vp' }) {
+          Text("导出隧道配置")
+            .width('100%')
+            .fontSize('18fp')
+          Text("导出配置为zip文件在下载目录中")
+            .width('100%')
+            .fontSize('12fp')
+        }
+        .onClick(() => {
+          this.vm.saveConfigToZip(this.getUIContext()).catch((e: BusinessError) => {
+            LLog.error(TAG, e)
+          })
+        })
+        .layoutWeight(1)
+        .itemRowStyle()
+      }
+
+      ListItem() {
         Column() {
           Text($r('app.string.review_instructions'))
             .fontSize('14fp')
@@ -115,6 +136,7 @@ struct WGSettingView {
                 this.showHideClickCount++;
               }
             })
+            .tagStyle()
           if (this.showHide) {
             Text($r('app.string.review_instructions_hide'))
               .fontSize('14fp')
@@ -132,6 +154,7 @@ struct WGSettingView {
       ListItem() {
         Row() {
           Text('WireGuard 官网')
+            .fontSize('18fp')
           Blank().layoutWeight(1)
           SymbolGlyph($r('sys.symbol.chevron_right'))
         }
@@ -144,6 +167,7 @@ struct WGSettingView {
       ListItem() {
         Row() {
           Text('WireGuard 白皮书')
+            .fontSize('18fp')
           Blank().layoutWeight(1)
           SymbolGlyph($r('sys.symbol.chevron_right'))
         }
@@ -156,6 +180,7 @@ struct WGSettingView {
       ListItem() {
         Row() {
           Text('开源库声明')
+            .fontSize('18fp')
           Blank().layoutWeight(1)
           SymbolGlyph($r('sys.symbol.chevron_right'))
         }
@@ -168,6 +193,7 @@ struct WGSettingView {
       ListItem() {
         Row() {
           Text('关于作者')
+            .fontSize('18fp')
           Blank().layoutWeight(1)
           SymbolGlyph($r('sys.symbol.chevron_right'))
         }
@@ -179,13 +205,15 @@ struct WGSettingView {
 
       ListItem() {
         Column() {
-          Text(`联系邮箱：${this.vm.email}`)
+          Text(`联系邮箱：${this.vm.email} (点击复制邮箱地址)`)
             .wordBreak(WordBreak.BREAK_WORD)
             .width('100%')
+            .tagStyle()
           Text(
-            `项目是我根据WireGuard官方白皮书，使用C++完全由自己编写，项目中用到的开源项目均已在项目中标记。可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
+            `项目是我根据WireGuard官方白皮书，使用C++14完全由自己编写，项目中用到的开源项目均已在项目中标记。可以通过在github或者通过邮箱向我提供意见以及改进建议。`)
             .wordBreak(WordBreak.BREAK_WORD)
             .width('100%')
+            .tagStyle()
         }
         .alignItems(HorizontalAlign.Start)
         .itemRowStyle()
@@ -200,4 +228,10 @@ struct WGSettingView {
       strokeWidth: '2vp'
     })
   }
+}
+
+@Extend(Text)
+function tagStyle() {
+  .fontSize('12fp')
+  .fontColor('#ff707070')
 }

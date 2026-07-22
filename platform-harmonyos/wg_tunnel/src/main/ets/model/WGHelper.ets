@@ -40,6 +40,10 @@ class WGHelper {
   get config() {
     return new WGDao(WireGuard.db.orm)
   }
+
+  async dbConfig2ConfFileContent(config: WGDBConf): Promise<string> {
+    return await native.wgConfToOfficialStr(config.conf)
+  }
 }
 
 /**
@@ -192,9 +196,12 @@ export namespace WireGuard {
    * 其他功能
    */
 
-
-  export async function readWgConf(qrContent: string): Promise<WGConf> {
-    let result = await native.readWGConf(qrContent);
+  /**
+   * 讲配置文件转为实际可以读取的配置
+   * @param content
+   */
+  export async function readWgConf(content: string): Promise<WGConf> {
+    let result = await native.readWGConf(content);
     // LLog.info(TAG, `扫描：${JSON.stringify(result)}`)
     return result;
   }
@@ -228,15 +235,10 @@ export namespace WireGuard {
   }
 
   export namespace Paths {
-    /**
-     * 缓存目录
-     */
-    export const dir_cache = "cache"
 
     /**
      * zip文件处理缓存目录
      */
-    // export const zip_cache = `${dir_cache}/zip`
     export const zip_cache = `zip`
 
     /**
@@ -245,6 +247,16 @@ export namespace WireGuard {
     export function getZipDecodeTmpDir(context: Context): string {
       const root = context.cacheDir
       return `${root}/${zip_cache}/decompress/${Date.now()}`
+    }
+
+    /**
+     * 获取缓存的zip压缩目录
+     * @param context
+     * @returns
+     */
+    export function getZipEncodeTmpDir(context: Context): string {
+      const root = context.cacheDir
+      return `${root}/${zip_cache}/encode/${Date.now()}`
     }
   }
 

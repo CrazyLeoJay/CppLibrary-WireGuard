@@ -49,6 +49,8 @@ namespace NapiTools {
     napi_value makeNapiString(napi_env &env, const std::string &value);
     
     napi_value makeStreamLogMessage(napi_env &env, const WireGuard::StreamLog::Message message);
+    
+    WireGuard::Tools::WGConf napiGetWGConf2Entity(napi_env &env, napi_value obj);
 }; // namespace NapiTools
 
 #endif // WIREGUARD_NAPI_TOOLS_H

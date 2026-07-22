@@ -38,6 +38,18 @@ export default class WGDao {
       .find()
   }
 
+  allDBConfig(): WGDBConf[] {
+    return this.orm.query(WgConfigTable)
+      .orderBy("createdAt", 'desc')
+      .find()
+      .filter((it) => {
+        return it.config && it.config.length > 0
+      })
+      .map((it) => {
+        return JSON.parse(it.config) as WGDBConf
+      })
+  }
+
   getConfigForId(id: number): WGDBConf | undefined {
     let result = this.orm.query(WgConfigTable)
       .select("config")

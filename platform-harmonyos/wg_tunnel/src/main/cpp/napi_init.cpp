@@ -311,21 +311,40 @@ static napi_value NAPI_Global_dnsToIp(napi_env env, napi_callback_info info) {
         return nullptr;
     }
 }
+
+static napi_value NAPI_Global_wgToOfficialStr(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        auto entity = NapiTools::napiGetWGConf2Entity(env, args[0]);
+        auto result = WireGuard::Tools::wgConfToOfficialConfigStr(entity);
+        return NapiTools::makeNapiString(env, result);
+    } catch (const std::exception &e) {
+        napi_throw_error(env, "读取异常", e.what());
+        return nullptr;
+    }
+}
 EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
     wg_napi::Init(env, exports);
     napi_property_descriptor desc[] = {
-        {     "makeKeyPair", nullptr,      NAPI_Global_makeKeyPair, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {   "genPrivateKey", nullptr,    NAPI_Global_genPrivateKey, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {    "genPublicKey", nullptr,     NAPI_Global_genPublicKey, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {      "readWGConf", nullptr,       NAPI_Global_readWGConf, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"readWGConfToJson", nullptr, NAPI_Global_readWGConfToJson, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {          "isIpv4", nullptr,           NAPI_Global_isIpv4, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {          "isIpv6", nullptr,           NAPI_Global_isIpv6, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {     "isIpAddress", nullptr,      NAPI_Global_isIpAddress, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {   "isValidDomain", nullptr,    NAPI_Global_isValidDomain, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {         "dnsToIp", nullptr,          NAPI_Global_dnsToIp, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {        "makeKeyPair", nullptr,      NAPI_Global_makeKeyPair, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {      "genPrivateKey", nullptr,    NAPI_Global_genPrivateKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {       "genPublicKey", nullptr,     NAPI_Global_genPublicKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {         "readWGConf", nullptr,       NAPI_Global_readWGConf, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {   "readWGConfToJson", nullptr, NAPI_Global_readWGConfToJson, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {             "isIpv4", nullptr,           NAPI_Global_isIpv4, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {             "isIpv6", nullptr,           NAPI_Global_isIpv6, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {        "isIpAddress", nullptr,      NAPI_Global_isIpAddress, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {      "isValidDomain", nullptr,    NAPI_Global_isValidDomain, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {   "isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {            "dnsToIp", nullptr,          NAPI_Global_dnsToIp, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"wgConfToOfficialStr", nullptr,  NAPI_Global_wgToOfficialStr, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
