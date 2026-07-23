@@ -7,7 +7,7 @@ if(NOT TARGET fmt::fmt)
     include(FetchContent)
     FetchContent_Declare(
             fmt
-            URL "../../thirty_libs/fmt-12.2.0.zip"
+            URL "${CMAKE_CURRENT_SOURCE_DIR}/../../thirty_libs/fmt-12.2.0.zip"
     )
     FetchContent_MakeAvailable(fmt)
 endif()
