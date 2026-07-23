@@ -346,7 +346,7 @@ namespace NapiTools {
                 throw WireGuard::WGException("napi调用异常");
             }
 
-            napi_value nvIpArea = createIpAddressArea(env, inter.ipArea);
+            napi_value nvIpArea = createIpAddressArea(env, inter.ipArea); 
             ns = napi_set_named_property(env, result, "ipArea", nvIpArea);
             if (ns != napi_ok) {
                 throw WireGuard::WGException("napi调用异常");
@@ -380,6 +380,19 @@ namespace NapiTools {
                     throw WireGuard::WGException("napi调用异常");
                 }
             }
+
+            if (inter.mtu) {
+                napi_value nvMtu;
+                ns = napi_create_uint32(env, *inter.mtu, &nvMtu);
+                if (ns != napi_ok) {
+                    throw WireGuard::WGException("napi调用异常");
+                }
+                ns = napi_set_named_property(env, result, "mtu", nvMtu);
+                if (ns != napi_ok) {
+                    throw WireGuard::WGException("napi调用异常");
+                }
+            }
+
             return result;
         }
 

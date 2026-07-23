@@ -161,40 +161,6 @@ static napi_value NAPI_Global_readWGConf(napi_env env, napi_callback_info info) 
 }
 
 
-static napi_value NAPI_Global_readWGConfToJson(napi_env env, napi_callback_info info) {
-    try {
-        napi_status ns;
-        size_t argc = 1;
-        napi_value args[argc];
-        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-
-        size_t len;
-        ns = napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-        std::vector<char> buf(len + 1);
-        ns = napi_get_value_string_utf8(env, args[0], buf.data(), len + 1, &len);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-
-        std::string entity = WireGuard::Tools::readConfFileToJson(std::string(buf.data(), len));
-        napi_value result;
-        ns = napi_create_string_utf8(env, entity.c_str(), entity.length(), &result);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-        return result;
-    } catch (const std::exception &e) {
-        napi_throw_error(env, "读取异常", e.what());
-        return nullptr;
-    }
-}
-
 static napi_value NAPI_Global_isIpv4(napi_env env, napi_callback_info info) {
     try {
         napi_status ns;
@@ -337,7 +303,6 @@ static napi_value Init(napi_env env, napi_value exports) {
         {      "genPrivateKey", nullptr,    NAPI_Global_genPrivateKey, nullptr, nullptr, nullptr, napi_default, nullptr},
         {       "genPublicKey", nullptr,     NAPI_Global_genPublicKey, nullptr, nullptr, nullptr, napi_default, nullptr},
         {         "readWGConf", nullptr,       NAPI_Global_readWGConf, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {   "readWGConfToJson", nullptr, NAPI_Global_readWGConfToJson, nullptr, nullptr, nullptr, napi_default, nullptr},
         {             "isIpv4", nullptr,           NAPI_Global_isIpv4, nullptr, nullptr, nullptr, napi_default, nullptr},
         {             "isIpv6", nullptr,           NAPI_Global_isIpv6, nullptr, nullptr, nullptr, napi_default, nullptr},
         {        "isIpAddress", nullptr,      NAPI_Global_isIpAddress, nullptr, nullptr, nullptr, napi_default, nullptr},

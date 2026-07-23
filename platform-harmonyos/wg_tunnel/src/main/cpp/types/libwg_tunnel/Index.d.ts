@@ -24,8 +24,6 @@ export function genPublicKey(privateKey: string): Promise<string>;
 
 export function readWGConf(conf: string): Promise<WGConf>;
 
-export function readWGConfToJson(conf: string): Promise<string>;
-
 export function wgConfToOfficialStr(conf: WGConf): Promise<string>;
 
 export function isIpv4(ip: string): Promise<boolean>;

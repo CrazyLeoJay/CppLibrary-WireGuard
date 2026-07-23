@@ -109,6 +109,7 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
   const vpnAddressFamily = vpnIp.address.isIpv4 ? 1 : 2;
   const vpnAddressPrefixLen = vpnIp?.cidr ?? 32
   const dns = config.vpn.dns ?? []
+  const mtu = config.vpn.mtu ?? 1400
   if (config.peers.length == 0) {
     throw new WGAppException("未配置Peer");
   }
@@ -135,7 +136,7 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
     addresses: [{
       address: { address: vpnAddress, family: vpnAddressFamily }, prefixLength: vpnAddressPrefixLen
     }],
-    mtu: 1400,
+    mtu: mtu,
     dnsAddresses: dns.map((it) => it.ip),
     routes: routes,
   }
