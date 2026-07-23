@@ -302,7 +302,7 @@ namespace WireGuard {
          * @param message
          */
         void printStreamLogThrow(const std::shared_ptr<Peer> &peer, MessageType type,
-                                 StreamLog::StreamDirection direction, size_t len,
+                                 StreamLog::StreamDirection direction, uint64_t len,
                                  const std::string &message = "") const;
     };
 }; // namespace WireGuard

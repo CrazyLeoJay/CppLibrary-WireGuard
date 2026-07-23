@@ -85,7 +85,7 @@ namespace WireGuard {
          * 用途：用于密钥对的创建时间戳
          */
         uint64_t getCurrentTimeNs() {
-            auto now = std::chrono::steady_clock::now();
+            auto now = Clock::now();
             auto duration = now.time_since_epoch();
             return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
         }
@@ -106,7 +106,7 @@ namespace WireGuard {
          */
         void tai64nNow(Timestamp &timestamp) {
             // TAI64N 格式：64 位 TAI 时间 + 32 位纳秒
-            auto now = std::chrono::system_clock::now();
+            auto now = Clock::now();
             auto epoch = now.time_since_epoch();
             auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch).count();
             auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(epoch).count() % 1000000000;
@@ -266,17 +266,17 @@ namespace WireGuard {
         void runWithDuration(std::chrono::seconds duration, 
                             std::chrono::seconds printInterval, 
                             const std::string &label) {
-            const auto startTime = std::chrono::steady_clock::now();
+            const auto startTime = Clock::now();
             auto lastPrintTime = startTime;
             while (true) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(20));
-                const auto elapsed = std::chrono::steady_clock::now() - startTime;
-                const auto timeSinceLastPrint = std::chrono::steady_clock::now() - lastPrintTime;
+                const auto elapsed = Clock::now() - startTime;
+                const auto timeSinceLastPrint = Clock::now() - lastPrintTime;
                 if (timeSinceLastPrint >= printInterval) {
                     const auto elapsedSeconds = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
                     LOG_INFO("%s, elapsed: %{public}lld s, remaining: %{public}lld s", 
                              label.c_str(), elapsedSeconds, (duration.count() - elapsedSeconds));
-                    lastPrintTime = std::chrono::steady_clock::now();
+                    lastPrintTime = Clock::now();
                 }
                 if (elapsed >= duration) {
                     break;

@@ -259,7 +259,7 @@ namespace WireGuard {
         /**
          * @brief 获取当前时间的纳秒级时间戳
          *
-         * 使用 std::chrono::steady_clock 确保单调递增
+         * 使用 std::chrono::system_clock 确保单调递增
          * 不受系统时钟调整影响
          *
          * @return uint64_t 从某个起点开始的纳秒数

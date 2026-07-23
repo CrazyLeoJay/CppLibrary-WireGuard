@@ -207,7 +207,7 @@ namespace WireGuard {
                         }
                     } else {
                         try {
-                            encryptPacketAndSendSocket(peer, nullptr, 0);
+                            encryptPacketAndSendSocket(peer, nullptr, 0);// 发送心跳包
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 如果发送发生异常，就设置一个小的等待时间，再次尝试
@@ -884,7 +884,7 @@ namespace WireGuard {
     }
 
     void Device::printStreamLogThrow(const std::shared_ptr<Peer> &peer, const MessageType type,
-                                     const StreamLog::StreamDirection direction, const size_t len,
+                                     const StreamLog::StreamDirection direction, const uint64_t len,
                                      const std::string &message) const {
         if (!peer) {
             LOG_WARN("printStreamLogThrow: peer 为空，跳过日志");

@@ -484,7 +484,7 @@ namespace WireGuard {
         }
 
         void tai64n_now(Timestamp &timestamp) {
-            auto now = std::chrono::system_clock::now();
+            auto now = Clock::now();
             auto epoch = now.time_since_epoch();
             auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch).count();
             auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(epoch).count() % 1000000000;
@@ -564,7 +564,7 @@ namespace WireGuard {
         }
 
         uint64_t get_current_time_ns() {
-            const auto now = std::chrono::steady_clock::now();
+            const auto now = Clock::now();
             return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
         }
     } // namespace crypto_static

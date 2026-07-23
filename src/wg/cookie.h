@@ -67,8 +67,8 @@ namespace WireGuard {
         const ContentKey &content_key_; // 用于计算的设备公钥
 
         Hash secret_{}; ///< 主密钥（随机生成，每 2 分钟轮换）
-        std::chrono::steady_clock::time_point secret_birthdate_; /// < Secret 创建时间
-        const std::chrono::steady_clock::duration secret_valid_duration{std::chrono::minutes(2)}; // 有效时长
+        Clock::time_point secret_birthdate_; /// < Secret 创建时间
+        const Clock::duration secret_valid_duration{std::chrono::minutes(2)}; // 有效时长
 
         mutable std::unordered_map<Endpoint, CookieData, EndpointHash> cookieIndex{}; // 保存每个站点的cookie
         mutable std::mutex secret_lock_; ///< 保护密钥的互斥锁

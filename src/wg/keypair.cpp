@@ -228,7 +228,7 @@ namespace WireGuard {
     }
 
     uint64_t KeyPair::getCurrentTimeNs() {
-        auto now = std::chrono::steady_clock::now();
+        auto now = Clock::now();
         auto duration = now.time_since_epoch();
         return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
     }
