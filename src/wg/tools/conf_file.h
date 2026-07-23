@@ -67,7 +67,8 @@ namespace WireGuard {
             WGKey privateKey;
             IpAddressArea ipArea;
             std::vector<IPAddress> dns;
-            std::shared_ptr<uint32_t> ListenPort; // 监听端口
+            std::shared_ptr<uint32_t> ListenPort{nullptr}; // 监听端口
+            std::shared_ptr<uint32_t> mtu{nullptr}; // 设置网络接口的最大传输单元（MTU）
         };
 
         struct WGConfPeer {
@@ -132,17 +133,6 @@ namespace WireGuard {
          * @return 转化为数据实体
          */
         WGConf readConfFileToEntity(const std::string &content);
-
-        /**
-         * 将配置文件解析成json
-         * 由于字段比较多，为了减少跨语言之间的配置读写，使用json序列化
-         *
-         * @param content 配置文件内容
-         * @return 解析的json
-         */
-        std::string readConfFileToJson(const std::string &content);
-
-        std::string wgConfToJson(const WGConf &config);
 
         DeviceRegisterConfig wgConfToDeviceRegisterConfig(const WGConf &conf);
 

@@ -240,10 +240,10 @@ namespace WireGuard {
      */
     struct IpAddressArea {
         IPAddress address;
-        uint8_t cidr = -1; // -1表示没有掩码
+        int cidr = -1; // -1表示没有掩码
 
         std::string toIpStr() const {
-            if (cidr > 0) {
+            if (cidr >= 0) {
                 return address.toIpStr() + "/" + std::to_string(cidr);
             }
             if (address.family == IPAddress::IPv4) {
