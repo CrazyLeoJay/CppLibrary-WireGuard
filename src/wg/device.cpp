@@ -207,7 +207,7 @@ namespace WireGuard {
                         }
                     } else {
                         try {
-                            encryptPacketAndSendSocket(peer, nullptr, 0);
+                            encryptPacketAndSendSocket(peer, nullptr, 0);// 发送心跳包
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 如果发送发生异常，就设置一个小的等待时间，再次尝试

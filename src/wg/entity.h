@@ -157,7 +157,7 @@ namespace WireGuard {
     using CookieNonce = std::array<uint8_t, COOKIE_NONCE_LEN>; // Cookie Nonce 类型
     using MacData = std::array<uint8_t, COOKIE_LEN>; // MAC 数据类型
 
-    using Clock = std::chrono::steady_clock;
+    using Clock = std::chrono::system_clock;
     using TimePoint = Clock::time_point;
 
     struct Key32Hash {
