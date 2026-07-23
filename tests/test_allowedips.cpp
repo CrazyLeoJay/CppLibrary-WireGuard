@@ -59,7 +59,7 @@ static IPAddress makeIpv6(const std::string &ipStr) {
  * @param allowedIps 允许的 IP 地址区域列表
  */
 static PeerConfig makePeerConfig(const std::string &name,
-                                 const std::vector<std::pair<std::string, uint8_t> > &allowedIps) {
+                                 const std::vector<std::pair<std::string, int> > &allowedIps) {
     PeerConfig config{};
     config.public_key = client_public;
     config.keepaliveInterval = 25;
@@ -83,7 +83,7 @@ static PeerConfig makePeerConfig(const std::string &name,
  * @param allowedIps 允许的 IP 地址区域列表（IP字符串, CIDR）
  */
 static std::shared_ptr<Peer> makePeer(size_t index, const std::string &name,
-                                      const std::vector<std::pair<std::string, uint8_t> > &allowedIps) {
+                                      const std::vector<std::pair<std::string, int> > &allowedIps) {
     ContentKey contentKey(client_private);
     PeerConfig config = makePeerConfig(name, allowedIps);
     return std::make_shared<Peer>(index, contentKey, config);
@@ -97,7 +97,7 @@ static std::shared_ptr<Peer> makePeer(size_t index, const std::string &name,
 struct RouteTestCase {
     std::string testName; // 测试名称
     std::string peerName; // Peer 名称
-    std::vector<std::pair<std::string, uint8_t> > allowedIps; // Peer 的 allowedIPs
+    std::vector<std::pair<std::string, int> > allowedIps; // Peer 的 allowedIPs
 };
 
 /**
@@ -143,7 +143,7 @@ protected:
      * @param allowedIps 允许的 IP 地址区域列表（IP字符串, CIDR）
      */
     std::shared_ptr<Peer> createPeer(size_t index, const std::string &name,
-                                     const std::vector<std::pair<std::string, uint8_t> > &allowedIpList) {
+                                     const std::vector<std::pair<std::string, int> > &allowedIpList) {
         auto contentKey = std::make_shared<ContentKey>(client_private);
         auto config = std::make_shared<PeerConfig>(makePeerConfig(name, allowedIpList));
         contentKeys.push_back(contentKey);
@@ -410,11 +410,11 @@ TEST_F(AllowedIPsTest, MixedIPv4IPv6_NoInterference) {
  */
 TEST_F(AllowedIPsTest, SinglePeerMultipleAllowedIPs) {
     auto peer = createPeer(0, "MultiPeer", {
-        {"10.0.0.0", 24},
-        {"192.168.1.0", 24},
-        {"fd00::", 64},
-        {"2001:db8::", 32},
-    });
+                               {"10.0.0.0", 24},
+                               {"192.168.1.0", 24},
+                               {"fd00::", 64},
+                               {"2001:db8::", 32},
+                           });
     allowedIps.addPeer(peer);
 
     // 所有配置的 IP 都应该返回 Peer0

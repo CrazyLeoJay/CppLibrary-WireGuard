@@ -99,7 +99,7 @@ namespace WireGuard {
             return addr;
         }
 
-        bool isValidCIDR(uint32_t cidr, IPAddress::Family family) {
+        bool isValidCIDR(const int cidr, const IPAddress::Family family) {
             if (family == IPAddress::Family::IPv4) {
                 return cidr >= 0 && cidr <= 32;
             } else {
@@ -329,7 +329,7 @@ namespace WireGuard {
                 throw WGException("Interface PrivateKey 不能为空");
             }
 
-            if (conf.inter.ipArea.cidr == static_cast<uint32_t>(-1)) {
+            if (conf.inter.ipArea.cidr == -1) {
                 throw WGException("Interface Address 不能为空");
             }
 
@@ -378,7 +378,7 @@ namespace WireGuard {
                 }
 
                 for (const auto &ip: peer.allowedIPs) {
-                    if (ip.cidr == static_cast<uint32_t>(-1)) {
+                    if (ip.cidr == -1) {
                         throw WGException("Peer AllowedIPs CIDR 不能为空");
                     }
                     if (!isValidCIDR(ip.cidr, ip.address.family)) {
@@ -462,7 +462,7 @@ namespace WireGuard {
                         if (slashPos != std::string::npos) {
                             std::string ipStr = value.substr(0, slashPos);
                             conf.inter.ipArea.address = parseIPAddress(ipStr);
-                            conf.inter.ipArea.cidr = static_cast<uint32_t>(std::stoi(value.substr(slashPos + 1)));
+                            conf.inter.ipArea.cidr = std::stoi(value.substr(slashPos + 1));
                         }
                     } else if (key == "DNS") {
                         std::vector<std::string> dnsList = split(value, ',');
@@ -473,6 +473,8 @@ namespace WireGuard {
                         conf.inter.ListenPort = std::make_shared<uint32_t>(std::stoi(value));
                     } else if (key == "ConfigName") {
                         conf.inter.configName = value;
+                    } else if (key == "MTU") {
+                        conf.inter.mtu = std::make_shared<uint32_t>(std::stoi(value));
                     }
                 } else if (inPeer && currentPeer) {
                     if (key == "PublicKey") {
@@ -487,7 +489,7 @@ namespace WireGuard {
                             size_t slashPos = ipStr.find('/');
                             if (slashPos != std::string::npos) {
                                 area.address = parseIPAddress(ipStr.substr(0, slashPos));
-                                area.cidr = static_cast<uint32_t>(std::stoi(ipStr.substr(slashPos + 1)));
+                                area.cidr = std::stoi(ipStr.substr(slashPos + 1));
                             }
                             currentPeer->allowedIPs.push_back(area);
                         }
@@ -510,59 +512,6 @@ namespace WireGuard {
             validateConf(conf);
 
             return conf;
-        }
-
-        std::string readConfFileToJson(const std::string &content) {
-            const WGConf conf = readConfFileToEntity(content);
-            return wgConfToJson(conf);
-        }
-
-        std::string wgConfToJson(const WGConf &conf) {
-            std::ostringstream json;
-            json << "{";
-
-            json << "\"interface\":{";
-            json << R"("privateKey":")" << crypto::bin32Array2Base64(conf.inter.privateKey) << "\",";
-            json << "\"address\":{";
-            json << R"("ip":")" << ipToStr(conf.inter.ipArea.address) << "\",";
-            json << "\"cidr\":" << std::to_string(conf.inter.ipArea.cidr);
-            json << "},";
-            json << "\"dns\":[";
-            for (size_t i = 0; i < conf.inter.dns.size(); i++) {
-                if (i > 0) json << ",";
-                json << "\"" << ipToStr(conf.inter.dns[i]) << "\"";
-            }
-            json << "]";
-            json << "},";
-
-            json << "\"peers\":[";
-            for (size_t i = 0; i < conf.peers.size(); i++) {
-                if (i > 0) json << ",";
-                const auto &peer = conf.peers[i];
-                json << "{";
-                json << R"("publicKey":")" << crypto::bin32Array2Base64(peer.publicKey) << "\",";
-                json << "\"endpoint\":{";
-                json << R"("ipStrOrDomain":")" << peer.endpoint.ipStrOrDomain << "\",";
-                json << "\"port\":" << peer.endpoint.port;
-                json << "},";
-                json << "\"allowedIPs\":[";
-                for (size_t j = 0; j < peer.allowedIPs.size(); j++) {
-                    if (j > 0) json << ",";
-                    const auto &ip = peer.allowedIPs[j];
-                    json << R"({"ip":")" << ipToStr(ip.address) << R"(","cidr":)" << std::to_string(ip.cidr) << "}";
-                }
-                json << "],";
-                json << "\"persistentKeepalive\":" << peer.persistentKeepalive;
-                if (peer.preSharedKey) {
-                    json << R"(,"preSharedKey":")" << crypto::bin32Array2Base64(peer.publicKey) << "\"";
-                }
-                json << "}";
-            }
-            json << "]";
-
-            json << "}";
-
-            return json.str();
         }
 
         DeviceRegisterConfig wgConfToDeviceRegisterConfig(const WGConf &conf) {
@@ -620,6 +569,9 @@ namespace WireGuard {
             }
             if (inter.ListenPort) {
                 str += "\nListenPort=" + std::to_string(*inter.ListenPort);
+            }
+            if (inter.mtu) {
+                str += "\nMTU=" + std::to_string(*inter.mtu);
             }
 
             for (const auto &peer: conf.peers) {

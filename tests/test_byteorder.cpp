@@ -108,9 +108,9 @@ TEST(ByteOrderTest, ipv4_mapped_address) {
     printf("\nIPv4-mapped IPv6 测试:\n");
     printf("  s6_addr[12-15]: 0x%08X (网络字节序)\n", read_back);
     printf("  ntohl 转换后: 0x%08X\n", read_back_converted);
-    printf("  原始主机字节序: 0x%08X\n", host_ip);
+    printf("  原始主机字节序: 0x%08X\n", ip_host);
     
-    ASSERT_EQ(read_back_converted, host_ip) << "IPv4-mapped地址需要ntohl转换";
+    ASSERT_EQ(read_back_converted, ip_host) << "IPv4-mapped地址需要ntohl转换";
 }
 
 } // namespace Test
