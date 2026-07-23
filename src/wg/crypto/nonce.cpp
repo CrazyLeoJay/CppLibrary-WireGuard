@@ -59,7 +59,7 @@ namespace WireGuard {
             crypto::kdf2(recv_key, send_key, chain_key, nullptr, 0);
         }
 
-        auto time = std::chrono::steady_clock::now().time_since_epoch();
+        auto time = Clock::now().time_since_epoch();
         uint64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(time).count();
 
         memcpy(keypair->sending.key.data(), send_key.data(), SYMMETRIC_KEY_LEN);
