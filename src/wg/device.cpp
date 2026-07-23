@@ -884,7 +884,7 @@ namespace WireGuard {
     }
 
     void Device::printStreamLogThrow(const std::shared_ptr<Peer> &peer, const MessageType type,
-                                     const StreamLog::StreamDirection direction, const size_t len,
+                                     const StreamLog::StreamDirection direction, const uint64_t len,
                                      const std::string &message) const {
         if (!peer) {
             LOG_WARN("printStreamLogThrow: peer 为空，跳过日志");

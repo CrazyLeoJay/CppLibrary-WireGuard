@@ -51,9 +51,9 @@ namespace WireGuard {
          * 每个Peer单独计算
          */
         struct StreamCalculate {
-            size_t length; // 当前数据大小
-            size_t receive_total; // 接收总数据量
-            size_t send_total; // 发送总数据量
+            uint64_t length; // 当前数据大小
+            uint64_t receive_total; // 接收总数据量
+            uint64_t send_total; // 发送总数据量
         };
 
         struct Message {
