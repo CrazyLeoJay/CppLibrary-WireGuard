@@ -9,6 +9,17 @@ add_compile_definitions(
         #SHOW_DEBUG_LOGS
 )
 
+# 如果 fmt 尚未导入，则导入
+if(NOT TARGET fmt::fmt)
+    include(FetchContent)
+    FetchContent_Declare(
+            fmt
+            URL "../../thirty_libs/fmt-12.2.0.zip"
+    )
+    FetchContent_MakeAvailable(fmt)
+endif()
+
+
 # 创建测试可执行文件
 add_executable(test_main test_main.cpp
         key_pair_gen.cpp
@@ -23,7 +34,7 @@ add_executable(test_main test_main.cpp
         test_byteorder.cpp
 )
 
-# 链接被测库 + GTest 主函数
+# 链接被测库 + GTest 主函数 + fmt库
 target_link_libraries(${PROJECT_NAME} PRIVATE
         GTest::gtest_main   # 自动提供 main() 函数
         wg
