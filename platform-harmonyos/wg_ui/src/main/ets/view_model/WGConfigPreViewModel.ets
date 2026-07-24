@@ -136,6 +136,7 @@ export default class WGConfigPreViewModel {
       // }
     } catch (e) {
       this.isVpnOpen = false;
+      WireGuard.event.publishVpnNoOpen()
       context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
       LLog.error(TAG, { error: e, message: "开启VPN异常" });
     }

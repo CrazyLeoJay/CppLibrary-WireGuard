@@ -21,6 +21,7 @@ import { zlib } from '@kit.BasicServicesKit';
 import WGAppException from '../error/WGAppException';
 import fs from '@ohos.file.fs';
 import { WGDBConf } from './entity/WGConfigEntity';
+import { fileUri } from '@kit.CoreFileKit';
 
 /**
  * WG 工具包
@@ -99,11 +100,13 @@ class WGToolsImpl {
    * @throws WGAppException
    */
   async loadFileToConfigs(context: Context, resUrl: string): Promise<WGConf | WGConf[]> {
-    const stat = await fs.stat(resUrl)
+    LLog.info(TAG, "判断文件类型")
+    const fileUriObj: fileUri.FileUri = new fileUri.FileUri(resUrl);
+    const stat = await fs.stat(fileUriObj.path)
     if (!stat.isFile()) {
       throw new WGAppException("不是文件")
     }
-
+    LLog.info(TAG, "开始解压缩分析配置")
     try {
       await this.validateZipFile(resUrl)
       return await this.zipAndReadWGConfig(context, resUrl)
@@ -231,7 +234,12 @@ class WGToolsImpl {
 
   private async checkFileSize(resUrl: string): Promise<void> {
     try {
-      const stat = await fs.stat(resUrl)
+      let path = resUrl;
+      if (path.startsWith("file://")) {
+        const fileUriObj: fileUri.FileUri = new fileUri.FileUri(resUrl);
+        path = fileUriObj.path;
+      }
+      const stat = await fs.stat(path)
       if (stat.size > MAX_FILE_SIZE) {
         throw new WGAppException(`文件大小超过限制(最大10M)，当前大小: ${(stat.size / 1024 / 1024).toFixed(2)}M`)
       }

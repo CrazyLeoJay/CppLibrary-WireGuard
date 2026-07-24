@@ -187,6 +187,10 @@ export class WGSystemEventDef {
       }
     })
   }
+
+  publishVpnNoOpen(){
+    WireGuard.event.publishVpnChange({ isOpen: false, tag: "no start vpn" });
+  }
 }
 
 const WGEvent = new WGSystemEventDef();

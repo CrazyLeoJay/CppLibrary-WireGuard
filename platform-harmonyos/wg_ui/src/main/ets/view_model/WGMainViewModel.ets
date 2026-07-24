@@ -113,7 +113,7 @@ export default class WGMainViewModel {
       })
     }
     const resUrl = uris[0];
-    LLog.info(TAG, `资源：${resUrl}`)
+    LLog.info(TAG, `选择导入的资源：${resUrl}`)
 
     return await WireGuard.tools.loadFileToConfigsToDb(uiContext.getHostContext()!, resUrl)
   }
@@ -168,8 +168,9 @@ export default class WGMainViewModel {
       await WireGuard.runWGConfig(item.id, config, isOn)
     } catch (e) {
       item.open = false;
-      context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
-      LLog.error(TAG, { error: e, message: "开启VPN异常" });
+      WireGuard.event.publishVpnNoOpen()
+      context.getPromptAction().showToast({ message: `VPN${isOn ? "开启" : "关闭"}失败 ${e ?? ""}` })
+      LLog.error(TAG, { error: e, message: `${isOn ? "开启" : "关闭"}VPN异常` });
     }
   }
 }

@@ -171,7 +171,7 @@ static napi_value NAPI_Global_isIpv4(napi_env env, napi_callback_info info) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isIPv4参数");
         bool result = WireGuard::Tools::isIPv4(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -191,7 +191,7 @@ static napi_value NAPI_Global_isIpv6(napi_env env, napi_callback_info info) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isIPv6参数");
         bool result = WireGuard::Tools::isIPv6(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -210,7 +210,7 @@ static napi_value NAPI_Global_isIpAddress(napi_env env, napi_callback_info info)
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isIpAddress参数");
         bool result = WireGuard::Tools::isValidIPAddress(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -230,7 +230,7 @@ static napi_value NAPI_Global_isValidDomain(napi_env env, napi_callback_info inf
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isValidDomain参数");
         bool result = WireGuard::Tools::isValidDomain(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -249,7 +249,7 @@ static napi_value NAPI_Global_isValidBase64Key(napi_env env, napi_callback_info 
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isValidBase64Key参数");
         bool result = WireGuard::Tools::isValidBase64Key(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -268,7 +268,7 @@ static napi_value NAPI_Global_dnsToIp(napi_env env, napi_callback_info info) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "dnsToIp参数");
 //        bool result = WireGuard::Tools::isValidBase64Key(nvContent);
         auto ip = WireGuard::DNS::readDomainToIp(nvContent);
         return NapiTools::makeNapiString(env, ip.toIpStr());

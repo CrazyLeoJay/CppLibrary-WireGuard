@@ -29,6 +29,7 @@ import WGConfig from './WGConfig';
 import WGEvent from './WGEvent';
 import WGTools from './WGTools';
 import { makeWGConf2VpnStartConfig, VpnConnHelper } from './WGConnect';
+import WGAppException from '../error/WGAppException';
 
 const TAG = "wgHelper"
 
@@ -168,27 +169,31 @@ export namespace WireGuard {
           config: vpnConf,
         },
       })
-      // .catch((e: BusinessError) => {
-      //   // switch (e.code) {
-      //   //   case 15501001:
-      //   //     LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
-      //   //   case 201:
-      //   //     LLog.warn(TAG, { error: e, message: "未授权！" })
-      //   //   default:
-      //   //     LLog.warn(TAG, e)
-      //   // }
-      //   throw new WGAppException({ e: e, message: "VPN启动异常" });
-      // })
+        .catch((e: BusinessError) => {
+          // switch (e.code) {
+          //   case 15501001:
+          //     LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
+          //   case 201:
+          //     LLog.warn(TAG, { error: e, message: "未授权！" })
+          //   default:
+          //     LLog.warn(TAG, e)
+          // }
+          throw new WGAppException({ e: e, message: "VPN启动异常" });
+        })
         .then(() => {
           LLog.info(TAG, "vpn start notify")
           // statusConfig.setRunningServer(id)
         })
     } else {
-      await vpnExtension.stopVpnExtensionAbility({
-        deviceId: '',
-        bundleName: packageName,
-        abilityName: abilityName,
-      })
+      if (await WireGuard.tools.isVpnExtensionRunning()) {
+        await vpnExtension.stopVpnExtensionAbility({
+          deviceId: '',
+          bundleName: packageName,
+          abilityName: abilityName,
+        })
+      }else{
+        LLog.info(TAG, "vpn 未开启，不执行关闭")
+      }
     }
   }
 
