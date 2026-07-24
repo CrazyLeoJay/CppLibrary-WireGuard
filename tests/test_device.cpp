@@ -44,29 +44,21 @@ WireGuard::DeviceRegisterConfig makeConfig(std::string path = "wg.内网ipto.612
     LOG_INFO("配置文件内容:\n%s", content.c_str());
 
     WireGuard::Tools::WGConf conf = WireGuard::Tools::readConfFileToEntity(content);
-    
-    for (const auto& peer : conf.peers) {
-        LOG_INFO("Peer endpoint: type=%d, host=%s, port=%d", 
-                 static_cast<int>(peer.endpoint.type), 
-                 peer.endpoint.ipStrOrDomain.c_str(), 
-                 peer.endpoint.port);
-    }
-    
+
+    auto printLog = WireGuard::Tools::wgConfToOfficialConfigStr(conf);
+    LOG_INFO("读取内容:\n%s", printLog.c_str());
+
     auto config = WireGuard::Tools::wgConfToDeviceRegisterConfig(conf);
-    
-    for (const auto& peer : config.peers) {
-        LOG_INFO("Parsed endpoint: %s:%d", 
-                 peer.endpoint.address.toIpStr().c_str(), 
-                 peer.endpoint.port);
-    }
-    
+
+
     return config;
 }
 
 
 TEST(DEVICE_TEST, default_test) {
     // const auto config = makeConfig(); // 连接openwrt服务。握手正常
-    const auto config = makeConfig("test.local.tmp.conf"); // 连接 Ubuntu 的 WireGuard服务，无法获取到返回日志
+    // const auto config = makeConfig("test.local.tmp.conf"); // 连接 Ubuntu 的 WireGuard服务，无法获取到返回日志
+    const auto config = makeConfig("test.pivpn.tmp.conf"); // 连接 pivpn 的 WireGuard服务，握手响应解密异常，需要处理
     WireGuard::Device device{config};
     device.initSocketStart([](int fd) {
     });
