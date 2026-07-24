@@ -495,7 +495,7 @@ namespace WireGuard {
                         }
                     } else if (key == "PersistentKeepalive") {
                         currentPeer->persistentKeepalive = static_cast<uint32_t>(std::stoi(value));
-                    } else if (key == "PreSharedKey") {
+                    } else if (key == "PreSharedKey" || key == "PresharedKey") {
                         currentPeer->preSharedKey = std::make_shared<WGKey>(crypto::base642Bin32Array(value));
                     }
                 }
