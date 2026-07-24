@@ -90,3 +90,11 @@ namespace WireGuard {
 } // namespace WireGuard
 
 #endif // WIREGUARD_WGEXCEPTION_H
+
+
+// 异常抛出宏，自动包含文件名、行号和函数名
+#define THROW_WG_EXCEPTION(format, ...) \
+throw WireGuard::WGException("[%s:%d] %s - " format, __FILE__, __LINE__, __func__, ##__VA_ARGS__)
+
+#define THROW_WG_EXCEPTION_SIMPLE(msg) \
+throw WireGuard::WGException("[%s:%d] %s - %s", __FILE__, __LINE__, __func__, msg)
