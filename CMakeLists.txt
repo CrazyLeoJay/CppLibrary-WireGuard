@@ -1,6 +1,7 @@
 #cmake_minimum_required(VERSION 4.0)
 cmake_minimum_required(VERSION 3.22.1)
 project(wg_main)
+cmake_policy(SET CMP0135 NEW)
 
 set(CMAKE_CXX_STANDARD 14)
 # 确保所有目标都使用 PIC
