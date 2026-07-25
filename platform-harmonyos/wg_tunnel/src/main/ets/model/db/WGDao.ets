@@ -32,10 +32,16 @@ export default class WGDao {
     this.orm = orm;
   }
 
-  allConfig(): WgConfigTable[] {
-    return this.orm.query(WgConfigTable)
-      .orderBy("createdAt", 'desc')
-      .find()
+  allConfig(qw?: QueryWhere): WgConfigTable[] {
+    const orm = this.orm.query(WgConfigTable)
+    if (qw) {
+      const sort = (qw.sortAsc ?? false) ? 'asc' : 'desc'
+      const column = qw.sortColumn ?? "createdAt"
+      orm.orderBy(column, sort)
+    } else {
+      orm.orderBy("createdAt", 'desc')
+    }
+    return orm.find()
   }
 
   allDBConfig(): WGDBConf[] {
@@ -104,4 +110,15 @@ export default class WGDao {
       .where({ name: inputName })
       .count()
   }
+}
+
+interface QueryWhere {
+  sortAsc?: boolean,
+  sortColumn?: SortColumnName, // 排序行
+}
+
+export enum SortColumnName {
+  config_name = "name",
+  create_time = "createdAt",
+  update_time = "updatedAt",
 }

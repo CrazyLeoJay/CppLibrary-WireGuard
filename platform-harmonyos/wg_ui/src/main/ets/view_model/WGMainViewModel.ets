@@ -20,11 +20,12 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
-import { StatusConfig, WGConf, WGDBConf } from 'wg_tunnel';
+import { SortColumnName, StatusConfig, WGConf, WGDBConf } from 'wg_tunnel';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
 import { AppErrorCode } from 'wg_tunnel/src/main/ets/error/AppErrorCode';
+import { PersistenceV2, UIUtils } from '@kit.ArkUI';
 
 const TAG = "主页"
 
@@ -36,8 +37,15 @@ export default class WGMainViewModel {
   nav: NavPathStack = new NavPathStack();
   @Trace wgList: MainItemData[] = [];
   @Trace qrCodePixelMap?: image.PixelMap;
+  @Trace uiConfig: MainUiConfig
 
   constructor(nav?: NavPathStack) {
+    this.uiConfig = PersistenceV2.globalConnect({
+      // 定义持久化的数据类型
+      type: MainUiConfig,
+      // 定义默认构造器，返回时需要调用makeObserved，才能实现自动持久化
+      defaultCreator: () => UIUtils.makeObserved(new MainUiConfig())
+    })!;
     if (nav) {
       this.nav = nav;
     }
@@ -47,8 +55,38 @@ export default class WGMainViewModel {
     return this.wgList.length == 0;
   }
 
+  /**
+   * 加载配置数据
+   */
   async loadConfigs() {
-    this.wgList = WireGuard.helper.config.allConfig().map((it) => {
+    try {
+      await this.loadMainDataForDB()
+    } catch (e) {
+      if ("数据库连接未建立" == (e as Error).message) {
+        // 等待一段时间秒，一般是初始化好了
+        setTimeout(async () => {
+          try {
+            // 不自调，防止死锁，最多重试一次
+            await this.loadConfigs()
+          } catch (err) {
+            LLog.error(TAG, err)
+          }
+        }, 100)
+        return
+      }
+      LLog.error(TAG, e)
+    }
+  }
+
+  /**
+   * 从数据库加载数据
+   */
+  private async loadMainDataForDB() {
+    LLog.info(TAG, `去加载数据`)
+    this.wgList = WireGuard.helper.config.allConfig({
+      sortAsc: this.uiConfig.listSortAsc,
+      sortColumn: this.uiConfig.sortColumn,
+    }).map((it) => {
       return new MainItemData(this, it);
     })
     LLog.info(TAG, `加载 ${this.wgList.length} 条数据`)
@@ -173,6 +211,23 @@ export default class WGMainViewModel {
       LLog.error(TAG, { error: e, message: `${isOn ? "开启" : "关闭"}VPN异常` });
     }
   }
+
+
+  preLoadDatas() {
+    this.wgList = [];
+    for (let index = 0; index < 10; index++) {
+      this.wgList.push(new MainItemData(this, {
+        name: `test-${index}`,
+        createdAt: new Date(Date.now()),
+        updatedAt: new Date(Date.now()),
+      }))
+    }
+  }
+
+  @Monitor("uiConfig.listSortAsc", "uiConfig.listShowSimple", "uiConfig.sortColumn",)
+  async change() {
+    this.loadConfigs()
+  }
 }
 
 /**
@@ -212,5 +267,40 @@ export class MainItemData {
       }
       this.isClick = false
     }
+  }
+}
+
+
+@ObservedV2
+class MainUiConfig {
+  @Trace listSortAsc: boolean = false;
+  @Trace listShowSimple: boolean = true;
+  @Trace sortColumn: SortColumnName = SortColumnName.create_time
+
+  getColumnName(): string {
+    switch (this.sortColumn) {
+      case SortColumnName.config_name:
+        return "配置名称"
+      case SortColumnName.update_time:
+        return "更新时间"
+      case SortColumnName.create_time:
+      default:
+        return "创建时间"
+    }
+  }
+
+  sortColumnToNext() {
+    switch (this.sortColumn) {
+      case SortColumnName.config_name:
+        this.sortColumn = SortColumnName.update_time
+        break
+      case SortColumnName.update_time:
+        this.sortColumn = SortColumnName.create_time
+        break
+      case SortColumnName.create_time:
+      default:
+        this.sortColumn = SortColumnName.config_name
+    }
+    LLog.info(TAG, `this.sortColumn=${this.sortColumn}`)
   }
 }

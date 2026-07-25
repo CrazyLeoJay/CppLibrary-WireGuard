@@ -20,7 +20,6 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
 import { WGConf, WireGuard } from 'wg_tunnel';
-import { AppErrorCode } from 'wg_tunnel/src/main/ets/error/AppErrorCode';
 
 const TAG = "WG主页";
 
@@ -31,9 +30,25 @@ export function NavWGMainPage() {
 
 @Preview
 @ComponentV2
+struct MainViewPreview {
+  @Local vm: WGMainViewModel = new WGMainViewModel();
+
+  aboutToAppear(): void {
+    this.vm.preLoadDatas();
+  }
+
+  build() {
+    WGMainViewNavDest({
+      previewVM: this.vm
+    })
+  }
+}
+
+@ComponentV2
 export struct WGMainViewNavDest {
   @Param nav: NavPathStack = new NavPathStack();
-  @Local vm: WGMainViewModel = new WGMainViewModel(this.nav);
+  @Param previewVM: WGMainViewModel = new WGMainViewModel(this.nav);
+  @Local vm: WGMainViewModel = this.previewVM;
 
   build() {
     NavDestination() {
@@ -67,23 +82,35 @@ export struct WGMainViewNavDest {
           })
         }
       },
-      // {
-      //   value: "新建VPN",
-      //   symbolIcon: new SymbolGlyphModifier($r('sys.symbol.plus_circle')),
-      //   action: () => {
-      //     WireGuard.navDescToNewWGConfigView(this.vm.nav, () => {
-      //       this.vm.loadConfigs();
-      //     });
-      //   }
-      // },
       {
         value: "设置",
-        // symbolIcon: new SymbolGlyphModifier($r('sys.symbol.dot_grid_1x2')),
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')),
         action: () => {
           WireGuardNav.navDescToWGSettingPreView(this.nav)
         }
-      }
+      },
+      {
+        value: `排序参数:${this.vm.uiConfig.getColumnName()}`,
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
+        action: () => {
+          this.vm.uiConfig.sortColumnToNext()
+        }
+      },
+
+      {
+        value: `排序顺序:${this.vm.uiConfig.listSortAsc ? '正序' : '倒叙'}`,
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
+        action: () => {
+          this.vm.uiConfig.listSortAsc = !this.vm.uiConfig.listSortAsc
+        }
+      },
+      {
+        value: `显示信息：${this.vm.uiConfig.listShowSimple ? '简略' : '详细'}`,
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.message')),
+        action: () => {
+          this.vm.uiConfig.listShowSimple = !this.vm.uiConfig.listShowSimple
+        }
+      },
     ])
   }
 
@@ -305,8 +332,10 @@ struct MainItemView {
       Column() {
         Text(`${this.data.name}`)
           .fontSize('18fp')
-        Text(`createAt: ${this.data.data.createdAt}`)
-          .fontSize('12fp')
+        if (!this.vm.uiConfig.listShowSimple) {
+          Text(`createAt: ${this.data.data.createdAt}`)
+            .fontSize('12fp')
+        }
       }
       .alignItems(HorizontalAlign.Start)
 
