@@ -126,7 +126,7 @@ namespace WireGuard {
          * @param data 数据指针
          * @param len 数据长度
          */
-        void sendPacket(const uint8_t *data, size_t len);
+        void sendPacket(const uint8_t *data, size_t len) const;
 
     private: // 被动操作 初始化、轮询、监听等
         void initPeers(const std::vector<PeerConfig> &peer);

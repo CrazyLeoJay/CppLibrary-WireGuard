@@ -29,6 +29,7 @@
 #include "keypair.h"
 #include "entity.h"
 #include <queue>
+#include <stdint.h>
 #include "version.h"
 
 namespace WireGuard {
@@ -111,6 +112,8 @@ namespace WireGuard {
          * @Throw
          */
         void verifyHandshakeInitiationResponse(const MessageResponse &msg);
+
+        uint32_t getKeepaliveInterval() const;
 
     public:
         // 接收端
