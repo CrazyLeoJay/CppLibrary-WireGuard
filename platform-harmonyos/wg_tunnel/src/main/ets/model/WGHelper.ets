@@ -191,7 +191,7 @@ export namespace WireGuard {
           bundleName: packageName,
           abilityName: abilityName,
         })
-      }else{
+      } else {
         LLog.info(TAG, "vpn 未开启，不执行关闭")
       }
     }
@@ -209,6 +209,10 @@ export namespace WireGuard {
     let result = await native.readWGConf(content);
     // LLog.info(TAG, `扫描：${JSON.stringify(result)}`)
     return result;
+  }
+
+  export function isRunning(): boolean {
+    return statusConfig.getConfig().isOpen()
   }
 
   export namespace Tools {

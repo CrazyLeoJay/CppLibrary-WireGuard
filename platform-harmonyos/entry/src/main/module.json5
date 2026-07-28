@@ -6,7 +6,8 @@
     "mainElement": "EntryAbility",
     "deviceTypes": [
       "phone",
-      "tablet"
+      "tablet",
+      "2in1",
     ],
     "srcEntry": "./ets/stage/MyWGAbilityStage.ets",
     "deliveryWithInstall": true,
@@ -32,6 +33,9 @@
               "ohos.want.action.home"
             ]
           }
+        ],
+        "backgroundModes": [
+          "dataTransfer"
         ]
       }
     ],
@@ -46,7 +50,19 @@
             "name": "ohos.extension.backup",
             "resource": "$profile:backup_config"
           }
-        ],
+        ]
+      }
+    ],
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.INTERNET"
+      },
+      {
+        "name": "ohos.permission.GET_NETWORK_INFO"
+      },
+      {
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+        "reason": "$string:keep_background_running_description",
       }
     ]
   }

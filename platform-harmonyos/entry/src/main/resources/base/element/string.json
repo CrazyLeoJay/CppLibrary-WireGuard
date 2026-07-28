@@ -7,6 +7,10 @@
     {
       "name": "EntryAbility_desc",
       "value": "description"
+    },
+    {
+      "name": "keep_background_running_description",
+      "value": "需要让应用长时间运行在后台提供VPN服务"
     }
   ]
 }

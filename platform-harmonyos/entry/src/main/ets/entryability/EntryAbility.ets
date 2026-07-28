@@ -16,8 +16,11 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 import { window } from '@kit.ArkUI';
+import { LLog, WireGuard } from 'wg_tunnel';
+import { longTaskModel } from '../model/LongTaskModel';
 
 const DOMAIN = 0x0000;
+const TAG = "EntryAbility"
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
@@ -54,10 +57,25 @@ export default class EntryAbility extends UIAbility {
   onForeground(): void {
     // Ability has brought to foreground
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onForeground');
+
+    // 应用切换到前台，停止长时任务
+    LLog.info(TAG, 'Ability onForeground');
+    longTaskModel.stopLongTask(this.context);
   }
 
   onBackground(): void {
     // Ability has back to background
     hilog.info(DOMAIN, 'testTag', '%{public}s', 'Ability onBackground');
+    if (WireGuard.isRunning()) {
+      // 应用切换到后台，启动长时任务保活VPN进程
+      LLog.info(TAG, 'Ability onBackground');
+      longTaskModel.startLongTask(this.context).catch((e: BusinessError) => {
+        LLog.error(TAG, e)
+      });
+    }
   }
+}
+
+export function isRunning() {
+  throw new Error('Function not implemented.');
 }

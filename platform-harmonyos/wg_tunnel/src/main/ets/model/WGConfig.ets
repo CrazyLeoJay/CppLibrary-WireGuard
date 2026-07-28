@@ -86,6 +86,10 @@ export class StatusConfig {
   runningConfigId?: number = undefined;
   running: boolean = false;
 
+  /**
+   * VPN 是否开启，也表示是否正在运行
+   * @returns
+   */
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true
   }
