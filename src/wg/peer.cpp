@@ -204,6 +204,10 @@ namespace WireGuard {
         lastReceivedHandshake_ = Clock::now();
     }
 
+    uint32_t Peer::getKeepaliveInterval() const {
+        return config.keepaliveInterval;
+    }
+
     bool Peer::handleHandshakeInitiation(const MessageInitiation &msg) {
         std::lock_guard<std::mutex> guard(handshakeMutex_);
         noiseReceive.decodeCheckHandshakeInitiation(msg);
