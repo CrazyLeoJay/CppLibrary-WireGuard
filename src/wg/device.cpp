@@ -207,7 +207,7 @@ namespace WireGuard {
                         }
                     } else {
                         try {
-                            encryptPacketAndSendSocket(peer, nullptr, 0);// 发送心跳包
+                            encryptPacketAndSendSocket(peer, nullptr, 0); // 发送心跳包
                             peer->updateHeartbeatPacketSendTime();
                         } catch (const std::exception &e) {
                             // 如果发送发生异常，就设置一个小的等待时间，再次尝试
@@ -464,6 +464,7 @@ namespace WireGuard {
             return;
         }
         const auto currentPeer = _peers[pk];
+        currentPeer->addRxBytes(len);
         currentPeer->setIAmInitiator(false);
         currentPeer->updateEndpoint(endpoint);
         printStreamLog(currentPeer, MessageType::HANDSHAKE_INITIATION, StreamLog::RECEIVE, len);
@@ -535,6 +536,7 @@ namespace WireGuard {
         }
         // 获取到当前 peer
         const auto currentPeer = _receiverIndexPeers[receiverIndex];
+        currentPeer->addRxBytes(len);
         // 发送数据流日志
         printStreamLog(currentPeer, MessageType::HANDSHAKE_RESPONSE, StreamLog::RECEIVE, len);
         // 更新端点 (PS:其实我觉得没啥更新必要，按道理，返回的ip地址和端口，应该和请求的一致)
@@ -587,6 +589,7 @@ namespace WireGuard {
         }
         // 获取到当前 peer
         const std::shared_ptr<Peer> currentPeer = _receiverIndexPeers[receiverIndex];
+        currentPeer->addRxBytes(len);
         // 发送数据流日志
         printStreamLog(currentPeer, MessageType::HANDSHAKE_COOKIE, StreamLog::RECEIVE, len);
         // 处理cookie消息，并且保存cookie到peer中，再次发送握手时，会携带cookie加密后的mac2
@@ -619,6 +622,8 @@ namespace WireGuard {
         }
         //        // 获取到当前 peer
         const auto currentPeer = _receiverIndexPeers[keyIndex];
+        // 记录接收的数据
+        currentPeer->addRxBytes(cipherLen);
         // 发送数据流日志
         printStreamLog(currentPeer, MessageType::DATA, StreamLog::RECEIVE, len);
         //        // 解密数据流
@@ -635,8 +640,6 @@ namespace WireGuard {
             LOG_SOCKET("接收到心跳包");
             return;
         }
-        // 记录接收的数据
-        currentPeer->addRxBytes(cipherLen);
 
         // 根据IP头部提取真实数据长度（去掉加密时添加的零填充）
         size_t actualLen = result.size();
@@ -706,7 +709,7 @@ namespace WireGuard {
             return;
         }
 
-        LOG_INFO("握手消息内容 - header.type=%hhu, senderIndex=%u, msg_size=%zu", 
+        LOG_INFO("握手消息内容 - header.type=%hhu, senderIndex=%u, msg_size=%zu",
                  msg.header.type, ntohl(msg.senderIndex), sizeof(msg));
         const auto result = socket.write(&msg, sizeof(msg), endpoint);
         if (result < 0) {
@@ -716,8 +719,9 @@ namespace WireGuard {
             printStreamLogThrow(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg), error);
             throw WGException(error);
         }
+        peer->addTxBytes(sizeof(msg));
         LOG_INFO("握手请求发送成功，result=%{public}zd", result);
-        LOG_INFO("socket fd=%{public}d, isRunning=%{public}s, isSocketRunning=%{public}s", 
+        LOG_INFO("socket fd=%{public}d, isRunning=%{public}s, isSocketRunning=%{public}s",
                  socket.fd(), socket.isRunning() ? "true" : "false", isSocketRunning.load() ? "true" : "false");
         // 发送数据流日志
         printStreamLog(peer, MessageType::HANDSHAKE_INITIATION, StreamLog::SEND, sizeof(msg));
@@ -784,6 +788,7 @@ namespace WireGuard {
             });
             // 加密数据，并且通过 socket 发送
             socket.write(message.data(), message.size(), endpoint);
+            peer->addTxBytes(message.size());
             // 发送数据流日志
             printStreamLog(peer, MessageType::DATA, StreamLog::SEND, message.size());
         } catch (const std::exception &e) {
