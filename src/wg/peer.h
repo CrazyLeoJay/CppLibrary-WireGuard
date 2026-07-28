@@ -160,6 +160,13 @@ namespace WireGuard {
         bool isCanSendData();
 
         /**
+         * 当间隔时间获取为0时，不发送心跳包
+         *
+         * @return 是否可以发送心跳包
+         */
+        bool canSendHeartbeatPacket() const;
+
+        /**
          * 更新发送心跳包的时间为当前时间
          */
         void updateHeartbeatPacketSendTime();

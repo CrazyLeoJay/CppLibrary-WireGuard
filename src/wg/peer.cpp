@@ -50,6 +50,10 @@ namespace WireGuard {
         }
     }
 
+    bool Peer::canSendHeartbeatPacket() const {
+        return config.keepaliveInterval > 0;
+    }
+
     void Peer::updateHeartbeatPacketSendTime() { this->lastKeepaliveSent_ = Clock::now(); }
 
     std::chrono::milliseconds Peer::heartbeatPacketSendWaitTime() const {

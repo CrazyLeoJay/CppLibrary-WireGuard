@@ -187,25 +187,26 @@ namespace WireGuard {
                     continue;
                 }
 
-                // 判断发送心跳包还需要等待的时间
-                auto waitTime = peer->heartbeatPacketSendWaitTime();
-                if (waitTime == std::chrono::milliseconds(0)) {
-                    if (!peer->isCanSendData()) {
-                        // 如果还没准备好，但触发了心跳，那就发送握手，而不是心跳包
-                        LOG_DEBUG(
-                            "发现有Peer还未准备好，则发起握手 当前 iAmInitiator=%{public}s",
-                            peer->getIAmInitiator() ? "发起者" : "接收者"
-                        );
-                        try {
-                            sendInitiation(peer);
-                            peer->updateHeartbeatPacketSendTime();
-                        } catch (const std::exception &e) {
-                            // 一般是创建的太频繁，这里等2秒再循环 或者直接调用握手
-                            LOG_WARN("发送握手初始化失败 peerIndex=%{public}zu err=%{public}s，2秒后重试", peer->getIndex(),
-                                     e.what());
-                            nextSleepDuration = std::chrono::seconds(2);
-                        }
-                    } else {
+                if (!peer->isCanSendData()) {
+                    // 如果还没准备好，但触发了心跳，那就发送握手，而不是心跳包
+                    LOG_DEBUG(
+                        "发现有Peer还未准备好，则发起握手 当前 iAmInitiator=%{public}s",
+                        peer->getIAmInitiator() ? "发起者" : "接收者"
+                    );
+                    try {
+                        sendInitiation(peer);
+                        peer->updateHeartbeatPacketSendTime();
+                    } catch (const std::exception &e) {
+                        // 一般是创建的太频繁，这里等2秒再循环 或者直接调用握手
+                        LOG_WARN("发送握手初始化失败 peerIndex=%{public}zu err=%{public}s，2秒后重试", peer->getIndex(),
+                                 e.what());
+                        nextSleepDuration = std::chrono::seconds(2);
+                    }
+                } else if (peer->canSendHeartbeatPacket()) {
+                    // 发送心跳包需要判断段是否需要发送，如果间隔时间为0，则只需要判断握手即可
+                    // 判断发送心跳包还需要等待的时间
+                    auto waitTime = peer->heartbeatPacketSendWaitTime();
+                    if (waitTime == std::chrono::milliseconds(0)) {
                         try {
                             encryptPacketAndSendSocket(peer, nullptr, 0); // 发送心跳包
                             peer->updateHeartbeatPacketSendTime();
@@ -215,9 +216,9 @@ namespace WireGuard {
                                      e.what());
                             nextSleepDuration = std::chrono::seconds(1);
                         }
+                    } else {
+                        nextSleepDuration = std::min(nextSleepDuration, waitTime);
                     }
-                } else {
-                    nextSleepDuration = std::min(nextSleepDuration, waitTime);
                 }
             }
 
