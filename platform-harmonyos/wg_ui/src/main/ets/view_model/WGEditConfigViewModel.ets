@@ -21,7 +21,7 @@ import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddress, IPAddressArea, WGConfPeer, WGDBConf, SiteUrlType } from 'wg_tunnel';
+import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf } from 'wg_tunnel';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -69,7 +69,7 @@ export default class WGNewConfigViewModel {
       config.preSharedKey = it.preSharedKey;
       config.setAddress(it.endpoint);
       config.allowedIpsInput = it.allowedIPs.map((it) => `${it.address.ip}/${it.cidr}`).join(",");
-      config.keepaliveInterval = it.keepaliveInterval;
+      config.keepaliveInterval = `${it.keepaliveInterval}`;
       return config;
     })
   }
@@ -262,7 +262,7 @@ export default class WGNewConfigViewModel {
       endpoint: endpoint,
       allowedIPs: allowedIps,
       preSharedKey: config.preSharedKey,
-      keepaliveInterval: config.keepaliveInterval,
+      keepaliveInterval: Number.parseInt(config.keepaliveInterval),
     } as WGConfPeer;
   }
 }

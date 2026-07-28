@@ -241,6 +241,28 @@ export namespace WireGuard {
     export async function isValidDomain(domain: string): Promise<boolean> {
       return await native.isValidDomain(domain);
     }
+
+    /**
+     * 将数据长度转换为带单位的字符串
+     *
+     * @param len 数据长度
+     */
+    export function bitsToString(len: number): string {
+      if (len < 0) {
+        return '0 b';
+      }
+      if (len < 1024) {
+        return `${len} b`;
+      }
+      let bytes: number = len / 8;
+      const units: string[] = ['B', 'KB', 'MB', 'GB', 'TB'];
+      let unitIndex: number = 0;
+      while (bytes >= 1024 && unitIndex < units.length - 1) {
+        bytes /= 1024;
+        unitIndex++;
+      }
+      return `${bytes.toFixed(2)} ${units[unitIndex]}`;
+    }
   }
 
   export namespace Paths {

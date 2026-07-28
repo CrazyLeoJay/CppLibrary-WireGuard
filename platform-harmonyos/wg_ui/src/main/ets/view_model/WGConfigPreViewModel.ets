@@ -161,12 +161,50 @@ export default class WGConfigPreViewModel {
   setSwitchClick() {
     this.isSwitchClick = true
   }
+
+  updateStreamParams(log: StreamLogMessage) {
+    if (this.isVpnOpen) {// 如果vpn开启才需要更新，后续应该添加接口的 私钥 比对，判断日志是否为当前日志的日志。可以在注册时就指定。
+      this.logData.updateLogMessage(log);
+      LLog.debug(TAG, `stream log: index=${log.peerIndex} receive=${log.sc.receiveTotal} send=${log.sc.sendTotal ?? 0}`)
+    }
+  }
+
+  receiveData(index: number): string {
+    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.receiveTotal ?? 0)
+  }
+
+  sendData(index: number): string {
+    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.sendTotal ?? 0)
+  }
+
+  updateLogViewData(log: StreamLogMessage, sortAes: boolean) {
+    if (sortAes) {
+      this.logData.logs.push(log);
+    } else {
+      this.logData.logs.unshift(log);
+    }
+  }
 }
 
 
 @ObservedV2
 export class WGStreamLogsData {
+
   @Trace logs: StreamLogMessage[] = []
+  @Trace lastLogForMap: Map<number, StreamLogMessage> = new Map(); // // 上一条日志，一直表示最新,不过需要根据peer区分
+
+  updateLogMessage(log: StreamLogMessage) {
+    this.lastLogForMap.set(log.peerIndex, log)
+  }
+
+  getLatestLogForPeer(index: number): StreamLogMessage | undefined {
+    return this.lastLogForMap.get(index)
+  }
+
+  clear() {
+    this.logs = [];
+    this.lastLogForMap.clear();
+  }
 }
 
 export interface IconBtnParam {
@@ -176,7 +214,7 @@ export interface IconBtnParam {
 
 @ObservedV2
 export class IconSwitchBtnParam {
-  @Trace on: boolean = false
+  @Trace on: boolean = false // 按钮是否开启
   onParam: IconBtnParam
   offParam: IconBtnParam
   onChange?: (on: boolean) => void

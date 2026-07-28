@@ -118,9 +118,18 @@ export default struct WGConfigPreView {
       this.vm.isVPNNoGetParamThrow = true
     }
   })
+  listener = WireGuard.event.subscribeVpnStreamLogs((log) => {
+    this.vm.updateStreamParams(log)
+  })
+  closeListener = WireGuard.event.subscribeVpnChange((state) => {
+    if (!state.isOpen) {
+      this.vm.logData.clear()
+    }
+  })
 
   aboutToDisappear(): void {
     this.throwEvent.cancel()
+    this.listener.cancel()
   }
 
   build() {
@@ -177,6 +186,7 @@ function cardBackgroundStyle() {
   .align(Alignment.Start)
 }
 
+const ConfigColumnSpace = '4vp'
 
 /**
  * 本地接口编辑卡片
@@ -211,24 +221,22 @@ struct InterfaceCardView {
 
   build() {
     Stack() {
-      Column({ space: '8vp' }) {
+      Column({ space: '16vp' }) {
         Text("本地（Interface）")
           .width('100%')
           .layoutGravity(LocalizedAlignment.START)
           .align(Alignment.Start)
-        Column() {
-          Text('名称').width('100%')
-          Text(this.data.name!!).width('100%')
+        Column({ space: ConfigColumnSpace }) {
+          Text('名称').width('100%').TagStyle()
+          Text(this.data.name!!).width('100%').TagContentStyle()
         }
 
-        Column() {
-          Text('公钥').width('100%')
+        Column({ space: ConfigColumnSpace }) {
+          Text('公钥').width('100%').TagStyle()
           Text(this.publicKey!!)
             .width('100%')
-            .maxLines(1)
-            .ellipsisMode(EllipsisMode.END)
-            .wordBreak(WordBreak.BREAK_ALL)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .TagContentStyle()
+            .TextOnlyLineEllipsisStyle()
         }
         .onClick(() => {
           if (this.publicKey.length > 0) {
@@ -236,14 +244,14 @@ struct InterfaceCardView {
           }
         })
 
-        Column() {
-          Text('局域网IP地址').width('100%')
-          Text(this.vm.getWlanIp!!).width('100%')
+        Column({ space: ConfigColumnSpace }) {
+          Text('局域网IP地址').width('100%').TagStyle()
+          Text(this.vm.getWlanIp!!).width('100%').TagContentStyle()
         }
 
-        Column() {
-          Text('DNS服务器').width('100%')
-          Text(this.vm.dns!!).width('100%')
+        Column({ space: ConfigColumnSpace }) {
+          Text('DNS服务器').width('100%').TagStyle()
+          Text(this.vm.dns!!).width('100%').TagContentStyle()
         }
       }
       .cardBackgroundStyle()
@@ -278,72 +286,97 @@ struct PeerCardView {
   private TAG = "";
 
   build() {
-    Column({ space: "8vp" }) {
-      Text(`${this.index + 1}、远程（Peer）`).width('100%')
-      Column() {
-        Text('公钥').width('100%')
+    Column({ space: "16vp" }) {
+      Text(`远程(Peer)-${this.index + 1}`).width('100%')
+      Column({ space: ConfigColumnSpace }) {
+        Text('公钥').width('100%').TagStyle()
         Text(this.data.publicKey!!)
           .width('100%')
-          .maxLines(1)
-          .layoutGravity(LocalizedAlignment.START)
-          .align(Alignment.Start)
-          .ellipsisMode(EllipsisMode.END)
-          .wordBreak(WordBreak.BREAK_ALL)
-          .textOverflow({ overflow: TextOverflow.Ellipsis })
+          .TagContentStyle()
+          .TextOnlyLineEllipsisStyle()
       }
       .onClick(() => {
         this.vm.copy44KeyToSystem(this.getUIContext(), this.data.publicKey)
       })
 
       if (this.data.preSharedKey) {
-        Column() {
-          Text('预共享密钥').width('100%')
+        Column({ space: ConfigColumnSpace }) {
+          Text('预共享密钥').width('100%').TagStyle()
           Text(this.data.preSharedKey!!)
             .width('100%')
-            .maxLines(1)
-            .layoutGravity(LocalizedAlignment.START)
-            .align(Alignment.Start)
-            .ellipsisMode(EllipsisMode.END)
-            .wordBreak(WordBreak.BREAK_ALL)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
+            .TagContentStyle()
+            .TextOnlyLineEllipsisStyle()
         }
         .onClick(() => {
           this.vm.copy44KeyToSystem(this.getUIContext(), this.data.preSharedKey!)
         })
       }
 
-      Column() {
-        Text('路由的IP地址（段）').width('100%')
-        Text(`${this.data.allowedIPs.map((it) => `${it.address.ip}/${it.cidr ?? 32}`).join(", ")}`).width('100%')
+      Column({ space: ConfigColumnSpace }) {
+        Text('路由的IP地址（段）').width('100%').TagStyle()
+        Text(`${this.data.allowedIPs.map((it) => `${it.address.ip}/${it.cidr ?? 32}`).join(", ")}`)
+          .width('100%')
+          .TagContentStyle()
       }
 
-      Column() {
-        Text(`对端`).width('100%')
+      Column({ space: ConfigColumnSpace }) {
+        Text(`对端`).width('100%').TagStyle()
         if (this.data.endpoint.type == SiteUrlType.IPv6) {
-          Text(`[${this.data.endpoint.ipStrOrDomain}]:${this.data.endpoint.port}`).width('100%')
+          Text(`[${this.data.endpoint.ipStrOrDomain}]:${this.data.endpoint.port}`).width('100%').TagContentStyle()
         } else {
-          Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%')
+          Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%').TagContentStyle()
         }
       }
 
-      Column() {
-        Text(`连接保活时间`).width('100%')
-        Text(`每隔 ${this.data.keepaliveInterval ?? 25} 秒`).width('100%')
+      Column({ space: ConfigColumnSpace }) {
+        Text(`连接保活时间`).width('100%').TagStyle()
+        Text(`每隔 ${this.data.keepaliveInterval ?? 25} 秒`).width('100%').TagContentStyle()
       }
 
-      // Text(`流量`) // 动态数据
+      if (this.vm.isVpnOpen) {
+        Column({ space: ConfigColumnSpace }) { //  动态数据
+          Text(`流量`).width('100%').TagStyle()
+          Text(`接受：${this.vm.receiveData(this.index)} 发送：${this.vm.sendData(this.index)}`)
+            .width('100%')
+            .TagContentStyle()
+        }
+      }
 
     }
     .cardBackgroundStyle()
   }
 }
 
+@Extend(Text)
+function TagStyle() {
+  .fontSize('13fp')
+  // .fontColor($r('app.color.tag'))
+}
+
+@Extend(Text)
+function TagContentStyle() {
+  .fontSize('18fp')
+  .layoutGravity(LocalizedAlignment.START)
+  .align(Alignment.Start)
+}
+
+@Extend(Text)
+function TextOnlyLineEllipsisStyle() {
+  .maxLines(1)
+  .ellipsisMode(EllipsisMode.END)
+  .wordBreak(WordBreak.BREAK_ALL)
+  .textOverflow({ overflow: TextOverflow.Ellipsis })
+}
+
+@Builder
+function MyBuilderFunction(): void {
+}
 
 @ComponentV2
 struct SwiperTitleLineView {
   @Param leftTag?: string = undefined
   @Param rightTag?: string = undefined
-  @BuilderParam childView: () => void
+  @BuilderParam childView: () => void = MyBuilderFunction
 
   build() {
     Column() {
@@ -392,11 +425,7 @@ const date_format = new Intl.DateTimeFormat('zh-CN', {});
 export struct WGConfigPreViewStreamLogView {
   @Param @Require vm: WGConfigPreViewModel;
   listener = WireGuard.event.subscribeVpnStreamLogs((log) => {
-    if (this.logSort.on) {
-      this.vm.logData.logs.push(log);
-    } else {
-      this.vm.logData.logs.unshift(log);
-    }
+    this.vm.updateLogViewData(log, this.logSort.on)
   })
 
   aboutToDisappear(): void {
