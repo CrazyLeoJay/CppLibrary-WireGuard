@@ -78,6 +78,46 @@ namespace WireGuard {
             return ipAddress;
         }
 
+        IPAddress readDomainToIpPreferIpv4(const std::string &domain) {
+            addrinfo hints{};
+            addrinfo *result = nullptr;
+            hints.ai_family = AF_UNSPEC;
+            hints.ai_socktype = SOCK_STREAM;
+            hints.ai_protocol = IPPROTO_TCP;
+
+            const int iResult = getaddrinfo(domain.c_str(), nullptr, &hints, &result);
+            if (iResult != 0) {
+                throw std::runtime_error("域名解析失败: " + std::string(gai_strerror(iResult)));
+            }
+
+            IPAddress ipAddress{};
+            IPAddress ipv6Address{};
+            bool foundIpv6 = false;
+
+            for (auto ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
+                if (ptr->ai_family == AF_INET) {
+                    const auto ipv4 = reinterpret_cast<struct sockaddr_in *>(ptr->ai_addr);
+                    ipAddress.family = IPAddress::IPv4;
+                    ipAddress.ip.ipv4 = ipv4->sin_addr.s_addr;
+                    freeaddrinfo(result);
+                    return ipAddress;
+                } else if (ptr->ai_family == AF_INET6 && !foundIpv6) {
+                    const auto ipv6 = reinterpret_cast<struct sockaddr_in6 *>(ptr->ai_addr);
+                    ipv6Address.family = IPAddress::IPv6;
+                    memcpy(ipv6Address.ip.ipv6, ipv6->sin6_addr.s6_addr, sizeof(ipv6Address.ip.ipv6));
+                    foundIpv6 = true;
+                }
+            }
+
+            freeaddrinfo(result);
+
+            if (foundIpv6) {
+                return ipv6Address;
+            }
+
+            throw std::runtime_error("域名解析失败: 未找到可用的IP地址");
+        }
+
         std::vector<IPAddress> readDomainToIpAll(const std::string &domain) {
             addrinfo hints{};
             addrinfo *result = nullptr;
@@ -90,26 +130,25 @@ namespace WireGuard {
                 throw std::runtime_error("域名解析失败: " + std::string(gai_strerror(iResult)));
             }
 
-            std::vector<IPAddress> via{};
+            std::vector<IPAddress> addresses{};
             for (auto ptr = result; ptr != nullptr; ptr = ptr->ai_next) {
                 if (ptr->ai_family == AF_INET) {
                     IPAddress ipAddress{};
                     const auto ipv4 = reinterpret_cast<struct sockaddr_in *>(ptr->ai_addr);
                     ipAddress.family = IPAddress::IPv4;
                     ipAddress.ip.ipv4 = ipv4->sin_addr.s_addr;
-                    via.push_back(ipAddress);
-                    break;
+                    addresses.push_back(ipAddress);
                 } else if (ptr->ai_family == AF_INET6) {
                     IPAddress ipAddress{};
                     const auto ipv6 = reinterpret_cast<struct sockaddr_in6 *>(ptr->ai_addr);
                     ipAddress.family = IPAddress::IPv6;
                     memcpy(ipAddress.ip.ipv6, ipv6->sin6_addr.s6_addr, sizeof(ipAddress.ip.ipv6));
-                    break;
+                    addresses.push_back(ipAddress);
                 }
             }
 
             freeaddrinfo(result);
-            return via;
+            return addresses;
         }
     }
 } // WireGuardTools

@@ -1,5 +1,5 @@
 /*
- * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
+* Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -30,16 +30,24 @@
 namespace WireGuard {
     namespace DNS {
         enum IPType {
-            IPV4=4,
-            IPV6=6,
+            IPV4 = 4,
+            IPV6 = 6,
         };
 
         /**
-         * @return 将域名解析成ip地址
+         * @return 将域名解析成ip地址，优先解析IPv4，如果IPv4解析失败则尝试IPv6
          */
         IPAddress readDomainToIp(const std::string &domain, const IPType &type = IPV4);
 
+        /**
+         * @return 将域名解析成所有可用的ip地址（包括IPv4和IPv6）
+         */
         std::vector<IPAddress> readDomainToIpAll(const std::string &domain);
+
+        /**
+         * @return 将域名优先解析为IPv4，如果失败则解析为IPv6
+         */
+        IPAddress readDomainToIpPreferIpv4(const std::string &domain);
     }
 } // WireGuardTools
 
