@@ -20,7 +20,7 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
-import { SortColumnName, StatusConfig, WGConf, WGDBConf } from 'wg_tunnel';
+import { SortColumnName, StatusConfigDTO, WGConf, WGDBConf } from 'wg_tunnel';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
@@ -158,11 +158,11 @@ export default class WGMainViewModel {
 
   /**
    * 设置活跃的配置，即已经开启的配置
-   * @param runningConfigId
+   * @param dto VPN状态DTO（纯数据，从跨进程广播反序列化而来）
    */
-  setActiveConfigId(config: StatusConfig) {
-    const running = config?.isOpen() ?? false
-    this.lastOpenConfigId = config?.runningConfigId ?? -1
+  setActiveConfigId(dto: StatusConfigDTO) {
+    const running = dto.runningConfigId != undefined && dto.running
+    this.lastOpenConfigId = dto.runningConfigId ?? -1
     if (running) {
       for (let item of this.wgList) {
         item.open = (item.id == this.lastOpenConfigId);
@@ -199,6 +199,8 @@ export default class WGMainViewModel {
     } else {
       // 关闭时，设置为-1
       this.lastOpenConfigId = -1
+      // 用户主动关闭VPN，设置标记阻止自动重连
+      // runWGConfig(isOne=false)内部会调用vpnStopByUser()和publishVpnChange广播
     }
     try {
       const config = JSON.parse(item.data.config!) as WGDBConf

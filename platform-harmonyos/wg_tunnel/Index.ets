@@ -34,6 +34,8 @@ export { default as Tools } from './src/main/ets/tools/tools';
 
 export * from './src/main/ets/tools/http';
 
+export * from './src/main/ets/tools/DnsResolve';
+
 export * from './src/main/ets/model/entity/napi_entity';
 
 export * from './src/main/ets/model/entity/WGConfigEntity';

@@ -11,6 +11,14 @@
     {
       "name": "keep_background_running_description",
       "value": "需要让应用长时间运行在后台提供VPN服务"
+    },
+    {
+      "name": "vpn_notification_title",
+      "value": "VPN正在运行"
+    },
+    {
+      "name": "vpn_notification_text",
+      "value": "WireGuard VPN正在后台运行中"
     }
   ]
 }
