@@ -16,6 +16,7 @@
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
+import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, VpnConfigAction, WireGuard } from 'wg_tunnel';
 import { longTaskModel } from '../model/LongTaskModel';
@@ -40,6 +41,14 @@ export default class EntryAbility extends UIAbility {
 
     // 初始化VPN事件监听（backgroundTaskManager要求UIAbilityContext，因此放在EntryAbility中）
     this.initVpnListeners();
+
+    // 注册长时任务取消回调，打印取消原因
+    try {
+      backgroundTaskManager.on('continuousTaskCancel', (info: backgroundTaskManager.ContinuousTaskCancelInfo) => {
+        LLog.warn(TAG, `长时任务被取消: taskId=${info.id}, reason=${info.reason}`);
+      });
+    } catch (error) {
+    }
   }
 
   onDestroy(): void {
@@ -48,6 +57,10 @@ export default class EntryAbility extends UIAbility {
     this.unsubscribeVpnStreamLogs();
     this.unsubscribeVpnConfigQuery();
     this.stopLongTaskIfNeeded();
+    try {
+      backgroundTaskManager.off('continuousTaskCancel');
+    } catch (error) {
+    }
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
@@ -71,6 +84,11 @@ export default class EntryAbility extends UIAbility {
 
   onBackground(): void {
     LLog.info(TAG, 'Ability onBackground');
+    // VPN运行中但长时任务被停止，重新吊起
+    if (WireGuard.config.status.getConfig().isOpen() && !longTaskModel.isRunning()) {
+      LLog.warn(TAG, 'VPN运行中但长时任务已停止，重新启动');
+      this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
+    }
   }
 
   /**

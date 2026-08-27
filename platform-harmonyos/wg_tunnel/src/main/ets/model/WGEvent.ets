@@ -62,7 +62,7 @@ export class SubEvent implements SubEventCancel {
         error?.(err)
         return;
       }
-      LLog.info(TAG, 'Succeeded in creating subscriber.');
+      LLog.info(TAG, `Succeeded in creating subscriber. tag: ${this.tag}`);
 
       try {
         invoke(data)
