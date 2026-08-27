@@ -59,7 +59,7 @@ namespace WireGuard {
             crypto::kdf2(recv_key, send_key, chain_key, nullptr, 0);
         }
 
-        auto time = std::chrono::steady_clock::now().time_since_epoch();
+        auto time = Clock::now().time_since_epoch();
         uint64_t now = std::chrono::duration_cast<std::chrono::nanoseconds>(time).count();
 
         memcpy(keypair->sending.key.data(), send_key.data(), SYMMETRIC_KEY_LEN);
@@ -150,7 +150,7 @@ namespace WireGuard {
         // 验证mac1
         CookieChecker::verifyMac1(msg, local_public);
 
-        remote_index = msg.senderIndex;
+        remote_index = ntohl(msg.senderIndex);
         // 获取对端的临时公钥
         // PublicKey remote_ephemeral_public_key{};
         std::memcpy(remote_ephemeral_public_key.data(), msg.ephemeral, PUBLIC_KEY_LEN);
@@ -251,8 +251,8 @@ namespace WireGuard {
 
         MessageResponse msg{};
         // 转为网络字节序
-        msg.receiverIndex = remote_index;
-        msg.senderIndex = senderIndex;
+        msg.receiverIndex = htonl(remote_index);
+        msg.senderIndex = htonl(senderIndex);
 
         // 写入公钥 并且混合 hash 和 chain_key
         std::memcpy(msg.ephemeral, ephemeral_public_key.data(), PUBLIC_KEY_LEN);
@@ -349,7 +349,7 @@ namespace WireGuard {
         // 计算 临时 私钥 公钥对
         crypto::generatePublicKey(ephemeral_public_key, ephemeral_private_key);
         MessageInitiation msg;
-        msg.senderIndex = senderIndex;
+        msg.senderIndex = htonl(senderIndex);
         // 写入临时公钥
         std::memcpy(msg.ephemeral, ephemeral_public_key.data(), PUBLIC_KEY_LEN);
 
@@ -410,7 +410,7 @@ namespace WireGuard {
         });
 
         // 生成 mac1
-        initHandshakeMac1 = CookieChecker::computeMac1(msg, remote_public);;
+        initHandshakeMac1 = CookieChecker::computeMac1(msg, remote_public);
         std::memcpy(msg.mac1, initHandshakeMac1.data(), COOKIE_LEN);
 
         if (last_received_cookie) {
@@ -448,8 +448,8 @@ namespace WireGuard {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
         });
-        // 记录当前索引
-        remote_index = msg.senderIndex;
+        // 记录当前索引（需要转换为本地字节序）
+        remote_index = ntohl(msg.senderIndex);
 
         // e: 读取临时公钥（服务端的临时公钥）
         PublicKey e;

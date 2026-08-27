@@ -3,6 +3,22 @@ project(test_main)
 
 set(CMAKE_CXX_STANDARD 14)
 
+add_compile_definitions(
+        NDEBUG
+        WG_PRINT_SPACE_ENABLE=true
+        #SHOW_DEBUG_LOGS
+)
+
+# 如果 fmt 尚未导入，则导入
+if(NOT TARGET fmt::fmt)
+    include(FetchContent)
+    FetchContent_Declare(
+            fmt
+            URL "${CMAKE_CURRENT_SOURCE_DIR}/../../thirty_libs/fmt-12.2.0.zip"
+    )
+    FetchContent_MakeAvailable(fmt)
+endif()
+
 
 # 创建测试可执行文件
 add_executable(test_main test_main.cpp
@@ -13,10 +29,12 @@ add_executable(test_main test_main.cpp
         test_params.h
         test_dns.cpp
         test_cookie.cpp
-        socket/test_server.cpp
+        test_allowedips.cpp
+        test_device.cpp
+        test_byteorder.cpp
 )
 
-# 链接被测库 + GTest 主函数
+# 链接被测库 + GTest 主函数 + fmt库
 target_link_libraries(${PROJECT_NAME} PRIVATE
         GTest::gtest_main   # 自动提供 main() 函数
         wg

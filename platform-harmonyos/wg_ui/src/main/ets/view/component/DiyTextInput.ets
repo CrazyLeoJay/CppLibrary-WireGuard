@@ -116,9 +116,9 @@ export struct DiyTextInput {
                   })
               } else if (item.type == "tag" && item.tag) {
                 Text(item.tag)
-                  // .fontSize('20fp')
-                  // .width('40vp')
-                  // .height('40vp')
+                // .fontSize('20fp')
+                // .width('40vp')
+                // .height('40vp')
                   .padding('2vp')
               }
             })
@@ -147,7 +147,13 @@ export struct DiyTextInput {
         })
         .backgroundColor(this.bgColor)
         .focusable(false)
-        .padding({ left: 5, right: 5 })
+        .padding({
+          left: '5vp',
+          right: '5vp',
+          top: '2vp',
+          bottom: '2vp'
+        })
+        .borderRadius('4vp')
         .onClick(() => {
           if (this.inputEnable) {
             animateToImmediately({ duration: 200 }, () => {

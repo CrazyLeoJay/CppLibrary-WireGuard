@@ -34,7 +34,7 @@ const WireGuard::PrivateKey client_private{
 const WireGuard::PublicKey client_public{
     WireGuard::crypto::base642Bin32Array("gN9lnPxypH67F7KystwjDdpwNsT007AV8s/MOOc0QGM=")
 };
-const WireGuard::PublicKey server_private{
+const WireGuard::PrivateKey server_private{
     WireGuard::crypto::base642Bin32Array("6CPPJCvfaej0+lwY5amd5pKJ0WLT0JuSv0VyPnMimVE=")
 };
 const WireGuard::PublicKey server_public{
@@ -67,8 +67,9 @@ TEST(tools_conf, readWireGuardConfFileToJson) {
 
     LOG_INFO("read file: \n%s" , test_wg_conf.c_str());
 
-    const auto json = WireGuard::Tools::readConfFileToJson(test_wg_conf);
-    LOG_INFO("read file to Json: \n%s" , json.c_str());
+    const auto config = WireGuard::Tools::readConfFileToEntity(test_wg_conf);
+    const auto str = WireGuard::Tools::wgConfToOfficialConfigStr(config);
+    LOG_INFO("read file to Conf: \n%s" , str.c_str());
 
 
 }

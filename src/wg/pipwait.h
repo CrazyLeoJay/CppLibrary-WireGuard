@@ -122,7 +122,7 @@ namespace WireGuard {
                 if (nfds == 0) {
                     return;
                 } else if (nfds < 0) {
-                    LOG_WARN("pip wait epoll_wait failed : errno=%{public}d", errno);
+                    LOG_WARN("pip wait epoll_wait failed : nfds=%{public}d errno=%{public}d", nfds, errno);
                     return;
                 }
                 // 遍历所有就绪的事件

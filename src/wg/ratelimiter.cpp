@@ -26,6 +26,8 @@
 #include <chrono>
 #include <memory>
 
+#include "entity.h"
+
 /**
  * @namespace WireGuard
  * @brief WireGuard速率限制器的实现
@@ -97,7 +99,7 @@ namespace WireGuard {
      */
     bool RateLimiter::allow(uint32_t ip) {
         // 获取当前时间（纳秒精度）
-        auto now = std::chrono::steady_clock::now().time_since_epoch();
+        auto now = Clock::now().time_since_epoch();
         uint64_t now_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(now).count();
 
         // 获取互斥锁保护共享状态

@@ -1,3 +1,5 @@
+import { AppErrorCode } from './AppErrorCode'
+
 /*
  * Copyright [2026] @github-crazyleojay (crazyleojay@163.com/gmail.com)
  *
@@ -21,11 +23,30 @@ export default class WGAppException extends Error {
     super(toMessage(params))
     this.params = this.params
   }
+
+  get code(): AppErrorCode | undefined {
+    if (typeof this.params !== 'string') {
+      if ('type' in this.params && this.params.type == `CodeError`) {
+        return this.params.code
+      }
+    }
+    return undefined
+  }
 }
 
 function toMessage(params?: AppErrorParams): string | undefined {
   if (typeof params === 'string') {
     return params
+  } else if ('type' in params && params.type == 'CodeError') {
+    if (params.e) {
+      if (params.e instanceof Error) {
+        return `code=${params.code} msg=${params.message ?? params.e.message} \n${params.e.stack}`
+      } else {
+        return `code=${params.code} msg=${params.message} error: ${params.e}}`
+      }
+    } else {
+      return `code=${params.code} msg=${params.message} error: no message`
+    }
   } else {
     if (params.e instanceof Error) {
       return `${params.message ?? params.e.message} \n${params.e.stack}`
@@ -38,4 +59,9 @@ function toMessage(params?: AppErrorParams): string | undefined {
 export type AppErrorParams = string | {
   message?: string,
   e: Error
+} | {
+  type: 'CodeError',
+  code: AppErrorCode,
+  e?: Error,
+  message?: string,
 }

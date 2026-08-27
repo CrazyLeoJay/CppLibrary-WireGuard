@@ -51,8 +51,6 @@ namespace WireGuard {
         ~Device();
 
     protected: // 确定参数
-        bool iAmInitiator{true}; // 是否为发起者。默认是，会率先主动发起握手
-
         const ContentKey content_key_;
         const DeviceConfig config;
         UDPSocket socket{DNS::IPV6};
@@ -89,7 +87,7 @@ namespace WireGuard {
         CookieChecker cookieChecker{content_key_};
 
         // =============== 日志打印 ===============
-        StreamLog::StreamLogPrint streamLog {
+        StreamLog::StreamLogPrint streamLog{
             [](StreamLog::Message msg) {
                 // const auto direction = msg.direction == WireGuard::StreamLog::RECEIVE ? "接收" : "发送";
                 // LOG_INFO("Device in [streamLog]：peerIndex=%d, 方向=%s 数据量=%zu", static_cast<int>(msg.peerIndex),
@@ -122,6 +120,13 @@ namespace WireGuard {
          * 停止并清除资源，close 后需要重新初始化
          */
         void close();
+
+        /**
+         * 发送数据包到所有已建立连接的Peer
+         * @param data 数据指针
+         * @param len 数据长度
+         */
+        void sendPacket(const uint8_t *data, size_t len) const;
 
     private: // 被动操作 初始化、轮询、监听等
         void initPeers(const std::vector<PeerConfig> &peer);
@@ -284,7 +289,8 @@ namespace WireGuard {
          */
         void sendToLocal(const uint8_t *data, size_t len) const;
 
-        void printStreamLog(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len) const;
+        void printStreamLog(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,
+                            size_t len) const;
 
         /**
          * 异常打印
@@ -295,7 +301,9 @@ namespace WireGuard {
          * @param len
          * @param message
          */
-        void printStreamLogThrow(const std::shared_ptr<Peer> &peer, MessageType type, StreamLog::StreamDirection direction,size_t len, const std::string &message = "") const;
+        void printStreamLogThrow(const std::shared_ptr<Peer> &peer, MessageType type,
+                                 StreamLog::StreamDirection direction, uint64_t len,
+                                 const std::string &message = "") const;
     };
 }; // namespace WireGuard
 #endif // WIREGUARD_DEVICE_H

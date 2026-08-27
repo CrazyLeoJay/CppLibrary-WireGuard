@@ -19,7 +19,9 @@ import { WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
 import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
-import { DeviceRegisterConfig, IPAddressArea, PeerConfig, SiteUrlType, StreamLogMessage } from './entity/napi_entity';
+import { IPAddressArea, PeerConfig, StreamLogMessage } from './entity/napi_entity';
+import { WireGuard } from './WGHelper';
+import { dnsResolveByMode, getDnsMode } from '../tools/DnsResolve';
 
 const TAG = "WG连接"
 
@@ -106,8 +108,9 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
   const vpnIp = config.vpn.vpnIp!;
   const vpnAddress = vpnIp.address.ip!;
   const vpnAddressFamily = vpnIp.address.isIpv4 ? 1 : 2;
-  const vpnAddressPrefixLen = vpnIp?.cidr ?? 32
+  const vpnAddressPrefixLen = vpnIp?.cidr ?? (vpnIp.address.isIpv4 ? 32 : 128)
   const dns = config.vpn.dns ?? []
+  const mtu = config.vpn.mtu ?? 1400
   if (config.peers.length == 0) {
     throw new WGAppException("未配置Peer");
   }
@@ -134,29 +137,54 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
     addresses: [{
       address: { address: vpnAddress, family: vpnAddressFamily }, prefixLength: vpnAddressPrefixLen
     }],
-    mtu: 1400,
+    mtu: mtu,
     dnsAddresses: dns.map((it) => it.ip),
     routes: routes,
   }
   return vpnConfig;
 }
 
+/**
+ * 将数据库配置转为VPN启动配置，根据端点类型和解析偏好选择DNS解析策略
+ * - 如果端点已经是直接IP地址，直接使用
+ * - 如果端点是域名，根据 dnsMode（默认优先IPv4/优先IPv6/强制IPv6/强制IPv4）解析
+ *
+ * @param conf 数据库配置
+ * @returns VPN设备配置
+ * @throws WGAppException 域名解析失败时抛出异常
+ */
 export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDeviceConfig> {
-  // 获取peers 如果有域名 需要将域名转成ip
   let peers: PeerConfig[] = await Promise.all(conf.conf.peers.map(async (item) => {
     const value = item.endpoint.ipStrOrDomain;
     let ip: string;
+    let isIpv4: boolean;
+
     if (await native.isIpAddress(value)) {
+      // 直接IP地址，无需DNS解析
       ip = value;
+      isIpv4 = await WireGuard.Tools.isIpv4(ip);
     } else {
-      ip = await native.dnsToIp(item.endpoint.ipStrOrDomain);
+      // DNS解析策略：根据 dnsMode 互斥选项解析
+      const mode = getDnsMode(item.endpoint);
+      ip = await dnsResolveByMode(item.endpoint.ipStrOrDomain, mode);
+      ip = ip.trim();
+      if (!ip) {
+        throw new WGAppException(`域名解析失败: ${item.endpoint.ipStrOrDomain}`);
+      }
+      // C++ toIpStr() 对 IPv6 返回带方括号的格式如 [2001:db8::1]，需去除方括号
+      // 否则传回 inet_pton(AF_INET6, ...) 时会解析失败
+      if (ip.startsWith('[') && ip.endsWith(']')) {
+        ip = ip.substring(1, ip.length - 1);
+      }
+      isIpv4 = await WireGuard.Tools.isIpv4(ip);
     }
+
     return {
       publicKey: item.publicKey,
       endpoint: {
         address: {
           ip: ip,
-          isIpv4: item.endpoint.type == SiteUrlType.IPv4,
+          isIpv4: isIpv4,
         },
         port: item.endpoint.port,
       },

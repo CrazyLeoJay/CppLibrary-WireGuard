@@ -27,6 +27,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <netinet/in.h>
 
 namespace WireGuard {
     // ============================================================================
@@ -108,7 +109,8 @@ namespace WireGuard {
             return false;
         }
 
-        // 计算填充长度（16 字节对齐，ChaCha20 的要求）
+        // 根据 WireGuard 白皮书，数据需要填充到16字节倍数
+        // encapsulated_packet = encapsulated_packet || zero padding in order to make the length a multiple of 16
         size_t paddedLen = ((plainLen + 15) / 16) * 16;
         std::vector<uint8_t> padded(paddedLen, 0);
         if (plaintext && plainLen > 0) {
@@ -117,8 +119,6 @@ namespace WireGuard {
         }
 
         // ChaCha20-Poly1305 加密
-        // AAD=nullptr（不需要额外的认证数据）
-        //        return crypto::encrypt(ciphertext, padded.data(), paddedLen, nullptr, 0, nonce, sending.key);
         crypto::encodeAEAD(ciphertext, sending.key, nonce, padded.data(), paddedLen, nullptr);
         return true;
     }
@@ -149,7 +149,7 @@ namespace WireGuard {
         msg->header.type = static_cast<uint8_t>(MessageType::DATA);
         memset(msg->reserved_zero, 0, 3);
         // 设置正确的 keyIndex
-        msg->keyIndex = remoteIndex;
+        msg->keyIndex = htonl(remoteIndex);
         msg->counter = *nonceOpt.get(); // 从密钥对获取
         memcpy(msg->encryptedData, result.data(), result.size());
         return message;
@@ -172,25 +172,7 @@ namespace WireGuard {
 
         // ChaCha20-Poly1305 解密
         // AAD=nullptr（不需要额外的认证数据）
-        // return crypto::decrypt(plaintext, ciphertext, cipherLen, nullptr, 0, nonce, receiving.key);
         crypto::decodeAEAD(plaintext, receiving.key, nonce, ciphertext, cipherLen, nullptr);
-        // 加密时填充了0 解密时进行移除
-
-        auto plainTextLen = plaintext.size();
-        if (plainTextLen > 0) {
-            for (size_t i = plaintext.size() - 1; true; i--) {
-                if (plaintext[i] == 0) {
-                    plainTextLen = i;
-                    continue;
-                }
-                if (i == 0)
-                    break;
-                break;
-            }
-            if (plainTextLen != plaintext.size()) {
-                plaintext.resize(plainTextLen);
-            }
-        }
         return true;
     }
 
@@ -246,7 +228,7 @@ namespace WireGuard {
     }
 
     uint64_t KeyPair::getCurrentTimeNs() {
-        auto now = std::chrono::steady_clock::now();
+        auto now = Clock::now();
         auto duration = now.time_since_epoch();
         return std::chrono::duration_cast<std::chrono::nanoseconds>(duration).count();
     }

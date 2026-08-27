@@ -34,13 +34,23 @@ export interface QRCodeNewConfig {
 @ComponentV2
 export struct QRCodeNewWGConfDialog {
   @Param @Require wgConf: WGConf
-  @Local inputName: string = "";
+  @Local inputName: string = this.wgConf.inter.deviceName ?? "";
+  @Local isSameNameConfig: boolean = false
 
   aboutToAppear(): void {
     if (!this.wgConf) {
       // 没有参数
       LLog.warn(TAG, "没有配置参数")
       this.getDialogController()?.close();
+    }
+    this.nameChange()
+  }
+
+  @Monitor('inputName')
+  nameChange() {
+    if (this.inputName && this.inputName.trim().length > 0) {
+      const count = WireGuard.helper.config.getCountForName(this.inputName.trim())
+      this.isSameNameConfig = count > 0
     }
   }
 
@@ -53,6 +63,11 @@ export struct QRCodeNewWGConfDialog {
         inputId: "qrcode_new_config_name",
         inputValue: this.inputName!!,
       })
+      if (this.isSameNameConfig) {
+        Text("该名称配置已经存在。\n但不影响创建，建议修改。")
+          .fontSize('14fp')
+          .width('100%')
+      }
 
       Row({ space: '16vp' }) {
         Button("取消")

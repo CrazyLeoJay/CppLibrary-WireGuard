@@ -37,14 +37,21 @@ namespace WireGuard {
         return endpoint;
     }
 
-    void Peer::updateEndpoint(Endpoint ep) { endpoint = ep; }
+    void Peer::updateEndpoint(Endpoint ep) {
+        std::lock_guard<std::mutex> lock(handshakeMutex_);
+        endpoint = ep;
+    }
 
-    bool Peer::isCanSendData(const bool &iAmInitiator) {
-        if (iAmInitiator) {
+    bool Peer::isCanSendData() {
+        if (iAmInitiator.load(std::memory_order_acquire)) {
             return noiseSend.canSendData();
         } else {
             return noiseReceive.canSendData();
         }
+    }
+
+    bool Peer::canSendHeartbeatPacket() const {
+        return config.keepaliveInterval > 0;
     }
 
     void Peer::updateHeartbeatPacketSendTime() { this->lastKeepaliveSent_ = Clock::now(); }
@@ -110,8 +117,8 @@ namespace WireGuard {
     }
 
     void Peer::addTxBytes(uint64_t bytes) {
-        txBytes_ += bytes; // 累加接收字节数
-        lastDataReceived_ = Clock::now(); // 更新最后接收时间
+        txBytes_ += bytes; // 累加发送字节数
+        lastDataSent_ = Clock::now(); // 更新最后发送时间
     }
 
     void Peer::needsReKey() const {
@@ -195,6 +202,10 @@ namespace WireGuard {
         std::lock_guard<std::mutex> lock(handshakeMutex_);
         noiseSend.verifyHandshakeInitiationResponse(msg);
         lastReceivedHandshake_ = Clock::now();
+    }
+
+    uint32_t Peer::getKeepaliveInterval() const {
+        return config.keepaliveInterval;
     }
 
     bool Peer::handleHandshakeInitiation(const MessageInitiation &msg) {

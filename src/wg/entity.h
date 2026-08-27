@@ -54,13 +54,11 @@ namespace WireGuard {
 
     constexpr int TUN_READ_BUFFER_SIZE = 65535; // 65kb
 
-    //    constexpr uint64_t REKEY_AFTER_MESSAGES = 1ULL << 60;
-    constexpr uint64_t REKEY_AFTER_MESSAGES = 1ULL << 20; // 表示最大发送的消息数量，超过需要重新握手或者更新密钥
+    constexpr uint64_t REKEY_AFTER_MESSAGES = 1ULL << 60; // 表示最大发送的消息数量，超过需要重新握手或者更新密钥
     constexpr uint64_t RECEIVING_WINDOW_LEN = 8192ULL; // 接收的重放计数器中，window的长度
     constexpr uint64_t REJECT_AFTER_MESSAGES = UINT64_MAX - RECEIVING_WINDOW_LEN - 1;
     // 时间常量（纳秒）
-    //    constexpr uint64_t REKEY_TIMEOUT = 5000000000ULL;       // 5 秒
-    constexpr uint64_t REKEY_TIMEOUT = 2000000000ULL; // 2 秒
+    constexpr uint64_t REKEY_TIMEOUT = 5000000000ULL; // 5 秒
     constexpr uint64_t REKEY_AFTER_TIME = 120000000000ULL; // 120 秒
     constexpr uint64_t REJECT_AFTER_TIME = 180000000000ULL; // 180 秒
     constexpr uint64_t KEEPALIVE_TIMEOUT = 10000000000ULL; // 10 秒
@@ -141,8 +139,8 @@ namespace WireGuard {
     };
 
     enum PacketIpType : uint32_t {
-        IPV4 = 0,
-        IPV6 = 0,
+        IPV4 = 4,
+        IPV6 = 6,
     };
 
 
@@ -159,7 +157,7 @@ namespace WireGuard {
     using CookieNonce = std::array<uint8_t, COOKIE_NONCE_LEN>; // Cookie Nonce 类型
     using MacData = std::array<uint8_t, COOKIE_LEN>; // MAC 数据类型
 
-    using Clock = std::chrono::steady_clock;
+    using Clock = std::chrono::system_clock;
     using TimePoint = Clock::time_point;
 
     struct Key32Hash {
@@ -177,7 +175,7 @@ namespace WireGuard {
      * 全部按照网络字节序大端序存储 uint32_t 的值（即右边是高位，左边是低位）
      * ipv6值转换时，右边第一位是0，所以debug时，顺序又是对的
      * 类如：
-     * 存入ip 10.3.3.0
+     * 存入ip 10.0.0.0
      * uint32_t 记录 197386 转hex为 0x0003030A
      * ipv6 显示 "\n\U00000003\U00000003\0\xa0\U0000000e+\x9a\U0000007f\0\0\0\xd0aE\xf3"
      */
@@ -206,6 +204,10 @@ namespace WireGuard {
         uint16_t port = 0;
 
         bool operator==(const Endpoint &other) const { return address == other.address && port == other.port; }
+
+        std::string toIpStr() const {
+            return address.toIpStr() + ":" + std::to_string(port);
+        }
     };
 
     struct IPAddressHash {
@@ -238,7 +240,17 @@ namespace WireGuard {
      */
     struct IpAddressArea {
         IPAddress address;
-        uint8_t cidr = -1; // -1表示没有掩码
+        int cidr = -1; // -1表示没有掩码
+
+        std::string toIpStr() const {
+            if (cidr >= 0) {
+                return address.toIpStr() + "/" + std::to_string(cidr);
+            }
+            if (address.family == IPAddress::IPv4) {
+                return address.toIpStr() + "/32";
+            }
+            return address.toIpStr() + "/128";
+        }
     };
 
     constexpr uint8_t IPv4HeaderLen = 20;
@@ -292,7 +304,7 @@ namespace WireGuard {
 
 
     struct ContentKey {
-        PublicKey local_private_key{};
+        PrivateKey local_private_key{};
         PublicKey local_public_key{};
         /**
          * @param private_key 本地私钥，根据发送端和接收端不同

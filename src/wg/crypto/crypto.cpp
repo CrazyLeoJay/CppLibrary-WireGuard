@@ -484,12 +484,15 @@ namespace WireGuard {
         }
 
         void tai64n_now(Timestamp &timestamp) {
-            auto now = std::chrono::system_clock::now();
+            auto now = Clock::now();
             auto epoch = now.time_since_epoch();
             auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch).count();
             auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(epoch).count() % 1000000000;
 
-            uint64_t tai_seconds = static_cast<uint64_t>(seconds) + 10ULL + 37ULL;
+            // TAI64N 时间戳：0x400000000000000a + Unix秒数
+            // 参考 wireguard-go 官方实现：base = 0x400000000000000a（即 0x4000000000000000 + 10）
+            // 注意：不需要加闰秒偏移（37），wireguard 官方实现都没有加
+            uint64_t tai_seconds = 0x400000000000000aULL + static_cast<uint64_t>(seconds);
 
             for (int i = 7; i >= 0; --i) {
                 timestamp[i] = tai_seconds & 0xFF;
@@ -561,7 +564,7 @@ namespace WireGuard {
         }
 
         uint64_t get_current_time_ns() {
-            const auto now = std::chrono::steady_clock::now();
+            const auto now = Clock::now();
             return std::chrono::duration_cast<std::chrono::nanoseconds>(now.time_since_epoch()).count();
         }
     } // namespace crypto_static

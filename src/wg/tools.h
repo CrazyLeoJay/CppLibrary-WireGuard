@@ -29,6 +29,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <string>
+#include <chrono>
+#include <thread>
 #include "version.h"
 
 namespace WireGuard {
@@ -94,6 +96,10 @@ namespace WireGuard {
             Endpoint makeEndpointIpv4(const std::string &ip, const uint16_t &port);
         }; // namespace IP
         bool isEmpty(const uint8_t * str, size_t size);
+
+        void runWithDuration(std::chrono::seconds duration, 
+                            std::chrono::seconds printInterval = std::chrono::seconds(1), 
+                            const std::string &label = "running");
     }; // namespace Tools
 }; // namespace WireGuard
 

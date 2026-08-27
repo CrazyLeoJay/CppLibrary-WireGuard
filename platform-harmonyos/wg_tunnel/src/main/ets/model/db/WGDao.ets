@@ -16,7 +16,6 @@
  */
 import { ORM } from '@ibestservices/ibest-orm';
 import { JSON } from '@kit.ArkTS';
-import { LLog, Tools } from '../../../../../Index';
 import { WGDBConf } from '../entity/WGConfigEntity';
 import WgConfigTable from './table/WgConfigTable';
 
@@ -33,10 +32,28 @@ export default class WGDao {
     this.orm = orm;
   }
 
-  allConfig(): WgConfigTable[] {
+  allConfig(qw?: QueryWhere): WgConfigTable[] {
+    const orm = this.orm.query(WgConfigTable)
+    if (qw) {
+      const sort = (qw.sortAsc ?? false) ? 'asc' : 'desc'
+      const column = qw.sortColumn ?? "createdAt"
+      orm.orderBy(column, sort)
+    } else {
+      orm.orderBy("createdAt", 'desc')
+    }
+    return orm.find()
+  }
+
+  allDBConfig(): WGDBConf[] {
     return this.orm.query(WgConfigTable)
       .orderBy("createdAt", 'desc')
       .find()
+      .filter((it) => {
+        return it.config && it.config.length > 0
+      })
+      .map((it) => {
+        return JSON.parse(it.config) as WGDBConf
+      })
   }
 
   getConfigForId(id: number): WGDBConf | undefined {
@@ -50,12 +67,23 @@ export default class WGDao {
     return JSON.parse(result.config) as WGDBConf
   }
 
-  insertNewConfig(config: WGDBConf) {
-    let cStr = JSON.stringify(config);
-    const table = new WgConfigTable();
-    table.name = config.name;
-    table.config = cStr;
-    this.orm.insert(table);
+  insertNewConfig(config: WGDBConf | WGDBConf[]) {
+    if (config instanceof Array) {
+      const all = config.map((it) => {
+        let cStr = JSON.stringify(it);
+        const table = new WgConfigTable();
+        table.name = it.name;
+        table.config = cStr;
+        return table
+      })
+      this.orm.insert(all);
+    } else {
+      let cStr = JSON.stringify(config);
+      const table = new WgConfigTable();
+      table.name = config.name;
+      table.config = cStr;
+      this.orm.insert(table);
+    }
   }
 
   updateConfig(id: number, config: WGDBConf) {
@@ -71,4 +99,26 @@ export default class WGDao {
   deleteConfig(id: number) {
     this.orm.deleteById(WgConfigTable, id);
   }
+
+  /**
+   * 计数这个名称在配置中出现的次数
+   *
+   * @param inputName
+   */
+  getCountForName(inputName: string): number {
+    return this.orm.query(WgConfigTable)
+      .where({ name: inputName })
+      .count()
+  }
+}
+
+interface QueryWhere {
+  sortAsc?: boolean,
+  sortColumn?: SortColumnName, // 排序行
+}
+
+export enum SortColumnName {
+  config_name = "name",
+  create_time = "createdAt",
+  update_time = "updatedAt",
 }

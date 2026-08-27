@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include "WGException.h"
 #include "crypto/crypto.h"
@@ -57,15 +58,13 @@ namespace WireGuard {
     }
 
     MacData CookieChecker::computeMac1(const MessageInitiation &msg, const PublicKey &public_key) {
-        constexpr size_t mac1_input_length = sizeof(MessageInitiation) - COOKIE_LEN * 2;
-        // 转为 const uint8_t*（只读）
+        constexpr size_t mac1_input_length = offsetof(MessageInitiation, mac1);
         const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
         return crypto::MAC(crypto::mixHash(crypto::LABEL_MAC1, public_key), bytes, mac1_input_length);
     }
 
-    MacData CookieChecker::computeMac1(const MessageResponse &msg, const PrivateKey &public_key) {
-        constexpr size_t mac1_input_length = sizeof(MessageResponse) - COOKIE_LEN * 2;
-        // 转为 const uint8_t*（只读）
+    MacData CookieChecker::computeMac1(const MessageResponse &msg, const PublicKey &public_key) {
+        constexpr size_t mac1_input_length = offsetof(MessageResponse, mac1);
         const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
         return crypto::MAC(crypto::mixHash(crypto::LABEL_MAC1, public_key), bytes, mac1_input_length);
     }
@@ -106,7 +105,7 @@ namespace WireGuard {
 
         // 生成cookie消息
         MessageCookie cookieMsg{};
-        cookieMsg.receiverIndex = msg.senderIndex;
+        cookieMsg.receiverIndex = htonl(msg.senderIndex);
         // cookieMsg.nonce
         crypto::randombytes(cookieMsg.nonce, NONCE_LEN);
         Logs::print_space([&]() { LOG_DEBUG("生成NONE，开始将Cookie加密入消息"); });
@@ -149,13 +148,11 @@ namespace WireGuard {
         }
     }
 
-    void CookieChecker::verifyMac1(const MessageResponse &msg, const PrivateKey &public_key) {
+    void CookieChecker::verifyMac1(const MessageResponse &msg, const PublicKey &public_key) {
         if (cookie::isEmpty(msg.mac1)) {
             throw WGException("Mac1 不存在");
         }
         const auto verifyCookie = computeMac1(msg, public_key);
-        // 判断两个 cookie 是否一致 一致表示有效
-        // return std::memcmp(verifyCookie.data(), msg.mac1, COOKIE_LEN) == 0;
         if (crypto_verify_16(msg.mac1, verifyCookie.data()) != 0) {
             throw WGException(
                 "mac1 验证失败 \nmsg.mac1=%s \nc_mac1  =%s",
@@ -212,12 +209,14 @@ namespace WireGuard {
             // 构造输入：peer_addr || port
             std::vector<uint8_t> input(4 + sizeof(endpoint.port));
             memcpy(input.data(), &endpoint.address.ip.ipv4, 4);
-            memcpy(input.data() + 4, &endpoint.port, sizeof(endpoint.port));
+            uint16_t portNetwork = htons(endpoint.port);
+            memcpy(input.data() + 4, &portNetwork, sizeof(portNetwork));
             cookie = crypto::MAC(secret_, input.data(), input.size());
         } else {
             std::vector<uint8_t> input(16 + sizeof(endpoint.port));
             memcpy(input.data(), endpoint.address.ip.ipv6, 16);
-            memcpy(input.data() + 16, &endpoint.port, sizeof(endpoint.port));
+            uint16_t portNetwork = htons(endpoint.port);
+            memcpy(input.data() + 16, &portNetwork, sizeof(portNetwork));
             cookie = crypto::MAC(secret_, input.data(), input.size());
         }
         return cookie;

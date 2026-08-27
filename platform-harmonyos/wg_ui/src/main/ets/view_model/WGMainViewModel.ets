@@ -20,11 +20,12 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
-import { WGConf } from 'wg_tunnel';
-import { fileIo, picker } from '@kit.CoreFileKit';
+import { SortColumnName, StatusConfigDTO, WGConf, WGDBConf } from 'wg_tunnel';
+import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { buffer } from '@kit.ArkTS';
+import { AppErrorCode } from 'wg_tunnel/src/main/ets/error/AppErrorCode';
+import { PersistenceV2, UIUtils } from '@kit.ArkUI';
 
 const TAG = "主页"
 
@@ -36,20 +37,57 @@ export default class WGMainViewModel {
   nav: NavPathStack = new NavPathStack();
   @Trace wgList: MainItemData[] = [];
   @Trace qrCodePixelMap?: image.PixelMap;
+  @Trace uiConfig: MainUiConfig
 
   constructor(nav?: NavPathStack) {
+    this.uiConfig = PersistenceV2.globalConnect({
+      // 定义持久化的数据类型
+      type: MainUiConfig,
+      // 定义默认构造器，返回时需要调用makeObserved，才能实现自动持久化
+      defaultCreator: () => UIUtils.makeObserved(new MainUiConfig())
+    })!;
     if (nav) {
       this.nav = nav;
     }
   }
 
-  get isEmptyList() : boolean{
+  get isEmptyList(): boolean {
     return this.wgList.length == 0;
   }
 
+  /**
+   * 加载配置数据
+   */
   async loadConfigs() {
-    this.wgList = WireGuard.helper.config.allConfig().map((it) => {
-      return new MainItemData(it);
+    try {
+      await this.loadMainDataForDB()
+    } catch (e) {
+      if ("数据库连接未建立" == (e as Error).message) {
+        // 等待一段时间秒，一般是初始化好了
+        setTimeout(async () => {
+          try {
+            // 不自调，防止死锁，最多重试一次
+            await this.loadConfigs()
+          } catch (err) {
+            LLog.error(TAG, err)
+          }
+        }, 100)
+        return
+      }
+      LLog.error(TAG, e)
+    }
+  }
+
+  /**
+   * 从数据库加载数据
+   */
+  private async loadMainDataForDB() {
+    LLog.info(TAG, `去加载数据`)
+    this.wgList = WireGuard.helper.config.allConfig({
+      sortAsc: this.uiConfig.listSortAsc,
+      sortColumn: this.uiConfig.sortColumn,
+    }).map((it) => {
+      return new MainItemData(this, it);
     })
     LLog.info(TAG, `加载 ${this.wgList.length} 条数据`)
   }
@@ -93,57 +131,176 @@ export default class WGMainViewModel {
   /**
    * @throws 解析异常
    */
-  async readWGConfForSystemFile(uiContext: UIContext): Promise<WGConf> {
+  async readWGConfForSystemFile(uiContext: UIContext): Promise<WGConf | WGConf[]> {
     const documentSelectOptions = new picker.DocumentSelectOptions();
-    documentSelectOptions.maxSelectNumber = 1; // 最多选择5个文件
+    documentSelectOptions.maxSelectNumber = 1; // 最多选择n个文件
     // // 指定选择的文件或者目录的URI（可选）
     // documentSelectOptions.defaultFilePathUri = "file://docs/storage/Users/currentUser/test";
     // 选择文件的后缀类型过滤（可选），例如只显示.txt和.pdf
     // documentSelectOptions.fileSuffixChoices = ['文档|.conf'];
-    documentSelectOptions.fileSuffixFilters = ['WireGuard配置|.conf'];
+    documentSelectOptions.fileSuffixFilters = ['WireGuard配置|.conf', 'WireGuard导出的压缩包|.zip'];
 
     let context = uiContext.getHostContext() as common.UIAbilityContext;
     const documentViewPicker = new picker.DocumentViewPicker(context);
     const uris: Array<string> = await documentViewPicker.select(documentSelectOptions)
     if (uris.length != 1) {
-      throw new WGAppException("未选择到指定文件")
+      throw new WGAppException({
+        type: 'CodeError',
+        code: AppErrorCode.SYSTEM_SELECT_FILE_COUNT_ZERO,
+        message: "未选择到指定文件"
+      })
     }
     const resUrl = uris[0];
-    LLog.info(TAG, `资源：${resUrl}`)
-    let file: fileIo.File | undefined
-    try {
-      file = await fileIo.open(resUrl, fileIo.OpenMode.READ_ONLY)
-      // todo 一般情况下 1m 的内存足够配置，后续还是要在c++处构建可以通过流写入的方式
-      const buf = new ArrayBuffer(1024 * 1024)
-      const readLen = await fileIo.read(file.fd, buf)
-      if (readLen <= 0) {
-        throw new WGAppException("没有读取到配置")
+    LLog.info(TAG, `选择导入的资源：${resUrl}`)
+
+    return await WireGuard.tools.loadFileToConfigsToDb(uiContext.getHostContext()!, resUrl)
+  }
+
+  /**
+   * 设置活跃的配置，即已经开启的配置
+   * @param dto VPN状态DTO（纯数据，从跨进程广播反序列化而来）
+   */
+  setActiveConfigId(dto: StatusConfigDTO) {
+    const running = dto.runningConfigId != undefined && dto.running
+    this.lastOpenConfigId = dto.runningConfigId ?? -1
+    if (running) {
+      for (let item of this.wgList) {
+        item.open = (item.id == this.lastOpenConfigId);
       }
-      const content = buffer.from(buf).toString()
-      // const content = await fileIo.read(fd);
-      return WireGuard.readWgConf(content)
-    } finally {
-      if (file) {
-        fileIo.close(file);
+    } else {
+      for (let item of this.wgList) {
+        item.open = false;
       }
     }
+  }
+
+  closeOther(id: number) {
+    for (let item of this.wgList) {
+      if (item.id != id) {
+        // if (item.id == this.lastOpenConfigId) {
+        item.open = false;
+      }
+    }
+  }
+
+  lastOpenConfigId: number = +1;
+
+  /**
+   * 改变Vpn配置，启动或停止
+   */
+  async changeVpnConfig(context: UIContext, item: MainItemData, isOn: boolean) {
+    // 如果是
+    if (isOn && this.lastOpenConfigId == item.id) {
+      // 如果是开启状态，且id一致，就不做处理
+      return;
+    }
+    if (isOn) {
+      this.lastOpenConfigId = item.id
+    } else {
+      // 关闭时，设置为-1
+      this.lastOpenConfigId = -1
+    }
+    try {
+      const config = JSON.parse(item.data.config!) as WGDBConf
+      // const config = WireGuard.helper.config.getConfigForId(this.id)!
+      await WireGuard.runWGConfig(item.id, config, isOn)
+    } catch (e) {
+      item.open = false;
+      WireGuard.event.publishVpnNoOpen()
+      context.getPromptAction().showToast({ message: `VPN${isOn ? "开启" : "关闭"}失败 ${e ?? ""}` })
+      LLog.error(TAG, { error: e, message: `${isOn ? "开启" : "关闭"}VPN异常` });
+    }
+  }
+
+
+  preLoadDatas() {
+    this.wgList = [];
+    for (let index = 0; index < 10; index++) {
+      this.wgList.push(new MainItemData(this, {
+        name: `test-${index}`,
+        createdAt: new Date(Date.now()),
+        updatedAt: new Date(Date.now()),
+      }))
+    }
+  }
+
+  @Monitor("uiConfig.listSortAsc", "uiConfig.listShowSimple", "uiConfig.sortColumn",)
+  async change() {
+    this.loadConfigs()
   }
 }
 
 /**
  * 主页每行数据
  */
+@ObservedV2
 export class MainItemData {
+  private vm: WGMainViewModel
   name: string;
-  open: boolean = false;
+  @Trace open: boolean = false;
   data: WgConfigTable
+  private isClick = false
 
-  constructor(data: WgConfigTable) {
+  constructor(vm: WGMainViewModel, data: WgConfigTable) {
+    this.vm = vm;
     this.data = data;
     this.name = data.name!;
+    this.open = WireGuard.config.status.isRunning(this.id)
   }
 
   get id(): number {
     return this.data.id!;
+  }
+
+  onClick() {
+    this.isClick = true
+  }
+
+  openChange(context: UIContext, isOn: boolean) {
+    if (this.isClick) {
+      if (isOn) {
+        LLog.info(TAG, "点击开启VPN")
+        this.vm.changeVpnConfig(context, this, true)
+      } else {
+        LLog.info(TAG, "点击关闭VPN")
+        this.vm.changeVpnConfig(context, this, false)
+      }
+      this.isClick = false
+    }
+  }
+}
+
+
+@ObservedV2
+class MainUiConfig {
+  @Trace listSortAsc: boolean = false;
+  @Trace listShowSimple: boolean = true;
+  @Trace sortColumn: SortColumnName = SortColumnName.create_time
+
+  getColumnName(): string {
+    switch (this.sortColumn) {
+      case SortColumnName.config_name:
+        return "配置名称"
+      case SortColumnName.update_time:
+        return "更新时间"
+      case SortColumnName.create_time:
+      default:
+        return "创建时间"
+    }
+  }
+
+  sortColumnToNext() {
+    switch (this.sortColumn) {
+      case SortColumnName.config_name:
+        this.sortColumn = SortColumnName.update_time
+        break
+      case SortColumnName.update_time:
+        this.sortColumn = SortColumnName.create_time
+        break
+      case SortColumnName.create_time:
+      default:
+        this.sortColumn = SortColumnName.config_name
+    }
+    LLog.info(TAG, `this.sortColumn=${this.sortColumn}`)
   }
 }

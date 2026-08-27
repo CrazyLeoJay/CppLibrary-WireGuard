@@ -48,7 +48,7 @@
   - [x] 数据加密传输
   - [x] UDP Socket 通讯
   - [x] 基础接收端和发送端搭建（device类，用于NDK映射）
-- [ ] Cookie 挑战
+- [x] Cookie 挑战
 
 
 
@@ -56,14 +56,18 @@
 
 > master-* 这里是正对不同的开发目标定制的开发环境。使用 git worktree 进行环境隔离开发。
 
-| 描述             | 分支名称           | 文档                               | 注释                                                         |
-| ---------------- | ------------------ | ---------------------------------- | ------------------------------------------------------------ |
-| 集合展示主页     | master             | [README](docs/README.md)           | 项目主页，用于对外展示，<br />合并所有`master-*`分支的代码集合 |
-| 主要功能开发分支 | master-cpp         | [README](docs/cpp/README.md)       | WireGuard主要实现功能                                        |
-| HarmonyOS App    | master-harmonyos   | [README](docs/harmonyos/README.md) | HarmonyOS App app应用开发                                    |
-| Android App      | master-android-dev | [README](docs/android/README.md)   | Android App 应用开发                                         |
+| 描述             | 分支名称            | 文档                                        | 注释                                                         |
+| ---------------- | ------------------- | ------------------------------------------- | ------------------------------------------------------------ |
+| 集合展示主页     | master              | [README](docs/README.md)                    | 项目主页，用于对外展示，<br />合并所有`master-*`分支的代码集合 |
+| 主要功能开发分支 | master-cpp          | [README](docs/cpp/README.md)                | WireGuard主要实现功能                                        |
+| HarmonyOS App    | master-harmonyos    | [README](platform-harmonyos/docs/README.md) | HarmonyOS App app应用开发                                    |
+| Android App      | master-android-dev  | [README](docs/android/README.md)            | Android App 应用开发                                         |
+| React Native     | master-react-native | [README](docs/react/README.md)              | React native 客户端，属于学习模块                            |
+| KMP              | master-kmp          | [README](docs/kmp/README.md)                | KMP 跨平台模块，属于学习模块                                 |
 
 > 注：有些文档可能还没完善，先占个位，减少合并冲突。
+>
+> 学习模块：学习模块是为了学习框架使用，不会保证最新更新。
 
 ## 版本管理
 
@@ -84,3 +88,16 @@
 - [WireGuard 官网](https://www.wireguard.com/)
 - [WireGuard 白皮书](https://www.wireguard.com/papers/wireguard.pdf)
 - [WireGuard 协议说明](https://www.wireguard.com/protocol/)
+
+
+
+## 支持
+
+如果觉得app或者项目好用，可以请作者喝杯咖啡。您的支持是我更新的动力
+
+<p align="center">
+<img src="README.assets/33f42378afa2d0d7eae662c08c4348d3.jpg" alt="33f42378afa2d0d7eae662c08c4348d3" alt="Alipay" width="300" /><img src="README.assets/4941d4083266371ac9f713c61fa944f4.png" alt="4941d4083266371ac9f713c61fa944f4" alt="WeChat Pay" width="300" />
+</p>
+
+
+

@@ -30,9 +30,25 @@ export function NavWGMainPage() {
 
 @Preview
 @ComponentV2
+struct MainViewPreview {
+  @Local vm: WGMainViewModel = new WGMainViewModel();
+
+  aboutToAppear(): void {
+    this.vm.preLoadDatas();
+  }
+
+  build() {
+    WGMainViewNavDest({
+      previewVM: this.vm
+    })
+  }
+}
+
+@ComponentV2
 export struct WGMainViewNavDest {
   @Param nav: NavPathStack = new NavPathStack();
-  @Local vm: WGMainViewModel = new WGMainViewModel(this.nav);
+  @Param previewVM: WGMainViewModel = new WGMainViewModel(this.nav);
+  @Local vm: WGMainViewModel = this.previewVM;
 
   build() {
     NavDestination() {
@@ -55,25 +71,46 @@ export struct WGMainViewNavDest {
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.arrow_2_circlepath')),
         action: () => {
           WireGuard.event.publishVpnStatusQuery();
-          this.vm.loadConfigs()
+          this.vm.loadConfigs().then(() => {
+            try {
+              this.getUIContext().getPromptAction().showToast({
+                message: `加载了 ${this.vm.wgList.length} 条数据`,
+              })
+            } catch (error) {
+              LLog.error(TAG, error)
+            }
+          })
         }
       },
-      // {
-      //   value: "新建VPN",
-      //   symbolIcon: new SymbolGlyphModifier($r('sys.symbol.plus_circle')),
-      //   action: () => {
-      //     WireGuard.navDescToNewWGConfigView(this.vm.nav, () => {
-      //       this.vm.loadConfigs();
-      //     });
-      //   }
-      // },
       {
         value: "设置",
-        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.dot_grid_1x2')),
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.gearshape')),
         action: () => {
           WireGuardNav.navDescToWGSettingPreView(this.nav)
         }
-      }
+      },
+      {
+        value: `排序参数:${this.vm.uiConfig.getColumnName()}`,
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
+        action: () => {
+          this.vm.uiConfig.sortColumnToNext()
+        }
+      },
+
+      {
+        value: `排序顺序:${this.vm.uiConfig.listSortAsc ? '正序' : '倒叙'}`,
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
+        action: () => {
+          this.vm.uiConfig.listSortAsc = !this.vm.uiConfig.listSortAsc
+        }
+      },
+      {
+        value: `显示信息：${this.vm.uiConfig.listShowSimple ? '简略' : '详细'}`,
+        symbolIcon: new SymbolGlyphModifier($r('sys.symbol.message')),
+        action: () => {
+          this.vm.uiConfig.listShowSimple = !this.vm.uiConfig.listShowSimple
+        }
+      },
     ])
   }
 
@@ -100,15 +137,28 @@ export struct WGMainView {
   @Local isShow: boolean = true;
   funcBtn: MenuElement[] = [
     {
-      value: "导入配置",
+      value: "选择conf或者zip文件导入配置",
       action: () => {
         // 通过文件系统，读取配置文件，识别后添加到数据列表
         this.vm.readWGConfForSystemFile(this.getUIContext())
           .then((wgConf) => {
-            this.newConfigDialog(wgConf);
+            if (wgConf instanceof Array) {
+              LLog.info(TAG, `成功导入 ${wgConf.length} 个配置，无需弹窗。`)
+              try {
+                this.getUIContext().getPromptAction()
+                  .showToast({
+                    message: `成功导入 ${wgConf.length} 个配置。`
+                  })
+              } catch (error) {
+                LLog.error(TAG, error)
+              }
+            } else {
+              this.newConfigDialog(wgConf);
+            }
+            this.vm.loadConfigs()
           })
           .catch((e: BusinessError) => {
-            LLog.error(TAG, e)
+            LLog.warn(TAG, e)
           })
       }
     },
@@ -120,7 +170,14 @@ export struct WGMainView {
             this.newConfigDialog(wgConf);
           })
           .catch((e: BusinessError) => {
-            LLog.error(TAG, e)
+            if (e.code == 1000500002) {
+              LLog.info(TAG, "用户去取消了二维码扫描")
+              return
+            }
+            LLog.error(TAG, {
+              message: `code=${e.code}`
+            , error: e
+            })
           })
       }
     },
@@ -137,8 +194,8 @@ export struct WGMainView {
     LLog.info(TAG, `配置读取: ${JSON.stringify(params)}`)
     const status = params.status
     if (status) {
-      // 更新UI线程配置
-      WireGuard.statusConfig.update(status)
+      // 设置开关
+      this.vm.setActiveConfigId(status);
     }
   })
 
@@ -190,7 +247,7 @@ export struct WGMainView {
       Repeat(this.vm.wgList)
         .each((it) => {
           ListItem() {
-            MainItemView({ data: it.item, index: it.index })
+            MainItemView({ vm: this.vm, data: it.item, index: it.index })
               .onClick(() => {
                 WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
               })
@@ -264,22 +321,36 @@ export struct WGMainView {
 
 @ComponentV2
 struct MainItemView {
+  @Param @Require vm: WGMainViewModel
   @Param @Require data: MainItemData;
   @Param @Require index: number;
 
   build() {
     Row() {
       Column() {
-        Text(`(${this.index + 1}) ${this.data.name}`)
-        Text(`createAt: ${this.data.data.createdAt}`)
+        Text(`${this.data.name}`)
+          .fontSize('18fp')
+        if (!this.vm.uiConfig.listShowSimple) {
+          Text(`createAt: ${this.data.data.createdAt}`)
+            .fontSize('12fp')
+        }
       }
       .alignItems(HorizontalAlign.Start)
 
       Blank().layoutWeight(1)
-      // Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
-      //   .onChange((isOn) => {
-      //
-      //   })
+      Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
+        .size({
+          width: '50vp',
+          height: '28vp',
+        })
+        .onClick(() => {
+          // 关闭其他开关
+          this.vm.closeOther(this.data.id)
+          this.data.onClick();
+        })
+        .onChange((isOn: boolean) => {
+          this.data.openChange(this.getUIContext(), isOn);
+        })
     }
     .padding({ left: '16vp', right: '16vp' })
     .width('100%')

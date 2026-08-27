@@ -13,80 +13,165 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { AppStorageV2, PersistenceV2, UIUtils } from '@ohos.arkui.StateManagement';
+import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../../../../Index';
+import { WGDBConf } from './entity/WGConfigEntity';
 
-const TAG = "WG状态"
+const TAG = "WGConfig"
+
+// ====================== Status 模块 ======================
 
 /**
- * WireGuard 状态记录
+ * VPN运行状态 - AppStorageV2内存级持久化
  *
- * Created on 2026/7/10.
- * @author leojay`fu
+ * VPN进程和主应用进程各自有独立的AppStorageV2存储（进程隔离），
+ * 跨进程同步通过 publishVpnChange / syncFromVpnProcess 完成。
  */
-
-class WGStatusImpl {
-  /**
-   * @returns 获取状态配置
-   */
-  getConfig(): StatusConfig {
-    // 注意以下方法都不能跨进程使用
-    return AppStorageV2.connect<StatusConfig>(StatusConfig, () => new StatusConfig())!
-    return PersistenceV2.globalConnect<StatusConfig>({
-      type: StatusConfig,
-      // 定义默认构造器，返回时需要调用makeObserved，才能实现自动持久化
-      defaultCreator: () => UIUtils.makeObserved(new StatusConfig()),
-    })!;
-    // return preferences.getPreferencesSync()
-  }
-
-
-  /**
-   * vpn开始运行
-   * @param configId
-   */
-  vpnStartRun(configId: number) {
-    const config = this.getConfig()
-    config.running = true
-    config.runningConfigId = configId;
-    LLog.info(TAG, `更新状态:${JSON.stringify(this.getConfig())}`)
-  }
-
-  /**
-   * vpn 正常停止运行
-   */
-  vpnStop() {
-    const config = this.getConfig()
-    config.runningConfigId = undefined;
-    config.running = false;
-    LLog.info(TAG, `更新状态:${JSON.stringify(this.getConfig())}`)
-  }
-
-  /**
-   * vpn 正常停止运行
-   */
-  vpnStopThrow() {
-    this.getConfig().running = false;
-    LLog.info(TAG, `更新状态:${JSON.stringify(this.getConfig())}`)
-  }
-
-  update(config:StatusConfig){
-    const c =this.getConfig()
-    c.runningConfigId = config.runningConfigId
-    c.running = config.running
-  }
-}
-
-
+@ObservedV2
 export class StatusConfig {
-  runningConfigId?: number;
-  running: boolean = false;
+  @Trace runningConfigId?: number = undefined;
+  @Trace running: boolean = false;
 
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true
   }
+
+  /** 转为纯数据DTO，用于跨进程序列化（@Trace属性JSON.stringify会加__ob_前缀） */
+  toDTO(): StatusConfigDTO {
+    const dto = new StatusConfigDTO()
+    dto.runningConfigId = this.runningConfigId
+    dto.running = this.running
+    return dto
+  }
 }
 
-const WGConfig = new WGStatusImpl();
+/** StatusConfig的纯数据传输对象，无装饰器，序列化安全 */
+export class StatusConfigDTO {
+  runningConfigId?: number = undefined;
+  running: boolean = false;
+}
+
+function getStatusConfig(): StatusConfig {
+  return AppStorageV2.connect(StatusConfig, () => UIUtils.makeObserved(new StatusConfig()))!;
+}
+
+/**
+ * Status操作接口
+ *
+ * - vpnStartRun/vpnStop/vpnStopThrow：仅VPN进程调用
+ * - syncFromVpnProcess：主应用进程收到VPN广播后同步
+ */
+class StatusImpl {
+  getConfig(): StatusConfig {
+    return getStatusConfig();
+  }
+
+  vpnStartRun(configId: number) {
+    const config = this.getConfig()
+    config.running = true
+    config.runningConfigId = configId;
+    LLog.info(TAG, `状态更新(running=true): configId=${configId}`)
+  }
+
+  vpnStop() {
+    const config = this.getConfig()
+    config.runningConfigId = undefined;
+    config.running = false;
+    LLog.info(TAG, `状态更新(running=false)`)
+  }
+
+  vpnStopThrow() {
+    this.getConfig().running = false;
+    LLog.info(TAG, `状态更新(throw, running=false)`)
+  }
+
+  syncFromVpnProcess(dto: StatusConfigDTO) {
+    const c = this.getConfig()
+    c.runningConfigId = dto.runningConfigId
+    c.running = dto.running
+    LLog.info(TAG, `从VPN进程同步: running=${c.running}, configId=${c.runningConfigId}`)
+  }
+
+  update(dto: StatusConfigDTO) {
+    const c = this.getConfig()
+    c.runningConfigId = dto.runningConfigId
+    c.running = dto.running
+  }
+
+  isRunning(id: number): boolean {
+    const config = this.getConfig();
+    return config.running && id == config.runningConfigId;
+  }
+}
+
+// ====================== RunArg 模块 ======================
+
+/**
+ * VPN待运行配置参数 - AppStorageV2内存级持久化
+ *
+ * runWGConfig启动时先缓存到此处：
+ * - VEA运行中 → 直接发SWITCH指令
+ * - VEA未运行 → 启动VEA，VEA轮询CONFIG_QUERY，EntryAbility从此缓存读取回复START
+ *
+ * 使用AppStorageV2而非静态变量：应用运行期间不被系统回收，退出即丢失。
+ */
+@ObservedV2
+export class RunArgConfig {
+  @Trace pendingConfigId?: number = undefined;
+  @Trace pendingDbConf?: WGDBConf = undefined;
+}
+
+function getRunArgConfig(): RunArgConfig {
+  return AppStorageV2.connect(RunArgConfig, () => UIUtils.makeObserved(new RunArgConfig()))!;
+}
+
+/**
+ * RunArg操作接口
+ */
+class RunArgImpl {
+  getConfig(): RunArgConfig {
+    return getRunArgConfig();
+  }
+
+  set(configId: number, wgDbConf: WGDBConf): void {
+    const c = this.getConfig();
+    c.pendingConfigId = configId;
+    c.pendingDbConf = wgDbConf;
+  }
+
+  clear(): void {
+    const c = this.getConfig();
+    c.pendingConfigId = undefined;
+    c.pendingDbConf = undefined;
+  }
+
+  hasConfig(): boolean {
+    const c = this.getConfig();
+    return c.pendingConfigId != undefined && c.pendingDbConf != undefined;
+  }
+
+  getConfigId(): number | undefined {
+    return this.getConfig().pendingConfigId;
+  }
+
+  getDbConf(): WGDBConf | undefined {
+    return this.getConfig().pendingDbConf;
+  }
+}
+
+// ====================== WGConfig 聚合 ======================
+
+/**
+ * WGConfig - 聚合Status和RunArg两个模块
+ *
+ * status：VPN运行状态（running/runningConfigId）
+ * runArg：待运行配置缓存（pendingConfigId/pendingDbConf）
+ */
+class WGConfigImpl {
+  readonly status = new StatusImpl();
+  readonly runArg = new RunArgImpl();
+}
+
+const WGConfig = new WGConfigImpl();
 
 export default WGConfig;

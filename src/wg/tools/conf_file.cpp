@@ -15,6 +15,7 @@
 #include <regex>
 
 #include "WGException.h"
+#include "wg_dns.h"
 
 #ifdef _WIN32
 #include <ws2tcpip.h>
@@ -98,7 +99,7 @@ namespace WireGuard {
             return addr;
         }
 
-        bool isValidCIDR(uint32_t cidr, IPAddress::Family family) {
+        bool isValidCIDR(const int cidr, const IPAddress::Family family) {
             if (family == IPAddress::Family::IPv4) {
                 return cidr >= 0 && cidr <= 32;
             } else {
@@ -242,7 +243,7 @@ namespace WireGuard {
                                 value.c_str());
                         }
                     }
-                // 判断：冒号数恰好为 1 个，按 IPv4:端口 或 域名:端口 格式解析
+                    // 判断：冒号数恰好为 1 个，按 IPv4:端口 或 域名:端口 格式解析
                 } else if (colonCount == 1) {
                     size_t colonPos = value.rfind(':');
                     host = value.substr(0, colonPos);
@@ -277,7 +278,7 @@ namespace WireGuard {
                     // 判断：冒号前的主机部分是否是合法 IPv4 地址
                     if (isIPv4(host)) {
                         urlType = IPv4;
-                    // 判断：冒号前的主机部分是否是合法域名
+                        // 判断：冒号前的主机部分是否是合法域名
                     } else if (isValidDomain(host)) {
                         urlType = Domain;
                     } else {
@@ -285,7 +286,7 @@ namespace WireGuard {
                             "Endpoint 主机部分既不是合法 IPv4，也不是合法域名，主机值：%s，原值：%s",
                             host.c_str(), value.c_str());
                     }
-                // 冒号数 == 0：按纯 IPv4 或纯域名（无端口，默认 80）解析
+                    // 冒号数 == 0：按纯 IPv4 或纯域名（无端口，默认 80）解析
                 } else {
                     host = value;
                     // 判断：主机字符串 trim 后是否为空
@@ -295,7 +296,7 @@ namespace WireGuard {
                     // 判断：主机是否为合法 IPv4 地址
                     if (isIPv4(host)) {
                         urlType = IPv4;
-                    // 判断：主机是否为合法域名
+                        // 判断：主机是否为合法域名
                     } else if (isValidDomain(host)) {
                         urlType = Domain;
                     } else {
@@ -328,7 +329,7 @@ namespace WireGuard {
                 throw WGException("Interface PrivateKey 不能为空");
             }
 
-            if (conf.inter.ipArea.cidr == static_cast<uint32_t>(-1)) {
+            if (conf.inter.ipArea.cidr == -1) {
                 throw WGException("Interface Address 不能为空");
             }
 
@@ -343,9 +344,9 @@ namespace WireGuard {
             }
 
 
-            if (conf.inter.listenerPort) {
-                if (!isValidPort(*conf.inter.listenerPort)) {
-                    throw WGException("Interface ListenerPort 值不合理: %s ", *conf.inter.listenerPort);
+            if (conf.inter.ListenPort) {
+                if (!isValidPort(*conf.inter.ListenPort)) {
+                    throw WGException("Interface ListenerPort 值不合理: %s ", *conf.inter.ListenPort);
                 }
             }
 
@@ -377,7 +378,7 @@ namespace WireGuard {
                 }
 
                 for (const auto &ip: peer.allowedIPs) {
-                    if (ip.cidr == static_cast<uint32_t>(-1)) {
+                    if (ip.cidr == -1) {
                         throw WGException("Peer AllowedIPs CIDR 不能为空");
                     }
                     if (!isValidCIDR(ip.cidr, ip.address.family)) {
@@ -420,7 +421,13 @@ namespace WireGuard {
             while (std::getline(stream, line)) {
                 line = trim(line);
 
-                if (line.empty() || line[0] == '#') {
+                size_t commentPos = line.find('#');
+                if (commentPos != std::string::npos) {
+                    line = line.substr(0, commentPos);
+                }
+                line = trim(line);
+
+                if (line.empty()) {
                     continue;
                 }
 
@@ -455,15 +462,19 @@ namespace WireGuard {
                         if (slashPos != std::string::npos) {
                             std::string ipStr = value.substr(0, slashPos);
                             conf.inter.ipArea.address = parseIPAddress(ipStr);
-                            conf.inter.ipArea.cidr = static_cast<uint32_t>(std::stoi(value.substr(slashPos + 1)));
+                            conf.inter.ipArea.cidr = std::stoi(value.substr(slashPos + 1));
                         }
                     } else if (key == "DNS") {
                         std::vector<std::string> dnsList = split(value, ',');
                         for (const auto &dns: dnsList) {
                             conf.inter.dns.push_back(parseIPAddress(dns));
                         }
-                    } else if (key == "ListenerPort") {
-                        conf.inter.listenerPort = std::make_shared<uint32_t>(std::stoi(value));
+                    } else if (key == "ListenPort") {
+                        conf.inter.ListenPort = std::make_shared<uint32_t>(std::stoi(value));
+                    } else if (key == "ConfigName") {
+                        conf.inter.configName = value;
+                    } else if (key == "MTU") {
+                        conf.inter.mtu = std::make_shared<uint32_t>(std::stoi(value));
                     }
                 } else if (inPeer && currentPeer) {
                     if (key == "PublicKey") {
@@ -478,13 +489,13 @@ namespace WireGuard {
                             size_t slashPos = ipStr.find('/');
                             if (slashPos != std::string::npos) {
                                 area.address = parseIPAddress(ipStr.substr(0, slashPos));
-                                area.cidr = static_cast<uint32_t>(std::stoi(ipStr.substr(slashPos + 1)));
+                                area.cidr = std::stoi(ipStr.substr(slashPos + 1));
                             }
                             currentPeer->allowedIPs.push_back(area);
                         }
                     } else if (key == "PersistentKeepalive") {
                         currentPeer->persistentKeepalive = static_cast<uint32_t>(std::stoi(value));
-                    } else if (key == "PreSharedKey") {
+                    } else if (key == "PreSharedKey" || key == "PresharedKey") {
                         currentPeer->preSharedKey = std::make_shared<WGKey>(crypto::base642Bin32Array(value));
                     }
                 }
@@ -503,57 +514,100 @@ namespace WireGuard {
             return conf;
         }
 
-        std::string readConfFileToJson(const std::string &content) {
-            const WGConf conf = readConfFileToEntity(content);
-            return wgConfToJson(conf);
+        DeviceRegisterConfig wgConfToDeviceRegisterConfig(const WGConf &conf) {
+            DeviceRegisterConfig drc{};
+
+            drc.client.device_name = conf.inter.configName;
+            std::memcpy(drc.client.private_key.data(), conf.inter.privateKey.data(), PRIVATE_KEY_LEN);
+            drc.client.listener_port = conf.inter.ListenPort;
+            drc.client.bind_address = std::make_shared<IPAddress>(conf.inter.ipArea.address);
+
+            for (const auto &wgPeer: conf.peers) {
+                PeerConfig pc{};
+                std::memcpy(pc.public_key.data(), wgPeer.publicKey.data(), PUBLIC_KEY_LEN);
+
+                if (wgPeer.endpoint.type == SiteUrlType::IPv4) {
+                    pc.endpoint.address = ipAddressForIpv4(wgPeer.endpoint.ipStrOrDomain);
+                } else if (wgPeer.endpoint.type == SiteUrlType::IPv6) {
+                    pc.endpoint.address = ipAddressForIpv6(wgPeer.endpoint.ipStrOrDomain);
+                } else if (wgPeer.endpoint.type == SiteUrlType::Domain) {
+                    auto ips = DNS::readDomainToIpAll(wgPeer.endpoint.ipStrOrDomain);
+                    if (!ips.empty()) {
+                        pc.endpoint.address = ips[0];
+                    }
+                }
+                pc.endpoint.port = static_cast<uint16_t>(wgPeer.endpoint.port);
+
+                pc.allowedIps = wgPeer.allowedIPs;
+                pc.keepaliveInterval = wgPeer.persistentKeepalive;
+
+                if (wgPeer.preSharedKey) {
+                    pc.pre_share_key = std::make_shared<SymmetricKey>();
+                    std::memcpy(pc.pre_share_key->data(), wgPeer.preSharedKey->data(), SYMMETRIC_KEY_LEN);
+                }
+
+                drc.peers.push_back(pc);
+            }
+
+            return drc;
         }
 
-        std::string wgConfToJson(const WGConf &conf) {
-            std::ostringstream json;
-            json << "{";
+        std::string wgConfToOfficialConfigStr(const WGConf &conf) {
+            std::string str = "[Interface]";
+            const auto inter = conf.inter;
+            str += "\nPrivateKey=" + crypto::bin32Array2Base64(inter.privateKey);
+            str += "\nAddress=" + inter.ipArea.toIpStr();
 
-            json << "\"interface\":{";
-            json << R"("privateKey":")" << crypto::bin32Array2Base64(conf.inter.privateKey) << "\",";
-            json << "\"address\":{";
-            json << R"("ip":")" << ipToStr(conf.inter.ipArea.address) << "\",";
-            json << "\"cidr\":" << std::to_string(conf.inter.ipArea.cidr);
-            json << "},";
-            json << "\"dns\":[";
-            for (size_t i = 0; i < conf.inter.dns.size(); i++) {
-                if (i > 0) json << ",";
-                json << "\"" << ipToStr(conf.inter.dns[i]) << "\"";
-            }
-            json << "]";
-            json << "},";
-
-            json << "\"peers\":[";
-            for (size_t i = 0; i < conf.peers.size(); i++) {
-                if (i > 0) json << ",";
-                const auto &peer = conf.peers[i];
-                json << "{";
-                json << R"("publicKey":")" << crypto::bin32Array2Base64(peer.publicKey) << "\",";
-                json << "\"endpoint\":{";
-                json << R"("ipStrOrDomain":")" << peer.endpoint.ipStrOrDomain << "\",";
-                json << "\"port\":" << peer.endpoint.port;
-                json << "},";
-                json << "\"allowedIPs\":[";
-                for (size_t j = 0; j < peer.allowedIPs.size(); j++) {
-                    if (j > 0) json << ",";
-                    const auto &ip = peer.allowedIPs[j];
-                    json << R"({"ip":")" << ipToStr(ip.address) << R"(","cidr":)" << std::to_string(ip.cidr) << "}";
+            if (!inter.dns.empty()) {
+                str += "\nDNS=";
+                int i = 0;
+                for (auto dn: inter.dns) {
+                    if (i > 0) str += ",";
+                    str += dn.toIpStr();
+                    ++i;
                 }
-                json << "],";
-                json << "\"persistentKeepalive\":" << peer.persistentKeepalive;
-                if (peer.preSharedKey) {
-                    json << R"(,"preSharedKey":")" << crypto::bin32Array2Base64(peer.publicKey) << "\"";
-                }
-                json << "}";
             }
-            json << "]";
+            if (inter.ListenPort) {
+                str += "\nListenPort=" + std::to_string(*inter.ListenPort);
+            }
+            if (inter.mtu) {
+                str += "\nMTU=" + std::to_string(*inter.mtu);
+            }
 
-            json << "}";
+            for (const auto &peer: conf.peers) {
+                str += "\n\n";
+                str += peerToOfficialConfigStr(peer);
+            }
+            str += "\n";
+            return str;
+        }
 
-            return json.str();
+        std::string peerToOfficialConfigStr(const WGConfPeer &peer) {
+            std::string str = "[Peer]";
+
+            str += "\nPublicKey=" + crypto::bin32Array2Base64(peer.publicKey);
+
+            if (peer.preSharedKey) {
+                str += "\nPresharedKey=" + crypto::bin32Array2Base64(*peer.preSharedKey);
+            }
+
+            if (!peer.allowedIPs.empty()) {
+                str += "\nAllowedIPs=";
+                int i = 0;
+                for (const auto &ip: peer.allowedIPs) {
+                    if (i > 0) str += ",";
+                    str += ip.toIpStr();
+                    ++i;
+                }
+            }
+
+            str += "\nEndpoint=" + peer.endpoint.toIpStr();
+
+            if (peer.persistentKeepalive > 0) {
+                str += "\nPersistentKeepalive=" + std::to_string(peer.persistentKeepalive);
+            }
+
+            return str;
         }
     }
 } // WireGuardTools

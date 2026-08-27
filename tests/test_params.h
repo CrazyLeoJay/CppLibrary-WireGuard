@@ -61,10 +61,19 @@ namespace WireGuard {
 
     const WireGuard::PrivateKey client_private{b642bin("CKvZGm8S0HoQUwvUIsZ8wd39Bqt/5Z5vaJNuKX4LHGI=")};
     const WireGuard::PublicKey client_public{b642bin("gN9lnPxypH67F7KystwjDdpwNsT007AV8s/MOOc0QGM=")};
-    const WireGuard::PublicKey server_private{b642bin("6CPPJCvfaej0+lwY5amd5pKJ0WLT0JuSv0VyPnMimVE=")};
+    const WireGuard::PrivateKey server_private{b642bin("6CPPJCvfaej0+lwY5amd5pKJ0WLT0JuSv0VyPnMimVE=")};
     const WireGuard::PublicKey server_public{b642bin("sMDHZrFHvyZKaYe1NYCy9+r2iR2DSQlcIFVFpeAh32A=")};
-    const WireGuard::PublicKey ephemeral_private{b642bin("eDal3qo5FbXZTspeM6kxztQ7i3yMJjKplVk6NL3rg0s=")};
+    const WireGuard::PrivateKey ephemeral_private{b642bin("eDal3qo5FbXZTspeM6kxztQ7i3yMJjKplVk6NL3rg0s=")};
     const WireGuard::PublicKey ephemeral_public{b642bin("1rzA6eYgIhK8aeFxuEHRzqvHfJE244/88Y4fkX/WfRs=")};
+
+    namespace Test51820 {
+        const WireGuard::PrivateKey client_private{b642bin("2AoPCL0Comiw1ffUa6m27PVTicDf+sNLf2UM8RlfdX8=")};
+        const WireGuard::PublicKey client_public{b642bin("JDgTiRyZp9frC88AhrMn2EbWW/AA8Xsg/rzNOqDfyhM=")};
+
+        // const WireGuard::PrivateKey server_private{b642bin("")};
+        const WireGuard::PublicKey server_public{b642bin("tF5CRf7H617jkebpS4IsMjpV8gfWbOsJ8cGYZzp6K3Q=")};
+    }
+
     // PrivateKey:eDal3qo5FbXZTspeM6kxztQ7i3yMJjKplVk6NL3rg0s=
     // PublicKey :1rzA6eYgIhK8aeFxuEHRzqvHfJE244/88Y4fkX/WfRs=
 }

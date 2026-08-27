@@ -4,3 +4,9 @@
 temp
 cmake-build-debug
 build
+build_wsl
+*.tmp.conf
+.cache
+.deveco
+.hvigor
+spec

@@ -16,10 +16,9 @@
  */
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
+import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard, getDnsMode, dnsResolveByMode, formatDnsError, SiteUrlType } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
-import { AppStorageV2 } from '@kit.ArkUI';
-import { common } from '@kit.AbilityKit';
+import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
@@ -34,18 +33,20 @@ export default class WGConfigPreViewModel {
    * @returns 当前Vpn是否运行中
    */
   @Trace isVpnOpen: boolean = false;
-  @Trace logData: WGStreamLogsData = AppStorageV2.connect(WGStreamLogsData, () => new WGStreamLogsData())!
+  @Trace logData: WGStreamLogsData = AppStorageV2.connect(WGStreamLogsData, () => new WGStreamLogsData())!;
+  @Trace connectedIps: Record<number, string> = {}; // peerIndex -> 实际连接的IP地址
+  @Trace peerDnsTestResult: string[] = []; // peerIndex -> 解析测试结果（数组整体重建触发UI刷新）
   /**
    * 是否发生为获取参数异常
    */
-  @Trace isVPNNoGetParamThrow:boolean = false;
+  @Trace isVPNNoGetParamThrow: boolean = false;
 
   constructor() {
     this.updateStatus();
   }
 
   updateStatus() {
-    const state = WireGuard.statusConfig.getConfig();
+    const state = WireGuard.config.status.getConfig();
     // 判断id是否相同，且存在
     const isIdSame = this.params?.id != undefined && state.runningConfigId == this.params?.id;
     this.isVpnOpen = isIdSame && state.isOpen()
@@ -137,8 +138,82 @@ export default class WGConfigPreViewModel {
       // }
     } catch (e) {
       this.isVpnOpen = false;
+      WireGuard.event.publishVpnNoOpen()
       context.getPromptAction().showToast({ message: `VPN开启失败 ${e ?? ""}` })
       LLog.error(TAG, { error: e, message: "开启VPN异常" });
+    }
+  }
+
+
+  isSwitchClick: boolean = false;
+
+  onSwitchChange(context: UIContext, isOn: boolean) {
+    if (this.isSwitchClick) {
+      if (isOn) {
+        LLog.info(TAG, "点击开启VPN")
+        this.changeVpnConfig(context, true)
+      } else {
+        LLog.info(TAG, "点击关闭VPN")
+        this.changeVpnConfig(context, false)
+      }
+    }
+    this.isSwitchClick = false
+  }
+
+  setSwitchClick() {
+    this.isSwitchClick = true
+  }
+
+  updateStreamParams(log: StreamLogMessage) {
+    if (this.isVpnOpen) {// 如果vpn开启才需要更新，后续应该添加接口的 私钥 比对，判断日志是否为当前日志的日志。可以在注册时就指定。
+      this.logData.updateLogMessage(log);
+      LLog.debug(TAG, `stream log: index=${log.peerIndex} receive=${log.sc.receiveTotal} send=${log.sc.sendTotal ?? 0}`)
+    }
+  }
+
+  receiveData(index: number): string {
+    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.receiveTotal ?? 0)
+  }
+
+  sendData(index: number): string {
+    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.sendTotal ?? 0)
+  }
+
+  /**
+   * 测试指定 Peer 的域名解析（只读测试，不修改配置）
+   * @param context UIContext，用于 Toast 提示
+   * @param index Peer 索引
+   * @throws
+   */
+  async testPeerDnsResolve(context: UIContext, index: number) {
+    const peer = this.data?.conf.peers[index];
+    if (!peer) {
+      return;
+    }
+    if (peer.endpoint.type != SiteUrlType.Domain) {
+      context.getPromptAction().showToast({ message: "对端地址不是域名，无需DNS解析" });
+      return;
+    }
+    const mode = getDnsMode(peer.endpoint);
+    try {
+      const ip = await dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode);
+      // @Trace 数组需整体重建才触发 UI 刷新
+      const newResult: string[] = this.peerDnsTestResult.slice();
+      newResult[index] = ip;
+      this.peerDnsTestResult = newResult;
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      const newResult: string[] = this.peerDnsTestResult.slice();
+      newResult[index] = formatDnsError(err);
+      this.peerDnsTestResult = newResult;
+    }
+  }
+
+  updateLogViewData(log: StreamLogMessage, sortAes: boolean) {
+    if (sortAes) {
+      this.logData.logs.push(log);
+    } else {
+      this.logData.logs.unshift(log);
     }
   }
 }
@@ -146,7 +221,22 @@ export default class WGConfigPreViewModel {
 
 @ObservedV2
 export class WGStreamLogsData {
+
   @Trace logs: StreamLogMessage[] = []
+  @Trace lastLogForMap: Map<number, StreamLogMessage> = new Map(); // // 上一条日志，一直表示最新,不过需要根据peer区分
+
+  updateLogMessage(log: StreamLogMessage) {
+    this.lastLogForMap.set(log.peerIndex, log)
+  }
+
+  getLatestLogForPeer(index: number): StreamLogMessage | undefined {
+    return this.lastLogForMap.get(index)
+  }
+
+  clear() {
+    this.logs = [];
+    this.lastLogForMap.clear();
+  }
 }
 
 export interface IconBtnParam {
@@ -156,7 +246,7 @@ export interface IconBtnParam {
 
 @ObservedV2
 export class IconSwitchBtnParam {
-  @Trace on: boolean = false
+  @Trace on: boolean = false // 按钮是否开启
   onParam: IconBtnParam
   offParam: IconBtnParam
   onChange?: (on: boolean) => void

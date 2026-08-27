@@ -161,40 +161,6 @@ static napi_value NAPI_Global_readWGConf(napi_env env, napi_callback_info info) 
 }
 
 
-static napi_value NAPI_Global_readWGConfToJson(napi_env env, napi_callback_info info) {
-    try {
-        napi_status ns;
-        size_t argc = 1;
-        napi_value args[argc];
-        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-
-        size_t len;
-        ns = napi_get_value_string_utf8(env, args[0], nullptr, 0, &len);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-        std::vector<char> buf(len + 1);
-        ns = napi_get_value_string_utf8(env, args[0], buf.data(), len + 1, &len);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-
-        std::string entity = WireGuard::Tools::readConfFileToJson(std::string(buf.data(), len));
-        napi_value result;
-        ns = napi_create_string_utf8(env, entity.c_str(), entity.length(), &result);
-        if (ns != napi_ok) {
-            throw WireGuard::WGException("napi调用异常");
-        }
-        return result;
-    } catch (const std::exception &e) {
-        napi_throw_error(env, "读取异常", e.what());
-        return nullptr;
-    }
-}
-
 static napi_value NAPI_Global_isIpv4(napi_env env, napi_callback_info info) {
     try {
         napi_status ns;
@@ -205,7 +171,7 @@ static napi_value NAPI_Global_isIpv4(napi_env env, napi_callback_info info) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isIPv4参数");
         bool result = WireGuard::Tools::isIPv4(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -225,7 +191,7 @@ static napi_value NAPI_Global_isIpv6(napi_env env, napi_callback_info info) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isIPv6参数");
         bool result = WireGuard::Tools::isIPv6(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -244,7 +210,7 @@ static napi_value NAPI_Global_isIpAddress(napi_env env, napi_callback_info info)
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isIpAddress参数");
         bool result = WireGuard::Tools::isValidIPAddress(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -264,7 +230,7 @@ static napi_value NAPI_Global_isValidDomain(napi_env env, napi_callback_info inf
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isValidDomain参数");
         bool result = WireGuard::Tools::isValidDomain(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -283,7 +249,7 @@ static napi_value NAPI_Global_isValidBase64Key(napi_env env, napi_callback_info 
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
+        auto nvContent = NapiTools::napiGetString(env, args[0], "isValidBase64Key参数");
         bool result = WireGuard::Tools::isValidBase64Key(nvContent);
 
         return NapiTools::makeNapiBool(env, result);
@@ -292,6 +258,7 @@ static napi_value NAPI_Global_isValidBase64Key(napi_env env, napi_callback_info 
         return nullptr;
     }
 }
+// 将域名转为IP，优先IPv4，失败则尝试IPv6
 static napi_value NAPI_Global_dnsToIp(napi_env env, napi_callback_info info) {
     try {
         napi_status ns;
@@ -302,10 +269,63 @@ static napi_value NAPI_Global_dnsToIp(napi_env env, napi_callback_info info) {
             throw WireGuard::WGException("napi调用异常");
         }
 
-        auto nvContent = NapiTools::napiGetString(env, args[0]);
-//        bool result = WireGuard::Tools::isValidBase64Key(nvContent);
-        auto ip = WireGuard::DNS::readDomainToIp(nvContent);
-        return NapiTools::makeNapiString(env, ip.toIpStr());
+        auto nvContent = NapiTools::napiGetString(env, args[0], "dnsToIp参数");
+        LOG_INFO("dnsToIp: domain=%{public}s", nvContent.c_str());
+        auto ip = WireGuard::DNS::readDomainToIpPreferIpv4(nvContent);
+        auto ipStr = ip.toIpStr();
+        LOG_INFO("dnsToIp: resolved=%{public}s", ipStr.c_str());
+        return NapiTools::makeNapiString(env, ipStr);
+    } catch (const std::exception &e) {
+        LOG_ERROR("dnsToIp failed: %{public}s", e.what());
+        std::string errMsg = "dnsToIp: " + std::string(e.what());
+        napi_throw_error(env, nullptr, errMsg.c_str());
+        return nullptr;
+    }
+}
+
+// 将域名转为指定类型的IP（type: 4=IPv4, 6=IPv6）
+static napi_value NAPI_Global_dnsToIpWithType(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 2;
+        napi_value args[2];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0], "dnsToIpWithType参数");
+        int32_t typeVal;
+        ns = napi_get_value_int32(env, args[1], &typeVal);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("获取type参数失败");
+        }
+        auto ipType = static_cast<WireGuard::DNS::IPType>(typeVal);
+        LOG_INFO("dnsToIpWithType: domain=%{public}s, type=%{public}d", nvContent.c_str(), typeVal);
+        auto ip = WireGuard::DNS::readDomainToIp(nvContent, ipType);
+        auto ipStr = ip.toIpStr();
+        LOG_INFO("dnsToIpWithType: resolved=%{public}s", ipStr.c_str());
+        return NapiTools::makeNapiString(env, ipStr);
+    } catch (const std::exception &e) {
+        LOG_ERROR("dnsToIpWithType failed: %{public}s", e.what());
+        std::string errMsg = "dnsToIpWithType: " + std::string(e.what());
+        napi_throw_error(env, nullptr, errMsg.c_str());
+        return nullptr;
+    }
+}
+
+static napi_value NAPI_Global_wgToOfficialStr(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 1;
+        napi_value args[argc];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+        auto entity = NapiTools::napiGetWGConf2Entity(env, args[0]);
+        auto result = WireGuard::Tools::wgConfToOfficialConfigStr(entity);
+        return NapiTools::makeNapiString(env, result);
     } catch (const std::exception &e) {
         napi_throw_error(env, "读取异常", e.what());
         return nullptr;
@@ -315,17 +335,18 @@ EXTERN_C_START
 static napi_value Init(napi_env env, napi_value exports) {
     wg_napi::Init(env, exports);
     napi_property_descriptor desc[] = {
-        {     "makeKeyPair", nullptr,      NAPI_Global_makeKeyPair, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {   "genPrivateKey", nullptr,    NAPI_Global_genPrivateKey, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {    "genPublicKey", nullptr,     NAPI_Global_genPublicKey, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {      "readWGConf", nullptr,       NAPI_Global_readWGConf, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"readWGConfToJson", nullptr, NAPI_Global_readWGConfToJson, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {          "isIpv4", nullptr,           NAPI_Global_isIpv4, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {          "isIpv6", nullptr,           NAPI_Global_isIpv6, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {     "isIpAddress", nullptr,      NAPI_Global_isIpAddress, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {   "isValidDomain", nullptr,    NAPI_Global_isValidDomain, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {"isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
-        {         "dnsToIp", nullptr,          NAPI_Global_dnsToIp, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {        "makeKeyPair", nullptr,      NAPI_Global_makeKeyPair, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {      "genPrivateKey", nullptr,    NAPI_Global_genPrivateKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {       "genPublicKey", nullptr,     NAPI_Global_genPublicKey, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {         "readWGConf", nullptr,       NAPI_Global_readWGConf, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {             "isIpv4", nullptr,           NAPI_Global_isIpv4, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {             "isIpv6", nullptr,           NAPI_Global_isIpv6, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {        "isIpAddress", nullptr,      NAPI_Global_isIpAddress, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {      "isValidDomain", nullptr,    NAPI_Global_isValidDomain, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {   "isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {            "dnsToIp", nullptr,          NAPI_Global_dnsToIp, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {    "dnsToIpWithType", nullptr,  NAPI_Global_dnsToIpWithType, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"wgConfToOfficialStr", nullptr,  NAPI_Global_wgToOfficialStr, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
     return exports;
