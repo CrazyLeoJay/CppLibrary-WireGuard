@@ -204,9 +204,6 @@ struct InterfaceCardView {
   vpnEvent: SubEventCancel = WireGuard.event.subscribeVpnChange((params) => {
     LLog.info(TAG, `配置发生变化: ${JSON.stringify(params)}`)
     const status = params.status
-    if (status) {
-      WireGuard.statusConfig.update(status)
-    }
     if (params.connectedIps) {
       this.vm.connectedIps = params.connectedIps
     }

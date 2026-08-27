@@ -311,7 +311,7 @@ class VPNChangeHelper {
    */
   static startVpn(id: number, config?: WGDeviceConfig) {
     // 1. 更新VPN进程本地状态（VPN进程的AppStorageV2）
-    WireGuard.statusConfig.vpnStartRun(id)
+    WireGuard.config.status.vpnStartRun(id)
     // 2. 构造广播参数并发布（主应用进程会通过subscribeVpnChange→syncFromVpnProcess同步）
     const params: VPNEventStatusParams = { isOpen: true, tag: VpnEventTag.START_VPN, vpnThreadRunning: true }
     if (config) {
@@ -335,7 +335,7 @@ class VPNChangeHelper {
    */
   static stopVpn() {
     // 1. 更新VPN进程本地状态
-    WireGuard.statusConfig.vpnStop()
+    WireGuard.config.status.vpnStop()
     // 2. 广播通知主应用进程同步，携带缓存的connectedIps和vpnThreadRunning=false
     const params: VPNEventStatusParams = {
       isOpen: false, tag: VpnEventTag.STOP_VPN, vpnThreadRunning: false,
@@ -345,7 +345,7 @@ class VPNChangeHelper {
   }
 
   static startVpnThrow(msg?: WGEventThrowParam) {
-    WireGuard.statusConfig.vpnStopThrow()
+    WireGuard.config.status.vpnStopThrow()
     WireGuard.event.publishVpnThrow(msg);
     WireGuard.event.publishVpnChange({
       isOpen: false, tag: VpnEventTag.THROW, vpnThreadRunning: false,
@@ -375,7 +375,7 @@ class VPNChangeHelper {
    * @param config 当前VPN设备配置（用于提取连接IP）
    */
   static queryStatus(config?: WGDeviceConfig) {
-    const isOpen = WireGuard.statusConfig.getConfig().isOpen()
+    const isOpen = WireGuard.config.status.getConfig().isOpen()
     const params: VPNEventStatusParams = { isOpen: isOpen, tag: VpnEventTag.QUERY_STATUS, vpnThreadRunning: true }
     if (config) {
       const connectedIps: Record<number, string> = {}

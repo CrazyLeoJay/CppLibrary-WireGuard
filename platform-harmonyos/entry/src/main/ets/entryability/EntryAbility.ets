@@ -17,7 +17,7 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, WireGuard } from 'wg_tunnel';
+import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, VpnConfigAction, WireGuard } from 'wg_tunnel';
 import { longTaskModel } from '../model/LongTaskModel';
 
 const TAG = "EntryAbility"
@@ -27,6 +27,8 @@ export default class EntryAbility extends UIAbility {
   private vpnChangeCancel?: SubEventCancel;
   // VPN流日志监听句柄
   private vpnStreamLogCancel?: SubEventCancel;
+  // V2: VEA配置请求监听句柄
+  private vpnConfigQueryCancel?: SubEventCancel;
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     try {
@@ -42,10 +44,9 @@ export default class EntryAbility extends UIAbility {
 
   onDestroy(): void {
     LLog.info(TAG, 'Ability onDestroy');
-    // 取消VPN状态监听和流日志监听
     this.unsubscribeVpnChange();
     this.unsubscribeVpnStreamLogs();
-    // 停止长时任务
+    this.unsubscribeVpnConfigQuery();
     this.stopLongTaskIfNeeded();
   }
 
@@ -88,13 +89,10 @@ export default class EntryAbility extends UIAbility {
    * - VPN停止 → 停止长时任务
    */
   private initVpnListeners(): void {
-    // 注册VPN状态变化监听（始终注册，确保能收到VPN进程的广播）
     this.subscribeVpnChangeIfNeeded();
-
-    // 注册VPN流日志监听（始终注册，用于通知中的流量和握手时间更新）
     this.subscribeVpnStreamLogsIfNeeded();
+    this.subscribeVpnConfigQueryIfNeeded();
 
-    // 检测VPN进程是否运行，运行中则发送查询请求同步最新状态
     WireGuard.tools.isVpnExtensionRunning().then((running: boolean) => {
       if (running) {
         WireGuard.event.publishVpnStatusQuery();
@@ -122,12 +120,19 @@ export default class EntryAbility extends UIAbility {
     this.vpnChangeCancel = WireGuard.event.subscribeVpnChange((params) => {
       // subscribeVpnChange内部已自动调用syncFromVpnProcess同步到本地AppStorageV2
       const tag = params.tag as VpnEventTag;
+      if (params.status) {
+        // 更新UI线程配置
+        WireGuard.config.status.update(params.status)
+      }
       LLog.info(TAG,
         `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}`);
 
       if (params.vpnThreadRunning === true) {
-        // VPN线程运行中 → 启动保活
-        this.startVpnKeepAlive(tag, params.connectedIps);
+        if (tag === VpnEventTag.VPN_SERVICE_STOPPED) {
+          this.onVpnServiceStopped();
+        } else {
+          this.startVpnKeepAlive(tag, params.connectedIps);
+        }
       } else {
         // VPN线程未运行 → 停止长时任务（stopBackgroundRunning会自动取消关联通知）
         this.stopLongTaskIfNeeded();
@@ -203,24 +208,41 @@ export default class EntryAbility extends UIAbility {
       return;
     }
     this.vpnStreamLogCancel = WireGuard.event.subscribeVpnStreamLogs((log: StreamLogMessage) => {
-      // 更新通知中的流量和握手数据
       longTaskModel.updateStreamLog(log);
     });
     LLog.info(TAG, '已注册VPN流日志监听');
   }
 
-  /**
-   * 停止长时任务（如正在运行）
-   *
-   * 在VPN关闭时调用，停止后台长时任务。
-   */
+  private subscribeVpnConfigQueryIfNeeded(): void {
+    if (this.vpnConfigQueryCancel != undefined) {
+      return;
+    }
+    this.vpnConfigQueryCancel = WireGuard.event.subscribeVpnConfigQuery(() => {
+      LLog.info(TAG, '收到VEA配置请求(CONFIG_QUERY)');
+      if (WireGuard.config.runArg.hasConfig()) {
+        WireGuard.event.publishVpnConfigRequest({
+          action: VpnConfigAction.START,
+          configId: WireGuard.config.runArg.getConfigId(),
+          wgDbConf: WireGuard.config.runArg.getDbConf(),
+        });
+        LLog.info(TAG, `已回复配置: configId=${WireGuard.config.runArg.getConfigId()}`);
+      } else {
+        LLog.warn(TAG, '无待启动配置，无法回复CONFIG_QUERY');
+      }
+    });
+    LLog.info(TAG, '已注册VEA配置请求监听');
+  }
+
+  private onVpnServiceStopped(): void {
+    LLog.info(TAG, 'VPN服务已停止（VEA进程存活），更新通知');
+    longTaskModel.setServiceStopped(true);
+    longTaskModel.publishNotification();
+  }
+
   private stopLongTaskIfNeeded(): void {
     longTaskModel.stopLongTask(this.context);
   }
 
-  /**
-   * 取消VPN状态变化监听
-   */
   private unsubscribeVpnChange(): void {
     if (this.vpnChangeCancel != undefined) {
       this.vpnChangeCancel.cancel();
@@ -229,14 +251,19 @@ export default class EntryAbility extends UIAbility {
     }
   }
 
-  /**
-   * 取消VPN流日志监听
-   */
   private unsubscribeVpnStreamLogs(): void {
     if (this.vpnStreamLogCancel != undefined) {
       this.vpnStreamLogCancel.cancel();
       this.vpnStreamLogCancel = undefined;
       LLog.info(TAG, '已取消VPN流日志监听');
+    }
+  }
+
+  private unsubscribeVpnConfigQuery(): void {
+    if (this.vpnConfigQueryCancel != undefined) {
+      this.vpnConfigQueryCancel.cancel();
+      this.vpnConfigQueryCancel = undefined;
+      LLog.info(TAG, '已取消VEA配置请求监听');
     }
   }
 }

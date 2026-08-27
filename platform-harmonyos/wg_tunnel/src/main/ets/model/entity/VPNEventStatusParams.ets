@@ -21,18 +21,21 @@ import { StatusConfigDTO } from '../WGConfig';
  * 标识VPN状态广播的事件来源，主应用进程可据此判断事件类型并采取不同行为：
  * - ON_CREATE：VPN Extension进程启动（onCreate回调），此时连接尚未建立
  * - START_VPN：VPN连接建立成功
- * - STOP_VPN：VPN正常停止（onDestroy回调）
+ * - STOP_VPN：VPN正常停止（onDestroy回调，VEA进程关闭）
  * - THROW：VPN运行异常，连接断开
  * - QUERY_STATUS：查询VPN状态的回复
  * - QUERY_NO_RUNNING：查询时VPN进程未运行
  * - NO_START_VPN：VPN未能启动
+ * - CONFIG_QUERY：VEA请求配置（V2模式，VEA启动后轮询请求）
+ * - CONFIG_REQUEST：主进程下发配置指令（V2模式，携带VpnConfigAction）
+ * - VPN_SERVICE_STOPPED：VPN服务停止但VEA进程存活（stop action，不关闭VEA）
  */
 export enum VpnEventTag {
   /** VPN Extension进程启动（onCreate） */
   ON_CREATE = 'onCreate',
   /** VPN连接建立成功 */
   START_VPN = 'startVpn',
-  /** VPN正常停止 */
+  /** VPN正常停止（VEA进程关闭） */
   STOP_VPN = 'stopVpn',
   /** VPN运行异常 */
   THROW = 'throw',
@@ -42,6 +45,12 @@ export enum VpnEventTag {
   QUERY_NO_RUNNING = 'queryNoRunning',
   /** VPN未能启动 */
   NO_START_VPN = 'noStartVpn',
+  /** VEA请求配置（V2模式） */
+  CONFIG_QUERY = 'configQuery',
+  /** 主进程下发配置指令（V2模式） */
+  CONFIG_REQUEST = 'configRequest',
+  /** VPN服务停止但VEA进程存活 */
+  VPN_SERVICE_STOPPED = 'vpnServiceStopped',
 }
 
 /**

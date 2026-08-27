@@ -46,7 +46,7 @@ export default class WGConfigPreViewModel {
   }
 
   updateStatus() {
-    const state = WireGuard.statusConfig.getConfig();
+    const state = WireGuard.config.status.getConfig();
     // 判断id是否相同，且存在
     const isIdSame = this.params?.id != undefined && state.runningConfigId == this.params?.id;
     this.isVpnOpen = isIdSame && state.isOpen()

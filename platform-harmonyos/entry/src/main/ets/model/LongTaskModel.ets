@@ -19,11 +19,9 @@ import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog, StreamLogMessage, MessageType } from 'wg_tunnel';
+import { NotificationUpdater } from './NotificationUpdater';
 
 const TAG: string = 'VpnKeepAlive';
-
-// 8分钟间隔更新通知进度，留2分钟缓冲避免超过10分钟限制
-const PROGRESS_UPDATE_INTERVAL_MS: number = 8 * 60 * 1000;
 
 /**
  * VPN通知内容数据 - 纯数据类，用于构建通知文本
@@ -33,14 +31,12 @@ const PROGRESS_UPDATE_INTERVAL_MS: number = 8 * 60 * 1000;
  * 流量统计和握手时间来自StreamLogMessage（跨进程广播）。
  */
 export class VpnNotificationData {
-  /** peerIndex -> 实际连接的IP地址（域名端点DNS解析后的IP） */
   connectedIps: Record<number, string> = {};
-  /** peerIndex -> 最新流日志（包含累计流量数据） */
   latestLogs: Map<number, StreamLogMessage> = new Map();
-  /** peerIndex -> 最后握手时间（来自握手类型的StreamLogMessage.timestamp） */
   lastHandshakeTime: Map<number, number> = new Map();
-  /** VPN配置名称（可选，用于通知标题区分） */
   configName?: string = undefined;
+  /** VPN服务已停止但VEA进程存活（V2模式STOP action） */
+  serviceStopped: boolean = false;
 }
 
 /**
@@ -135,10 +131,14 @@ function formatDuration(startTime: number): string {
  * @author leojay`fu
  */
 class LongTaskModel {
-  // 进度更新定时器
-  private progressTimer?: number;
-  // VPN通知数据（运行时缓存，非持久化）
+  private updater: NotificationUpdater;
   private vpnData: VpnNotificationData = new VpnNotificationData();
+
+  constructor() {
+    this.updater = new NotificationUpdater(() => {
+      this.publishNotification();
+    });
+  }
 
   /**
    * 构建ContinuousTaskRequest（公共方法）
@@ -246,43 +246,12 @@ class LongTaskModel {
 
       LLog.info(TAG, `startBackgroundRunning成功, taskId=${state.continuousTaskId}, notificationId=${state.notificationId}`);
 
-      // 发布初始通知内容
       this.publishNotification();
-
-      // 启动进度更新定时器（通过通知内容更新满足DATA_TRANSFER的进度更新要求）
-      this.startProgressTimer();
+      this.updater.start();
     } catch (error) {
       const err = error as BusinessError;
       LLog.error(TAG, `startBackgroundRunning失败. code: ${err.code}, message: ${err.message}`);
       throw new Error(`startBackgroundRunning failed: ${err.code} - ${err.message}`);
-    }
-  }
-
-  /**
-   * 启动进度更新定时器
-   * DATA_TRANSFER 模式不支持 updateBackgroundRunning，通过 notificationManager.publish 更新通知内容
-   * 来满足10分钟内必须有进度更新的要求
-   */
-  private startProgressTimer(): void {
-    this.stopProgressTimer();
-    this.progressTimer = setInterval(() => {
-      const state = getLongTaskState();
-      if (state.continuousTaskId != undefined) {
-        this.publishNotification();
-        LLog.info(TAG, "定时器触发：更新通知内容");
-      }
-    }, PROGRESS_UPDATE_INTERVAL_MS);
-    LLog.info(TAG, `进度更新定时器已启动, 间隔=${PROGRESS_UPDATE_INTERVAL_MS / 1000}秒`);
-  }
-
-  /**
-   * 停止进度更新定时器
-   */
-  private stopProgressTimer(): void {
-    if (this.progressTimer != undefined) {
-      clearInterval(this.progressTimer);
-      this.progressTimer = undefined;
-      LLog.info(TAG, "进度更新定时器已停止");
     }
   }
 
@@ -296,7 +265,15 @@ class LongTaskModel {
     const lines: string[] = [];
     const state = getLongTaskState();
 
-    // 运行时长
+    if (this.vpnData.serviceStopped) {
+      lines.push('VPN服务已停止');
+      if (state.startTime != undefined) {
+        lines.push(`运行时长: ${formatDuration(state.startTime)}`);
+      }
+      lines.push('VEA进程保持存活，可快速切换配置');
+      return lines;
+    }
+
     if (state.startTime != undefined) {
       lines.push(`运行时长: ${formatDuration(state.startTime)}`);
     }
@@ -400,10 +377,8 @@ class LongTaskModel {
     if (data.configName != undefined) {
       this.vpnData.configName = data.configName;
     }
-    // 仅在长时任务运行中时更新通知
-    const state = getLongTaskState();
-    if (state.continuousTaskId != undefined) {
-      this.publishNotification();
+    if (getLongTaskState().continuousTaskId != undefined) {
+      this.updater.update();
     }
   }
 
@@ -413,26 +388,20 @@ class LongTaskModel {
    * @param log VPN流日志消息（包含流量统计和握手时间）
    */
   updateStreamLog(log: StreamLogMessage): void {
-    // 更新该Peer的最新流量数据
     this.vpnData.latestLogs.set(log.peerIndex, log);
-
-    // 如果是握手消息，记录握手时间
     if (log.messageType === MessageType.HANDSHAKE_INITIATION ||
       log.messageType === MessageType.HANDSHAKE_RESPONSE) {
       this.vpnData.lastHandshakeTime.set(log.peerIndex, log.timestamp);
     }
-
-    // 仅在长时任务运行中时更新通知
-    const state = getLongTaskState();
-    if (state.continuousTaskId != undefined) {
-      this.publishNotification();
+    if (getLongTaskState().continuousTaskId != undefined) {
+      this.updater.update();
     }
   }
 
-  /**
-   * 清除VPN通知数据
-   * 在VPN停止时调用，清空缓存数据
-   */
+  setServiceStopped(stopped: boolean): void {
+    this.vpnData.serviceStopped = stopped;
+  }
+
   clearVpnData(): void {
     this.vpnData = new VpnNotificationData();
   }
@@ -446,8 +415,7 @@ class LongTaskModel {
       return;
     }
 
-    // 先清除定时器
-    this.stopProgressTimer();
+    this.updater.stop();
 
     // 清除VPN通知数据
     this.clearVpnData();

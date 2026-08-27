@@ -17,6 +17,7 @@ import { commonEventManager } from '@kit.BasicServicesKit';
 import { LLog, StreamLogMessage, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
 import VPNEventStatusParams, { VpnEventTag } from './entity/VPNEventStatusParams';
+import { VpnConfigRequestParams } from './entity/VpnConfigAction';
 import WGTools from './WGTools';
 import { WGEventThrow, WGEventThrowForString, WGEventThrowParam, WGEventThrowToString } from '../error/WGEventThrow';
 
@@ -36,6 +37,8 @@ const VPN_START_CLOSE = `${packageName}.VPN_CLOSE`
 const VPN_STATUS_CHANGE = `${packageName}.VPN_STATUS_CHANGE` // VPN状态变化
 const VPN_STATUS_QUERY = `${packageName}.VPN_STATUS_QUERY` // VPN状态查询
 const VPN_STREAM_LOGS = `${packageName}.VPN_STREAM_LOGS` // VPN Stream 流日志
+const VPN_CONFIG_QUERY = `${packageName}.VPN_CONFIG_QUERY` // VEA请求配置（V2模式）
+const VPN_CONFIG_REQUEST = `${packageName}.VPN_CONFIG_REQUEST` // 主进程下发配置指令（V2模式）
 
 export interface SubEventCancel {
   cancel(): void
@@ -153,7 +156,7 @@ export class WGSystemEventDef {
     // VPN进程调用时：附带VPN进程的权威状态（running=true/false, runningConfigId）
     // 主应用进程调用时：附带主应用进程的本地状态
     // 通过 toDTO() 转换为纯数据对象，避免 @Trace 代理导致序列化属性名加 __ob_ 前缀
-    params.status = WireGuard.statusConfig.getConfig().toDTO()
+    params.status = WireGuard.config.status.getConfig().toDTO()
     this.publish(VPN_STATUS_CHANGE, JSON.stringify(params))
     LLog.info(TAG, `通知变化：${JSON.stringify(params)}`)
   }
@@ -181,7 +184,7 @@ export class WGSystemEventDef {
         // 【核心同步逻辑】收到VPN状态变化广播后，将状态同步到本地AppStorageV2
         // 以VPN进程数据为准，确保主应用进程的状态与VPN进程一致
         if (result.status) {
-          WireGuard.statusConfig.syncFromVpnProcess(result.status)
+          WireGuard.config.status.syncFromVpnProcess(result.status)
         }
         paramsInvoke(result)
       }
@@ -220,6 +223,62 @@ export class WGSystemEventDef {
       if (data.data) {
         const log = JSON.parse(data.data) as StreamLogMessage
         logListener(log);
+      }
+    })
+  }
+
+  /**
+   * 【V2模式】VEA发布配置请求
+   *
+   * VEA进程启动后通过此方法请求主应用进程下发VPN配置。
+   * 主应用进程收到后通过 publishVpnConfigRequest 回复配置。
+   * VEA会以3秒间隔轮询，最多30次。
+   */
+  publishVpnConfigQuery() {
+    this.publish(VPN_CONFIG_QUERY)
+  }
+
+  /**
+   * 【V2模式】主应用进程订阅VEA配置请求
+   *
+   * 收到请求后，主应用进程应查询当前需要启动的配置并调用
+   * publishVpnConfigRequest 下发配置指令。
+   *
+   * @param invoke 配置请求回调
+   * @returns SubEventCancel 取消订阅的句柄
+   */
+  subscribeVpnConfigQuery(invoke: () => void): SubEventCancel {
+    return this.subscribe(VPN_CONFIG_QUERY, () => {
+      invoke()
+    })
+  }
+
+  /**
+   * 【V2模式】主应用进程下发配置指令
+   *
+   * 携带 VpnConfigRequestParams（action/configId/wgDbConf），
+   * VEA进程收到后根据action执行对应操作（start/stop/switch/restart）。
+   *
+   * @param params 配置请求参数
+   */
+  publishVpnConfigRequest(params: VpnConfigRequestParams) {
+    this.publish(VPN_CONFIG_REQUEST, JSON.stringify(params))
+    LLog.info(TAG, `下发配置指令: action=${params.action}, configId=${params.configId}`)
+  }
+
+  /**
+   * 【V2模式】VEA订阅配置指令
+   *
+   * VEA进程订阅此事件，收到主应用进程下发的配置指令后执行对应操作。
+   *
+   * @param invoke 配置指令回调，返回解析后的 VpnConfigRequestParams
+   * @returns SubEventCancel 取消订阅的句柄
+   */
+  subscribeVpnConfigRequest(invoke: (params: VpnConfigRequestParams) => void): SubEventCancel {
+    return this.subscribe(VPN_CONFIG_REQUEST, (data) => {
+      if (data.data) {
+        const params = JSON.parse(data.data) as VpnConfigRequestParams
+        invoke(params)
       }
     })
   }

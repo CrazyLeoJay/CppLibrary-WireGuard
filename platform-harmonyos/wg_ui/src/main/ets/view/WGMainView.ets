@@ -194,8 +194,6 @@ export struct WGMainView {
     LLog.info(TAG, `配置读取: ${JSON.stringify(params)}`)
     const status = params.status
     if (status) {
-      // 更新UI线程配置
-      WireGuard.statusConfig.update(status)
       // 设置开关
       this.vm.setActiveConfigId(status);
     }

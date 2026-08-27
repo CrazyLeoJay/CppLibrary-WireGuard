@@ -12,7 +12,7 @@
     "extensionAbilities": [
       {
         "name": "WGVpnExtAbility",
-        "srcEntry": "./ets/ability/WGVpnExtAbility.ets",
+        "srcEntry": "./ets/ability/WGVpnExtAbilityV2.ets",
         "type": "vpn",
         "exported": false
       }

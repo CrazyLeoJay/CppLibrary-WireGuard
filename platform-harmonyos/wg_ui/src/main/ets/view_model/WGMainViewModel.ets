@@ -245,7 +245,7 @@ export class MainItemData {
     this.vm = vm;
     this.data = data;
     this.name = data.name!;
-    this.open = WireGuard.statusConfig.isRunning(this.id)
+    this.open = WireGuard.config.status.isRunning(this.id)
   }
 
   get id(): number {
