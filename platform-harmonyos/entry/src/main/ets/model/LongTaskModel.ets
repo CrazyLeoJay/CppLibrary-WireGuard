@@ -192,6 +192,27 @@ class LongTaskModel {
     return getLongTaskState().continuousTaskId != undefined;
   }
 
+  /**
+   * 主动移除长时任务关联的通知
+   *
+   * 在以下时机调用，防止出现多个通知窗口：
+   * - startLongTask 启动前：取消上次残留的旧通知
+   * - stopLongTask 停止时：立即移除通知，不依赖 stopBackgroundRunning 的系统清理
+   */
+  private removeNotification(): void {
+    const state = getLongTaskState();
+    if (state.notificationId != undefined) {
+      const oldId = state.notificationId;
+      notificationManager.cancel(oldId).then(() => {
+        LLog.info(TAG, `已移除旧通知: id=${oldId}`);
+      }).catch((err: BusinessError) => {
+        if (err.code !== 1600004) {
+          LLog.warn(TAG, `移除旧通知失败: id=${oldId}, code=${err.code}`);
+        }
+      });
+    }
+  }
+
   // 启动长时任务
   /**
    * @throws
@@ -204,6 +225,10 @@ class LongTaskModel {
         LLog.info(TAG, '后台长时任务已启动，无需重复启动');
         return;
       }
+
+      // 启动前取消旧通知，防止出现多个通知
+      this.removeNotification();
+
       const request = await this.createTaskRequest(currentContext);
 
       const notification: backgroundTaskManager.ContinuousTaskNotification =
@@ -426,6 +451,9 @@ class LongTaskModel {
 
     // 清除VPN通知数据
     this.clearVpnData();
+
+    // 主动取消通知，防止残留多个通知窗口
+    this.removeNotification();
 
     if (state.continuousTaskId != undefined) {
       // 使用新API签名：stopBackgroundRunning(context, continuousTaskId)
