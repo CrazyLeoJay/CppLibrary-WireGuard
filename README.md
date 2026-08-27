@@ -48,7 +48,7 @@
   - [x] 数据加密传输
   - [x] UDP Socket 通讯
   - [x] 基础接收端和发送端搭建（device类，用于NDK映射）
-- [ ] Cookie 挑战
+- [x] Cookie 挑战
 
 
 
@@ -88,3 +88,16 @@
 - [WireGuard 官网](https://www.wireguard.com/)
 - [WireGuard 白皮书](https://www.wireguard.com/papers/wireguard.pdf)
 - [WireGuard 协议说明](https://www.wireguard.com/protocol/)
+
+
+
+## 支持
+
+如果觉得app或者项目好用，可以请作者喝杯咖啡。您的支持是我更新的动力
+
+<p align="center">
+<img src="README.assets/33f42378afa2d0d7eae662c08c4348d3.jpg" alt="33f42378afa2d0d7eae662c08c4348d3" alt="Alipay" width="300" /><img src="README.assets/4941d4083266371ac9f713c61fa944f4.png" alt="4941d4083266371ac9f713c61fa944f4" alt="WeChat Pay" width="300" />
+</p>
+
+
+
