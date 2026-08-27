@@ -163,9 +163,21 @@ export default class EntryAbility extends UIAbility {
    * @param connectedIps 连接IP数据（可选，来自VPN状态广播）
    */
   private async startVpnKeepAlive(tag: VpnEventTag, connectedIps?: Record<number, string>): Promise<void> {
-    // 缓存连接IP（如果有）
+    // 缓存连接IP和配置信息
     if (connectedIps) {
       longTaskModel.updateVpnData({ connectedIps: connectedIps });
+    }
+    // 从RunArg缓存读取配置名和目标端点
+    const dbConf = WireGuard.config.runArg.getDbConf();
+    if (dbConf) {
+      const endpoints: Record<number, string> = {};
+      dbConf.conf.peers.forEach((peer, index) => {
+        endpoints[index] = `${peer.endpoint.ipStrOrDomain}:${peer.endpoint.port}`;
+      });
+      longTaskModel.updateVpnData({
+        configName: dbConf.name,
+        targetEndpoints: endpoints,
+      });
     }
     // 1. 防重复启动：长时任务已运行则仅更新数据
     if (longTaskModel.isRunning()) {

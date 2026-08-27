@@ -34,7 +34,10 @@ export class VpnNotificationData {
   connectedIps: Record<number, string> = {};
   latestLogs: Map<number, StreamLogMessage> = new Map();
   lastHandshakeTime: Map<number, number> = new Map();
+  /** VPN配置名称 */
   configName?: string = undefined;
+  /** 目标端点地址列表（peerIndex -> ipStrOrDomain:port） */
+  targetEndpoints: Record<number, string> = {};
   /** VPN服务已停止但VEA进程存活（V2模式STOP action） */
   serviceStopped: boolean = false;
 }
@@ -266,12 +269,20 @@ class LongTaskModel {
     const state = getLongTaskState();
 
     if (this.vpnData.serviceStopped) {
+      if (this.vpnData.configName) {
+        lines.push(`配置: ${this.vpnData.configName}`);
+      }
       lines.push('VPN服务已停止');
       if (state.startTime != undefined) {
         lines.push(`运行时长: ${formatDuration(state.startTime)}`);
       }
       lines.push('VEA进程保持存活，可快速切换配置');
       return lines;
+    }
+
+    // 配置名
+    if (this.vpnData.configName) {
+      lines.push(`${this.vpnData.configName}`);
     }
 
     if (state.startTime != undefined) {
@@ -282,11 +293,12 @@ class LongTaskModel {
     const peerIndices: number[] = Array.from(this.vpnData.latestLogs.keys()).sort((a, b) => a - b);
 
     if (peerIndices.length === 0 && Object.keys(this.vpnData.connectedIps).length > 0) {
-      // 有连接IP但暂无流量数据
       for (const index of Object.keys(this.vpnData.connectedIps)) {
         const peerIndex = Number(index);
         const ip = this.vpnData.connectedIps[peerIndex];
-        lines.push(`Peer[${peerIndex}]: ${ip}`);
+        const endpoint = this.vpnData.targetEndpoints[peerIndex];
+        const label = endpoint ? `→${endpoint}` : '';
+        lines.push(`Peer[${peerIndex}]: ${ip}${label}`);
       }
     }
 
@@ -302,19 +314,21 @@ class LongTaskModel {
       const handshakeTs = this.vpnData.lastHandshakeTime.get(peerIndex);
       const handshakeStr = handshakeTs != undefined ? formatTime(handshakeTs) : '无';
 
-      lines.push(`Peer[${peerIndex}]: ${ip} ↓${rx} ↑${tx} 握手:${handshakeStr}`);
+      const endpoint = this.vpnData.targetEndpoints[peerIndex];
+      const label = endpoint ? `→${endpoint}` : '';
+      // lines.push(`Peer[${peerIndex}]: ${ip}${label} ↓${rx} ↑${tx} 握手:${handshakeStr}`);
+      lines.push(`Peer[${peerIndex}]: ↓${rx} ↑${tx} 握手:${handshakeStr}`);
     }
 
     // 无数据时的占位提示
-    if (lines.length === 1 && state.startTime != undefined) {
-      // 只有运行时长一行，说明VPN刚启动还没有数据
+    if (lines.length <= 2 && state.startTime != undefined) {
       lines.push('等待连接数据...');
     }
 
-    return lines;
-  }
+   return lines;
+   }
 
-  /**
+   /**
    * 发布/更新自定义通知内容
    * 使用notificationManager.publish发布多行文本通知，
    * 展示VPN连接状态、流量统计、握手时间等信息。
@@ -338,10 +352,10 @@ class LongTaskModel {
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_MULTILINE,
           multiLine: {
-            title: 'WireGuard VPN 运行中',
+            title: this.vpnData.configName ? `${this.vpnData.configName} - VPN运行中` : 'WireGuard VPN 运行中',
             text: lines.length > 0 ? lines[0] : 'VPN运行中',
-            briefText: 'VPN运行中',
-            longTitle: 'WireGuard VPN',
+            briefText:  'VPN运行中',
+            longTitle:  'WireGuard VPN',
             lines: lines,
           }
         },
@@ -376,6 +390,9 @@ class LongTaskModel {
     }
     if (data.configName != undefined) {
       this.vpnData.configName = data.configName;
+    }
+    if (data.targetEndpoints != undefined) {
+      this.vpnData.targetEndpoints = data.targetEndpoints;
     }
     if (getLongTaskState().continuousTaskId != undefined) {
       this.updater.update();
