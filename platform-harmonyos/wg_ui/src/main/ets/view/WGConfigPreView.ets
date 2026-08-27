@@ -22,7 +22,9 @@ import {
   Timestamp,
   WGConfPeer,
   WGDBConf,
-  WGEventThrow
+  WGEventThrow,
+  getDnsMode,
+  dnsModeDesc
 } from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
@@ -87,6 +89,8 @@ export struct WGConfigPreViewNavDest {
         const params = data.pathInfo.param as WGConfigPreViewParams;
         this.vm.params = params;
         this.vm.loadData(params);
+        // 打开预览界面时主动查询VPN状态，获取VPN进程实际连接IP
+        WireGuard.event.publishVpnStatusQuery();
       } else {
         LLog.warn(TAG, "未得到参数！")
         this.vm.nav.pop({});
@@ -130,6 +134,7 @@ export default struct WGConfigPreView {
   aboutToDisappear(): void {
     this.throwEvent.cancel()
     this.listener.cancel()
+    this.closeListener.cancel()
   }
 
   build() {
@@ -200,8 +205,10 @@ struct InterfaceCardView {
     LLog.info(TAG, `配置发生变化: ${JSON.stringify(params)}`)
     const status = params.status
     if (status) {
-      // 更新UI线程配置
       WireGuard.statusConfig.update(status)
+    }
+    if (params.connectedIps) {
+      this.vm.connectedIps = params.connectedIps
     }
     this.vm.updateStatus()
   })
@@ -314,7 +321,7 @@ struct PeerCardView {
 
       Column({ space: ConfigColumnSpace }) {
         Text('路由的IP地址（段）').width('100%').TagStyle()
-        Text(`${this.data.allowedIPs.map((it) => `${it.address.ip}/${it.cidr ?? 32}`).join(", ")}`)
+        Text(`${this.data.allowedIPs.map((it) => `${it.address.ip}/${it.cidr ?? (it.address.isIpv4 ? 32 : 128)}`).join(", ")}`)
           .width('100%')
           .TagContentStyle()
       }
@@ -325,6 +332,41 @@ struct PeerCardView {
           Text(`[${this.data.endpoint.ipStrOrDomain}]:${this.data.endpoint.port}`).width('100%').TagContentStyle()
         } else {
           Text(`${this.data.endpoint.ipStrOrDomain}:${this.data.endpoint.port}`).width('100%').TagContentStyle()
+        }
+      }
+
+      // 仅域名时展示解析偏好（只读）与解析测试
+      if (this.data.endpoint.type == SiteUrlType.Domain) {
+        Column({ space: ConfigColumnSpace }) {
+          Text('DNS解析偏好').width('100%').TagStyle()
+          Text(dnsModeDesc(getDnsMode(this.data.endpoint))).width('100%').TagContentStyle()
+        }
+
+        Row({ space: '8vp' }) {
+          Button("解析测试", { type: ButtonType.Normal })
+            .fontSize('14fp')
+            .fontColor(Color.White)
+            .backgroundColor($r('app.color.wg_new_card_item_select_color'))
+            .borderRadius('8vp')
+            .height('32vp')
+            .padding({ left: '16vp', right: '16vp' })
+            .onClick(() => {
+              this.vm.testPeerDnsResolve(this.getUIContext(), this.index)
+            })
+          if (this.vm.peerDnsTestResult[this.index]) {
+            Text(this.vm.peerDnsTestResult[this.index])
+              .fontSize('14fp')
+              .layoutWeight(1)
+          }
+        }
+        .width('100%')
+      }
+
+      if (this.vm.isVpnOpen && this.data.endpoint.type == SiteUrlType.Domain
+        && this.vm.connectedIps[this.index]) {
+        Column({ space: ConfigColumnSpace }) {
+          Text('当前连接的 IP').width('100%').TagStyle()
+          Text(this.vm.connectedIps[this.index]).width('100%').TagContentStyle()
         }
       }
 

@@ -52,9 +52,16 @@ export function isValidDomain(domain: string): Promise<boolean>;
 export function isValidBase64Key(key: string): Promise<boolean>;
 
 /**
- * 将域名转为iP
+ * 将域名转为IP，优先解析IPv4，如果失败则解析IPv6
  */
 export function dnsToIp(domain: string): Promise<string>;
+
+/**
+ * 将域名转为IP，指定IP类型
+ * @param domain 域名
+ * @param type IP类型：4=IPv4, 6=IPv6
+ */
+export function dnsToIpWithType(domain: string, type: number): Promise<string>;
 
 /**
  * @author leojay`fu

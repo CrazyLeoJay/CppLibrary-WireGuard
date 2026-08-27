@@ -19,7 +19,7 @@ import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
-import { LLog } from 'wg_tunnel';
+import { LLog, DnsResolveMode } from 'wg_tunnel';
 
 const TAG = "编辑界面";
 
@@ -263,11 +263,51 @@ struct PeerEditCardView {
         Text(this.data.addressCheckMessage)
           .fontColor(this.data.addressVerify ? Color.Green : Color.Red)
           .fontSize('12fp')
-          .width('100%')
+          .layoutWeight(1)
           .layoutGravity(LocalizedAlignment.START)
+        Blank().layoutWeight(0)
       }
       .layoutWeight(0)
       .width("100%")
+
+      // 仅域名时显示解析偏好四选一与解析测试
+      if (this.data.isDomain) {
+        Column({ space: '8vp' }) {
+          Text("DNS解析偏好")
+            .fontSize('14fp')
+            .width('100%')
+            .layoutGravity(LocalizedAlignment.START)
+          // 单行横排四个选项卡
+          Row({ space: '8vp' }) {
+            this.buildDnsModeTab(DnsResolveMode.PREFER_IPV4, "默认IPv4")
+            this.buildDnsModeTab(DnsResolveMode.PREFER_IPV6, "优先IPv6")
+            this.buildDnsModeTab(DnsResolveMode.FORCE_IPV6, "强制IPv6")
+            this.buildDnsModeTab(DnsResolveMode.FORCE_IPV4, "强制IPv4")
+          }
+          .width('100%')
+        }
+        .width('100%')
+
+        // 解析测试按钮（随解析偏好一起显示/隐藏）
+        Row({ space: '8vp' }) {
+          Button("解析测试", { type: ButtonType.Normal })
+            .fontSize('14fp')
+            .fontColor(Color.White)
+            .backgroundColor($r('app.color.wg_new_card_item_select_color'))
+            .borderRadius('8vp')
+            .height('32vp')
+            .padding({ left: '16vp', right: '16vp' })
+            .onClick(() => {
+              this.data.testDnsResolve(this.getUIContext());
+            })
+          if (this.data.dnsTestResult.length > 0) {
+            Text(this.data.dnsTestResult)
+              .fontSize('14fp')
+              .layoutWeight(1)
+          }
+        }
+        .width('100%')
+      }
 
       WgCardTextInput({
         inputValue: this.data.allowedIpsInput!!,
@@ -283,5 +323,22 @@ struct PeerEditCardView {
       .padding({ left: 2 })
     }
     .cardBackgroundStyle()
+  }
+
+  @Builder
+  buildDnsModeTab(mode: DnsResolveMode, desc: string) {
+    Text(desc)
+      .fontSize('12fp')
+      .fontColor(this.data.dnsMode == mode ? Color.White : Color.Gray)
+      .backgroundColor(this.data.dnsMode == mode
+        ? $r('app.color.wg_new_card_item_select_color')
+        : Color.Transparent)
+      .borderRadius('8vp')
+      .padding({ top: '6vp', bottom: '6vp', left: '4vp', right: '4vp' })
+      .textAlign(TextAlign.Center)
+      .layoutWeight(1)
+      .onClick(() => {
+        this.data.dnsMode = mode;
+      })
   }
 }

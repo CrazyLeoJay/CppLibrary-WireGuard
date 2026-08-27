@@ -15,14 +15,18 @@
  */
 import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.AbilityKit';
 import { window } from '@kit.ArkUI';
-import { LLog, SubEventCancel, WireGuard } from 'wg_tunnel';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { notificationManager } from '@kit.NotificationKit';
+import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, WireGuard } from 'wg_tunnel';
 import { longTaskModel } from '../model/LongTaskModel';
 
 const TAG = "EntryAbility"
 
 export default class EntryAbility extends UIAbility {
-  // VPN状态变化监听句柄，用于取消订阅
+  // VPN状态变化监听句柄
   private vpnChangeCancel?: SubEventCancel;
+  // VPN流日志监听句柄
+  private vpnStreamLogCancel?: SubEventCancel;
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     try {
@@ -31,19 +35,22 @@ export default class EntryAbility extends UIAbility {
       LLog.error(TAG, `设置颜色模式失败: ${JSON.stringify(err)}`);
     }
     LLog.info(TAG, 'Ability onCreate');
+
+    // 初始化VPN事件监听（backgroundTaskManager要求UIAbilityContext，因此放在EntryAbility中）
+    this.initVpnListeners();
   }
 
   onDestroy(): void {
     LLog.info(TAG, 'Ability onDestroy');
-    // 确保停止长时任务并清除定时器，防止资源泄漏
-    longTaskModel.stopLongTask(this.context);
-    // 取消VPN状态监听
+    // 取消VPN状态监听和流日志监听
     this.unsubscribeVpnChange();
+    this.unsubscribeVpnStreamLogs();
+    // 停止长时任务
+    this.stopLongTaskIfNeeded();
   }
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     LLog.info(TAG, 'Ability onWindowStageCreate');
-
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         LLog.error(TAG, `加载页面失败: ${JSON.stringify(err)}`);
@@ -59,57 +66,42 @@ export default class EntryAbility extends UIAbility {
 
   onForeground(): void {
     LLog.info(TAG, 'Ability onForeground');
-
-    // ===== 步骤1：停止后台长时任务 =====
-    // 应用切换到前台，停止长时任务（同时清除进度更新定时器）
-    longTaskModel.stopLongTask(this.context);
-
-    // ===== 步骤2：同步VPN进程最新状态 =====
-    // 流程：先检测VPN进程是否运行 → 注册状态监听 → 请求查询
-    // 注册监听确保在请求查询前已准备好接收VPN进程的回复
-    this.syncVpnStatus();
   }
 
   onBackground(): void {
     LLog.info(TAG, 'Ability onBackground');
-    if (WireGuard.isRunning()) {
-      // 应用切换到后台，启动长时任务保活VPN进程
-      // 使用新API签名，启动后自动开启进度更新定时器
-      LLog.info(TAG, 'VPN运行中，启动长时任务');
-      longTaskModel.startLongTask(this.context).catch((e: Error) => {
-        LLog.error(TAG, `启动长时任务失败: ${e.message}`);
-      });
-    }
   }
 
   /**
-   * 同步VPN进程最新状态
+   * 初始化VPN事件监听并同步状态
    *
    * 流程：
-   * 1. 检测VPN Extension进程是否运行
-   * 2. 注册VPN状态变化监听（确保能收到VPN进程的回复）
-   * 3. 发送状态查询请求
+   * 1. 注册VPN状态变化监听（程序运行即注册，无需条件）
+   * 2. 注册VPN流日志监听（程序运行即注册，无需条件）
+   * 3. 检测VPN Extension进程是否运行，运行中则发送状态查询
    *
    * VPN进程收到查询后会通过 publishVpnChange() 回复最新状态，
    * 主应用进程在 subscribeVpnChange → syncFromVpnProcess() 中自动同步到本地。
    *
-   * 注意：应用启动时不需要主动启动VPN或重连，
-   * VPN进程如果仍在运行会自行维护连接状态。
+   * 长时任务生命周期由VPN状态驱动：
+   * - VPN启动 → 启动长时任务（通知显示VPN状态）
+   * - VPN停止 → 停止长时任务
    */
-  private syncVpnStatus(): void {
-    // 先检测VPN进程是否运行，避免无谓的查询请求
+  private initVpnListeners(): void {
+    // 注册VPN状态变化监听（始终注册，确保能收到VPN进程的广播）
+    this.subscribeVpnChangeIfNeeded();
+
+    // 注册VPN流日志监听（始终注册，用于通知中的流量和握手时间更新）
+    this.subscribeVpnStreamLogsIfNeeded();
+
+    // 检测VPN进程是否运行，运行中则发送查询请求同步最新状态
     WireGuard.tools.isVpnExtensionRunning().then((running: boolean) => {
-      if (!running) {
-        LLog.info(TAG, 'VPN Extension未运行，无需同步状态');
-        return;
+      if (running) {
+        WireGuard.event.publishVpnStatusQuery();
+        LLog.info(TAG, 'VPN Extension运行中，已发送状态查询请求');
+      } else {
+        LLog.info(TAG, 'VPN Extension未运行，无需查询状态');
       }
-
-      // 注册VPN状态变化监听（确保在发送查询前已就绪）
-      this.subscribeVpnChange();
-
-      // 发送查询请求，VPN进程收到后会通过publishVpnChange回复
-      WireGuard.event.publishVpnStatusQuery();
-      LLog.info(TAG, 'VPN Extension运行中，已发送状态查询请求');
     }).catch((e: Error) => {
       LLog.error(TAG, `检测VPN进程状态异常: ${e.message}`);
     });
@@ -117,19 +109,113 @@ export default class EntryAbility extends UIAbility {
 
   /**
    * 注册VPN状态变化监听
-   * 收到VPN进程广播后自动调用 syncFromVpnProcess 同步状态到本地
+   *
+   * 监听VPN线程运行状态和连接状态，据此管理通知和后台长时任务。
+   * 通过 VpnEventTag 枚举判断事件类型：
+   * - ON_CREATE / START_VPN / QUERY_STATUS → VPN线程运行中，启动保活
+   * - STOP_VPN / THROW / 其他 → VPN线程停止，取消通知并停止长时任务
    */
-  private subscribeVpnChange(): void {
-    // 避免重复注册
+  private subscribeVpnChangeIfNeeded(): void {
     if (this.vpnChangeCancel != undefined) {
       return;
     }
-    this.vpnChangeCancel = WireGuard.event.subscribeVpnChange((_params) => {
+    this.vpnChangeCancel = WireGuard.event.subscribeVpnChange((params) => {
       // subscribeVpnChange内部已自动调用syncFromVpnProcess同步到本地AppStorageV2
-      // 此处无需额外处理
-      LLog.info(TAG, '收到VPN状态变化广播，已自动同步到本地');
+      const tag = params.tag as VpnEventTag;
+      LLog.info(TAG,
+        `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}`);
+
+      if (params.vpnThreadRunning === true) {
+        // VPN线程运行中 → 启动保活
+        this.startVpnKeepAlive(tag, params.connectedIps);
+      } else {
+        // VPN线程未运行 → 停止长时任务（stopBackgroundRunning会自动取消关联通知）
+        this.stopLongTaskIfNeeded();
+      }
     });
     LLog.info(TAG, '已注册VPN状态变化监听');
+  }
+
+  /**
+   * 启动VPN保活（长时任务 + 通知）
+   *
+   * VPN线程运行中时调用。流程：
+   *   1. 防重复：长时任务已启动则跳过，仅更新通知数据
+   *   2. 启动长时任务（先启动，不等通知权限）
+   *   3. 缓存连接IP（如果有）
+   *   4. 处理通知权限
+   *      - 已授权 → 刷新通知数据（缓存的数据一次性刷出）
+   *      - 未授权 → 请求授权 → 授权后刷新通知数据
+   *      - 授权失败 → 不刷新（长时任务仍在运行，后续定时器会持续尝试）
+   *
+   * 【数据缓存机制】
+   * VPN启动后连接数据（connectedIps、streamLog）持续到来，
+   * updateVpnData/updateStreamLog 始终缓存到 vpnData 中，
+   * 但只在长时任务运行且通知已授权时才刷新通知。
+   * 用户授权后调用 publishNotification() 即可将缓存数据一次性刷出。
+   *
+   * @param tag 事件标签（VpnEventTag枚举）
+   * @param connectedIps 连接IP数据（可选，来自VPN状态广播）
+   */
+  private async startVpnKeepAlive(tag: VpnEventTag, connectedIps?: Record<number, string>): Promise<void> {
+    // 缓存连接IP（如果有）
+    if (connectedIps) {
+      longTaskModel.updateVpnData({ connectedIps: connectedIps });
+    }
+    // 1. 防重复启动：长时任务已运行则仅更新数据
+    if (longTaskModel.isRunning()) {
+      LLog.info(TAG, `长时任务已运行，仅更新通知数据: tag=${tag}`);
+      longTaskModel.publishNotification();
+      return;
+    }
+
+    // 2. 启动长时任务
+    try {
+      await longTaskModel.startLongTask(this.context);
+    } catch (e) {
+      LLog.error(TAG, `启动长时任务失败: ${(e as Error).message}`);
+      return;
+    }
+
+    // 3. 处理通知权限
+    try {
+      const enabled = await notificationManager.isNotificationEnabled();
+      if (!enabled) {
+        await notificationManager.requestEnableNotification(this.context);
+      }
+      // 权限就绪，刷新通知（将缓存数据一次性刷出）
+      longTaskModel.publishNotification();
+    } catch (e) {
+      const err = e as BusinessError;
+      LLog.warn(TAG, `通知权限处理失败: code=${err.code}, message=${err.message}`);
+      // 授权失败不刷新通知，长时任务仍在运行，后续定时器会持续尝试
+    }
+  }
+
+  /**
+   * 注册VPN流日志监听
+   *
+   * 流日志包含每个Peer的实时流量统计和握手事件，
+   * 用于更新后台通知中的流量数据和最后握手时间。
+   */
+  private subscribeVpnStreamLogsIfNeeded(): void {
+    if (this.vpnStreamLogCancel != undefined) {
+      return;
+    }
+    this.vpnStreamLogCancel = WireGuard.event.subscribeVpnStreamLogs((log: StreamLogMessage) => {
+      // 更新通知中的流量和握手数据
+      longTaskModel.updateStreamLog(log);
+    });
+    LLog.info(TAG, '已注册VPN流日志监听');
+  }
+
+  /**
+   * 停止长时任务（如正在运行）
+   *
+   * 在VPN关闭时调用，停止后台长时任务。
+   */
+  private stopLongTaskIfNeeded(): void {
+    longTaskModel.stopLongTask(this.context);
   }
 
   /**
@@ -140,6 +226,17 @@ export default class EntryAbility extends UIAbility {
       this.vpnChangeCancel.cancel();
       this.vpnChangeCancel = undefined;
       LLog.info(TAG, '已取消VPN状态变化监听');
+    }
+  }
+
+  /**
+   * 取消VPN流日志监听
+   */
+  private unsubscribeVpnStreamLogs(): void {
+    if (this.vpnStreamLogCancel != undefined) {
+      this.vpnStreamLogCancel.cancel();
+      this.vpnStreamLogCancel = undefined;
+      LLog.info(TAG, '已取消VPN流日志监听');
     }
   }
 }

@@ -24,7 +24,7 @@ import { VpnConnHelper, makeWGConf2VpnStartConfig } from '../model/WGConnect';
 import { StreamDirection } from '../../../../Index';
 import { WGEventThrowParam } from '../error/WGEventThrow';
 import WGTools from '../model/WGTools';
-import VPNEventStatusParams from '../model/entity/VPNEventStatusParams';
+import VPNEventStatusParams, { VpnEventTag } from '../model/entity/VPNEventStatusParams';
 
 const TAG = "vpn_ability"
 
@@ -43,6 +43,9 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
   override onCreate(want: Want): void {
     super.onCreate(want);
     try {
+      // 通知主应用进程：VPN线程已启动（此时连接尚未建立，用于提前请求通知授权）
+      VPNChangeHelper.onCreate()
+
       const params = want.parameters
       if (!params) {
         LLog.error(TAG, "没有配置")
@@ -281,14 +284,27 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
  * 需要先修改状态，然后通知全局VPN变化
  */
 class VPNChangeHelper {
+  /** 缓存的连接IP，stopVpn等场景无法获取config时使用上次缓存值 */
+  private static cachedConnectedIps?: Record<number, string>;
+
+  /**
+   * VPN Extension onCreate回调
+   *
+   * VPN Extension进程启动时调用，通知主应用进程VPN线程已开始运行。
+   * 此时VPN连接尚未建立，isOpen=false，但vpnThreadRunning=true表示进程已就绪。
+   * 主应用进程收到vpnThreadRunning=true后可提前请求通知授权。
+   */
+  static onCreate() {
+    WireGuard.event.publishVpnChange({ isOpen: false, tag: VpnEventTag.ON_CREATE, vpnThreadRunning: true });
+  }
+
   /**
    * 通知VPN启动成功
    *
    * 【仅在VPN进程调用】VPN连接建立成功后调用
    * 执行流程：
-   *   1. vpnStartRun(id) - 更新VPN进程本地状态：running=true, runningConfigId=id, userManuallyStopped=false
-   *   2. clearManuallyStopped() - 清除用户主动关闭标记（VPN启动成功，允许后续自动重连）
-   *   3. publishVpnChange() - 跨进程广播通知主应用进程同步上述状态
+   *   1. vpnStartRun(id) - 更新VPN进程本地状态：running=true, runningConfigId=id
+   *   2. publishVpnChange() - 跨进程广播通知主应用进程同步上述状态
    *
    * @param id 配置ID
    * @param config VPN设备配置（用于提取连接IP）
@@ -296,16 +312,15 @@ class VPNChangeHelper {
   static startVpn(id: number, config?: WGDeviceConfig) {
     // 1. 更新VPN进程本地状态（VPN进程的AppStorageV2）
     WireGuard.statusConfig.vpnStartRun(id)
-    // 2. 清除用户主动关闭标记（VPN启动成功意味着不再是"用户主动关闭"状态）
-    WireGuard.statusConfig.clearManuallyStopped()
-    // 3. 构造广播参数并发布（主应用进程会通过subscribeVpnChange→syncFromVpnProcess同步）
-    const params: VPNEventStatusParams = { isOpen: true, tag: "startVpn" }
+    // 2. 构造广播参数并发布（主应用进程会通过subscribeVpnChange→syncFromVpnProcess同步）
+    const params: VPNEventStatusParams = { isOpen: true, tag: VpnEventTag.START_VPN, vpnThreadRunning: true }
     if (config) {
       const connectedIps: Record<number, string> = {}
       config.peers.forEach((peer, index) => {
         connectedIps[index] = peer.endpoint.address.ip
       })
       params.connectedIps = connectedIps
+      VPNChangeHelper.cachedConnectedIps = connectedIps
     }
     WireGuard.event.publishVpnChange(params);
   }
@@ -317,24 +332,25 @@ class VPNChangeHelper {
    * 执行流程：
    *   1. vpnStop() - 更新VPN进程本地状态：running=false, runningConfigId=undefined
    *   2. publishVpnChange() - 跨进程广播通知主应用进程同步上述状态
-   *
-   * 【设计决策：此处不调用vpnStopByUser()】
-   * 因为 onDestroy 无法区分以下两种场景：
-   *   a) 用户主动关闭VPN → 主应用进程已在 runWGConfig(isOne=false) 中设置vpnStopByUser并广播
-   *   b) 系统强杀VPN Extension → 不应设置userManuallyStopped，因为需要自动重连
-   * 所以用户主动关闭的标记由主应用进程负责设置并通过广播同步，VPN进程只负责同步状态
    */
   static stopVpn() {
     // 1. 更新VPN进程本地状态
     WireGuard.statusConfig.vpnStop()
-    // 2. 广播通知主应用进程同步（不附带userManuallyStopped，保留主应用进程的已有标记值）
-    WireGuard.event.publishVpnChange({ isOpen: false, tag: "stop vpn" });
+    // 2. 广播通知主应用进程同步，携带缓存的connectedIps和vpnThreadRunning=false
+    const params: VPNEventStatusParams = {
+      isOpen: false, tag: VpnEventTag.STOP_VPN, vpnThreadRunning: false,
+      connectedIps: VPNChangeHelper.cachedConnectedIps,
+    }
+    WireGuard.event.publishVpnChange(params);
   }
 
   static startVpnThrow(msg?: WGEventThrowParam) {
     WireGuard.statusConfig.vpnStopThrow()
     WireGuard.event.publishVpnThrow(msg);
-    WireGuard.event.publishVpnChange({ isOpen: false, tag: "throw" });
+    WireGuard.event.publishVpnChange({
+      isOpen: false, tag: VpnEventTag.THROW, vpnThreadRunning: false,
+      connectedIps: VPNChangeHelper.cachedConnectedIps,
+    });
 
     bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT)
       .then((bundleInfo) => {
@@ -360,13 +376,17 @@ class VPNChangeHelper {
    */
   static queryStatus(config?: WGDeviceConfig) {
     const isOpen = WireGuard.statusConfig.getConfig().isOpen()
-    const params: VPNEventStatusParams = { isOpen: isOpen, tag: "Query Status" }
+    const params: VPNEventStatusParams = { isOpen: isOpen, tag: VpnEventTag.QUERY_STATUS, vpnThreadRunning: true }
     if (config) {
       const connectedIps: Record<number, string> = {}
       config.peers.forEach((peer, index) => {
         connectedIps[index] = peer.endpoint.address.ip
       })
       params.connectedIps = connectedIps
+      VPNChangeHelper.cachedConnectedIps = connectedIps
+    } else if (VPNChangeHelper.cachedConnectedIps) {
+      // 无config时使用缓存值
+      params.connectedIps = VPNChangeHelper.cachedConnectedIps
     }
     WireGuard.event.publishVpnChange(params);
   }

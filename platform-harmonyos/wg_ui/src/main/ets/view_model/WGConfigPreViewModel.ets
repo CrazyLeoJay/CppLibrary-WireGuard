@@ -16,7 +16,7 @@
  */
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard } from 'wg_tunnel';
+import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard, getDnsMode, dnsResolveByMode, formatDnsError, SiteUrlType } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
@@ -33,7 +33,9 @@ export default class WGConfigPreViewModel {
    * @returns 当前Vpn是否运行中
    */
   @Trace isVpnOpen: boolean = false;
-  @Trace logData: WGStreamLogsData = AppStorageV2.connect(WGStreamLogsData, () => new WGStreamLogsData())!
+  @Trace logData: WGStreamLogsData = AppStorageV2.connect(WGStreamLogsData, () => new WGStreamLogsData())!;
+  @Trace connectedIps: Record<number, string> = {}; // peerIndex -> 实际连接的IP地址
+  @Trace peerDnsTestResult: string[] = []; // peerIndex -> 解析测试结果（数组整体重建触发UI刷新）
   /**
    * 是否发生为获取参数异常
    */
@@ -175,6 +177,36 @@ export default class WGConfigPreViewModel {
 
   sendData(index: number): string {
     return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.sendTotal ?? 0)
+  }
+
+  /**
+   * 测试指定 Peer 的域名解析（只读测试，不修改配置）
+   * @param context UIContext，用于 Toast 提示
+   * @param index Peer 索引
+   * @throws
+   */
+  async testPeerDnsResolve(context: UIContext, index: number) {
+    const peer = this.data?.conf.peers[index];
+    if (!peer) {
+      return;
+    }
+    if (peer.endpoint.type != SiteUrlType.Domain) {
+      context.getPromptAction().showToast({ message: "对端地址不是域名，无需DNS解析" });
+      return;
+    }
+    const mode = getDnsMode(peer.endpoint);
+    try {
+      const ip = await dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode);
+      // @Trace 数组需整体重建才触发 UI 刷新
+      const newResult: string[] = this.peerDnsTestResult.slice();
+      newResult[index] = ip;
+      this.peerDnsTestResult = newResult;
+    } catch (e) {
+      const err = e instanceof Error ? e : new Error(String(e));
+      const newResult: string[] = this.peerDnsTestResult.slice();
+      newResult[index] = formatDnsError(err);
+      this.peerDnsTestResult = newResult;
+    }
   }
 
   updateLogViewData(log: StreamLogMessage, sortAes: boolean) {

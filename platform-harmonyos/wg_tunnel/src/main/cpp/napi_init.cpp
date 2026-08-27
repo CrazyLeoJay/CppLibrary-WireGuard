@@ -258,6 +258,7 @@ static napi_value NAPI_Global_isValidBase64Key(napi_env env, napi_callback_info 
         return nullptr;
     }
 }
+// 将域名转为IP，优先IPv4，失败则尝试IPv6
 static napi_value NAPI_Global_dnsToIp(napi_env env, napi_callback_info info) {
     try {
         napi_status ns;
@@ -269,11 +270,46 @@ static napi_value NAPI_Global_dnsToIp(napi_env env, napi_callback_info info) {
         }
 
         auto nvContent = NapiTools::napiGetString(env, args[0], "dnsToIp参数");
-//        bool result = WireGuard::Tools::isValidBase64Key(nvContent);
-        auto ip = WireGuard::DNS::readDomainToIp(nvContent);
-        return NapiTools::makeNapiString(env, ip.toIpStr());
+        LOG_INFO("dnsToIp: domain=%{public}s", nvContent.c_str());
+        auto ip = WireGuard::DNS::readDomainToIpPreferIpv4(nvContent);
+        auto ipStr = ip.toIpStr();
+        LOG_INFO("dnsToIp: resolved=%{public}s", ipStr.c_str());
+        return NapiTools::makeNapiString(env, ipStr);
     } catch (const std::exception &e) {
-        napi_throw_error(env, "读取异常", e.what());
+        LOG_ERROR("dnsToIp failed: %{public}s", e.what());
+        std::string errMsg = "dnsToIp: " + std::string(e.what());
+        napi_throw_error(env, nullptr, errMsg.c_str());
+        return nullptr;
+    }
+}
+
+// 将域名转为指定类型的IP（type: 4=IPv4, 6=IPv6）
+static napi_value NAPI_Global_dnsToIpWithType(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 2;
+        napi_value args[2];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0], "dnsToIpWithType参数");
+        int32_t typeVal;
+        ns = napi_get_value_int32(env, args[1], &typeVal);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("获取type参数失败");
+        }
+        auto ipType = static_cast<WireGuard::DNS::IPType>(typeVal);
+        LOG_INFO("dnsToIpWithType: domain=%{public}s, type=%{public}d", nvContent.c_str(), typeVal);
+        auto ip = WireGuard::DNS::readDomainToIp(nvContent, ipType);
+        auto ipStr = ip.toIpStr();
+        LOG_INFO("dnsToIpWithType: resolved=%{public}s", ipStr.c_str());
+        return NapiTools::makeNapiString(env, ipStr);
+    } catch (const std::exception &e) {
+        LOG_ERROR("dnsToIpWithType failed: %{public}s", e.what());
+        std::string errMsg = "dnsToIpWithType: " + std::string(e.what());
+        napi_throw_error(env, nullptr, errMsg.c_str());
         return nullptr;
     }
 }
@@ -309,6 +345,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         {      "isValidDomain", nullptr,    NAPI_Global_isValidDomain, nullptr, nullptr, nullptr, napi_default, nullptr},
         {   "isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
         {            "dnsToIp", nullptr,          NAPI_Global_dnsToIp, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {    "dnsToIpWithType", nullptr,  NAPI_Global_dnsToIpWithType, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"wgConfToOfficialStr", nullptr,  NAPI_Global_wgToOfficialStr, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);

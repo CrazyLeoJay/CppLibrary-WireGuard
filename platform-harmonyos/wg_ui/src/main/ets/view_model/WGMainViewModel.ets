@@ -199,8 +199,6 @@ export default class WGMainViewModel {
     } else {
       // 关闭时，设置为-1
       this.lastOpenConfigId = -1
-      // 用户主动关闭VPN，设置标记阻止自动重连
-      // runWGConfig(isOne=false)内部会调用vpnStopByUser()和publishVpnChange广播
     }
     try {
       const config = JSON.parse(item.data.config!) as WGDBConf

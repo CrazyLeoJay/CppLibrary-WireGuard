@@ -183,582 +183,583 @@ void DevicePeerHelper::callbackOnStreamLogListener(WireGuard::StreamLog::Message
 }
 
 namespace wg_napi {
-    napi_value Init(napi_env env, napi_value exports) {
-        napi_property_descriptor properties[] = {
-            {             "initVpn", nullptr,              InitVpn, nullptr, nullptr, nullptr, napi_default, nullptr},
-            {               "start", nullptr,                Start, nullptr, nullptr, nullptr, napi_default, nullptr},
-            {"setStreamLogListener", nullptr, setStreamLogListener, nullptr, nullptr, nullptr, napi_default, nullptr},
-            {               "close", nullptr,                Close, nullptr, nullptr, nullptr, napi_default, nullptr},
-        };
+napi_value Init(napi_env env, napi_value exports) {
+    napi_property_descriptor properties[] = {
+        {"initVpn", nullptr, InitVpn, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"start", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"setStreamLogListener", nullptr, setStreamLogListener, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, nullptr},
+    };
 
-        napi_value value;
-        auto status = napi_define_class(
-            env, "WireGuardDevice", NAPI_AUTO_LENGTH, New, nullptr, sizeof(properties) / sizeof(properties[0]),
-            properties, &value
-        );
-        if (status != napi_ok) {
-            napi_throw_error(env, nullptr, "Node-API napi_define_class fail");
-            return nullptr;
-        }
-        status = napi_set_named_property(env, exports, "WireGuardDevice", value);
-        if (status != napi_ok) {
-            napi_throw_error(env, nullptr, "Node-API napi_set_named_property fail");
-            return nullptr;
-        }
-        return exports;
-    }
-
-    napi_value New(napi_env env, napi_callback_info info) {
-        napi_value isNewTarget = nullptr;
-        napi_get_new_target(env, info, &isNewTarget);
-        napi_value jsThis;
-        size_t argc = 1;
-        napi_value args[1];
-        napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
-        if (isNewTarget != nullptr) {
-            try {
-                if (argc < 1) {
-                    throw WireGuard::WGException("构造函数需要 DeviceRegisterConfig 参数");
-                }
-                DevicePeerHelper *deviceHelper = new DevicePeerHelper();
-                deviceHelper->_env = env;
-                deviceHelper->tag = 2;
-
-                // 构造阶段即解析并保存 config
-                deviceHelper->configPtr = std::make_shared<WireGuard::DeviceRegisterConfig>();
-                GetConnectConfig(env, args[0], *deviceHelper->configPtr);
-
-                // 构造阶段即创建 Device 对象（用户要求）
-                WireGuard::Logs::print_space([&]() {
-                    auto privateKey = deviceHelper->configPtr.get()->client.private_key;
-                    auto ipStr = WireGuard::crypto::bin2B64(privateKey.data(), privateKey.size());
-                    LOG_DEBUG("构造阶段创建 Device，private key=%{public}s", ipStr.c_str());
-                });
-                deviceHelper->device = std::make_shared<WireGuard::Device>(*deviceHelper->configPtr);
-
-                napi_status status = napi_wrap(
-                    env, jsThis, reinterpret_cast<void *>(deviceHelper),
-                    [](napi_env env, void *finalize_data, void *finalize_hint) {
-                        LOG_DEBUG("DevicePeerHelper 销毁");
-                        delete reinterpret_cast<DevicePeerHelper *>(finalize_data);
-                    },
-                    nullptr, &deviceHelper->_wrapper
-                );
-                if (status != napi_ok) {
-                    delete deviceHelper; // napi_wrap 失败手动释放（其成员 shared_ptr 会自动析构 device/config）
-                    LOG_ERROR("napi wrap 保存对象失败, return code: %{public}d", status);
-                    throw WireGuard::WGException("wrap 报错 device 异常");
-                }
-            } catch (const std::exception &e) {
-                std::string error("构造 WireGuardDevice 失败: ");
-                error += e.what();
-                LOG_ERROR("%{public}s", error.data());
-                napi_throw_error(env, TAG.c_str(), error.data());
-            }
-            return jsThis;
-
-        } else {
-            // 使用 WireGuardDevice(...) 作为普通函数调用的转发
-            napi_value cons;
-            const char *constructorName = "WireGuardDevice";
-            napi_get_named_property(env, jsThis, constructorName, &cons);
-            napi_value instance;
-            napi_new_instance(env, cons, argc, args, &instance);
-            return instance;
-        }
-    }
-
-    napi_value InitVpn(napi_env env, napi_callback_info info) {
-        napi_value jsThis;
-        size_t argc = 1;
-        napi_value args[argc];
-        napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
-        LOG_DEBUG("NAPI InitVpn");
-        try {
-            DevicePeerHelper *deviceHelper = nullptr;
-            auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&deviceHelper));
-            if (state != napi_ok || deviceHelper == nullptr) {
-                throw WireGuard::WGException("对象获取失败");
-            }
-
-            // 必须先通过构造函数创建好 config 和 device（与 d.ts 签名一致）
-            if (!deviceHelper->configPtr || !deviceHelper->device) {
-                throw WireGuard::WGException("Device 尚未构造，请先使用 new WireGuardDevice(config) 创建设备");
-            }
-
-            if (argc < 1) {
-                throw WireGuard::WGException("initVpn 需要 socket fd listener 回调参数");
-            }
-
-            napi_value method_value = args[0];
-            LOG_DEBUG("NAPI InitVpn invoke listener");
-
-            NapiTools::TsfnContext context;
-            napi_status ns = napi_create_reference(env, method_value, 1, &context.callbackRef);
-            if (ns != napi_ok) {
-                throw WireGuard::WGException("napi_create_reference 失败，status=%d", ns);
-            }
-            deviceHelper->_currentListenerContext = context;
-
-            // 创建异步资源名称
-            napi_value async_resource_name;
-            napi_status nameStatus =
-                napi_create_string_utf8(env, "SocketFdListener", NAPI_AUTO_LENGTH, &async_resource_name);
-            if (nameStatus != napi_ok) {
-                throw WireGuard::WGException("创建异步资源名称失败，status=%d", nameStatus);
-            }
-
-            // 创建线程安全函数
-            napi_status tsfnStatus = napi_create_threadsafe_function(
-                env,
-                method_value,                           // ArkTS回调函数
-                nullptr,                                // 异步资源对象（可以为 nullptr）
-                async_resource_name,                    // 异步资源名称（必需，不能为 nullptr）
-                0,                                      // 无限队列
-                1,                                      // 初始线程数
-                &deviceHelper->_currentListenerContext, // 上下文
-                [](napi_env env, void *finalize_data, void *finalize_hint) {
-                    NapiTools::TsfnContext *ctx = static_cast<NapiTools::TsfnContext *>(finalize_data);
-                    if (ctx && ctx->callbackRef) {
-                        napi_delete_reference(env, ctx->callbackRef);
-                        LOG_DEBUG("回收Ref");
-                        ctx->callbackRef = nullptr;
-                    }
-                },
-                nullptr,
-                [](napi_env env, napi_value js_cb, void *, void *data) { // 主线程执行回调
-                    napi_value argv[1];
-                    int32_t *socketFd = static_cast<int32_t *>(data);
-                    LOG_DEBUG("调用 socket fd callback fd=%{public}d", *socketFd);
-                    napi_status status = napi_create_int32(env, *socketFd, &argv[0]);
-                    status = napi_call_function(env, nullptr, js_cb, 1, argv, nullptr);
-                    delete socketFd; // 释放数据
-                    if (status != napi_ok) {
-                        LOG_ERROR("socket fd 回调失败，status=%d", status);
-                    }
-                },
-                &deviceHelper->_currentSocketFdListener
-            );
-
-            if (tsfnStatus != napi_ok || deviceHelper->_currentSocketFdListener == nullptr) {
-                throw WireGuard::WGException("创建线程安全函数失败，status=%d", tsfnStatus);
-            }
-            LOG_DEBUG("线程安全函数创建成功");
-            std::function<void(int &)> onChange{[deviceHelper](int fd) {
-                try {
-                    LOG_DEBUG("接口接收到SocketFD更换 fd=%{public}d", fd);
-                    deviceHelper->callbackOnSocketChangeListener(fd);
-                    LOG_DEBUG("接口接收到SocketFD更换 fd=%{public}d finish", fd);
-                } catch (const std::exception &e) {
-                    LOG_ERROR("回调异常：%s", e.what());
-                }
-            }};
-            LOG_INFO("wireGuard initSocket");
-            // 复用构造阶段已经创建好的 device
-            uint32_t sockFd = deviceHelper->device->initSocketStart(onChange);
-            LOG_INFO("wireGuard initSocket invoke socket_fd: %{public}d", sockFd);
-            napi_value tunnelFd;
-            napi_create_int64(env, sockFd, &tunnelFd);
-            return tunnelFd;
-        } catch (const std::exception &e) {
-            std::string error("初始化异常: ");
-            error += (e.what());
-            LOG_ERROR("%{public}s", error.data());
-            napi_throw_error(env, TAG.data(), error.data());
-            return nullptr;
-        }
-    }
-
-    napi_value Start(napi_env env, napi_callback_info info) {
-        napi_value jsThis;
-        size_t argc = 1;
-        napi_value args[argc];
-        napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
-
-        // 获取网卡 fd
-        napi_value nvFd = args[0];
-        uint32_t fd{};
-        napi_get_value_uint32(env, nvFd, &fd);
-
-        DevicePeerHelper *device;
-        auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&device));
-        if (state != napi_ok || device == nullptr) {
-            throw WireGuard::WGException("对象获取失败");
-        }
-        try {
-            LOG_INFO("wireGuard start fd=%{public}d", fd);
-            if (device) {
-                LOG_INFO("wireGuard start getClient");
-                auto currentDevice = device->device;
-                if (currentDevice) {
-                    currentDevice->start(fd);
-                    LOG_INFO("wireGuard start invoke");
-                } else {
-                    throw WireGuard::WGException("currentClient 客户端对象为获取到");
-                }
-            } else {
-                throw WireGuard::WGException("client 客户端对象为获取到");
-            }
-        } catch (const std::exception &e) {
-            std::string error("start 异常: ");
-            error += (e.what());
-            LOG_ERROR("%{public}s", error.data());
-            napi_throw_error(env, TAG.data(), error.data());
-            return nullptr;
-        }
-        napi_value result;
-        napi_get_undefined(env, &result);
-        return result;
-    }
-
-    napi_value setStreamLogListener(napi_env env, napi_callback_info info) {
-        napi_value jsThis;
-        size_t argc = 1;
-        napi_value args[argc];
-        napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
-        LOG_DEBUG("NAPI setStreamLogListener");
-        try {
-            // 通过napi_unwrap将jsThis之前绑定的C++对象取出，并对其进行操作
-            DevicePeerHelper *deviceHelper = nullptr;
-            auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&deviceHelper));
-            if (state != napi_ok || deviceHelper == nullptr) {
-                throw WireGuard::WGException("对象获取失败");
-            }
-
-            napi_value nv_method_value = args[0];
-            NapiTools::TsfnContext context;
-            napi_create_reference(env, nv_method_value, 1, &context.callbackRef);
-            deviceHelper->_currentStreamLogListenerContext = context;
-
-            // 创建异步资源名称（必需，不能为 nullptr）
-            napi_value async_resource_name;
-            napi_status nameStatus =
-                napi_create_string_utf8(env, "StreamLogListener", NAPI_AUTO_LENGTH, &async_resource_name);
-            if (nameStatus != napi_ok) {
-                throw WireGuard::WGException("创建异步资源名称失败，status=%d", nameStatus);
-            }
-
-            napi_status tsfnStatus = napi_create_threadsafe_function(
-                env, nv_method_value, nullptr, async_resource_name, 0, 1,
-                &deviceHelper->_currentStreamLogListenerContext,
-                [](napi_env env, void *finalize_data, void *finalize_hint) {
-                    NapiTools::TsfnContext *ctx = static_cast<NapiTools::TsfnContext *>(finalize_data);
-                    if (ctx && ctx->callbackRef) {
-                        napi_delete_reference(env, ctx->callbackRef);
-                        LOG_DEBUG("回收Ref");
-                        ctx->callbackRef = nullptr;
-                    }
-                },
-                nullptr,
-                [](napi_env env, napi_value js_cb, void *, void *data) { // 主线程执行回调
-                    napi_value argv[1];
-                    auto *msg = static_cast<WireGuard::StreamLog::Message *>(data);
-                    argv[0] = NapiTools::makeStreamLogMessage(env, *msg);
-                    napi_status status = napi_call_function(env, nullptr, js_cb, 1, argv, nullptr);
-                    delete msg; // 释放堆上的 Message
-                    if (status != napi_ok) {
-                        LOG_ERROR("StreamLog TSFN 回调失败，status=%d", status);
-                    }
-                },
-                &deviceHelper->_currentStreamLogListener
-            );
-            // 检查线程安全函数是否创建成功
-            if (tsfnStatus != napi_ok || deviceHelper->_currentStreamLogListener == nullptr) {
-                throw WireGuard::WGException("创建线程安全函数失败，status=%d", tsfnStatus);
-            }
-            LOG_DEBUG("线程安全函数创建成功");
-            if (!deviceHelper->device) {
-                throw WireGuard::WGException("device is null");
-            }
-            deviceHelper->device->setStreamLog([deviceHelper](WireGuard::StreamLog::Message msg) {
-                try {
-                    deviceHelper->callbackOnStreamLogListener(msg);
-                } catch (const std::exception &e) {
-                    LOG_ERROR("回调异常：%s", e.what());
-                }
-            });
-        } catch (const std::exception &e) {
-            std::string error("初始化异常: ");
-            error += (e.what());
-            LOG_ERROR("%{public}s", error.data());
-            napi_throw_error(env, TAG.data(), error.data());
-        }
+    napi_value value;
+    auto status = napi_define_class(env, "WireGuardDevice", NAPI_AUTO_LENGTH, New, nullptr,
+                                    sizeof(properties) / sizeof(properties[0]), properties, &value);
+    if (status != napi_ok) {
+        napi_throw_error(env, nullptr, "Node-API napi_define_class fail");
         return nullptr;
     }
+    status = napi_set_named_property(env, exports, "WireGuardDevice", value);
+    if (status != napi_ok) {
+        napi_throw_error(env, nullptr, "Node-API napi_set_named_property fail");
+        return nullptr;
+    }
+    return exports;
+}
 
-    napi_value Close(napi_env env, napi_callback_info info) {
-        napi_value jsThis;
-        napi_get_cb_info(env, info, nullptr, nullptr, &jsThis, nullptr);
+napi_value New(napi_env env, napi_callback_info info) {
+    napi_value isNewTarget = nullptr;
+    napi_get_new_target(env, info, &isNewTarget);
+    napi_value jsThis;
+    size_t argc = 1;
+    napi_value args[1];
+    napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
+    if (isNewTarget != nullptr) {
+        try {
+            if (argc < 1) {
+                throw WireGuard::WGException("构造函数需要 DeviceRegisterConfig 参数");
+            }
+            DevicePeerHelper *deviceHelper = new DevicePeerHelper();
+            deviceHelper->_env = env;
+            deviceHelper->tag = 2;
 
-        DevicePeerHelper *device;
-        auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&device));
-        if (state != napi_ok || device == nullptr) {
+            // 构造阶段即解析并保存 config
+            deviceHelper->configPtr = std::make_shared<WireGuard::DeviceRegisterConfig>();
+            GetConnectConfig(env, args[0], *deviceHelper->configPtr);
+
+            // 构造阶段即创建 Device 对象（用户要求）
+            WireGuard::Logs::print_space([&]() {
+                auto privateKey = deviceHelper->configPtr.get()->client.private_key;
+                auto ipStr = WireGuard::crypto::bin2B64(privateKey.data(), privateKey.size());
+                LOG_DEBUG("构造阶段创建 Device，private key=%{public}s", ipStr.c_str());
+            });
+            deviceHelper->device = std::make_shared<WireGuard::Device>(*deviceHelper->configPtr);
+
+            napi_status status = napi_wrap(
+                env, jsThis, reinterpret_cast<void *>(deviceHelper),
+                [](napi_env env, void *finalize_data, void *finalize_hint) {
+                    LOG_DEBUG("DevicePeerHelper 销毁");
+                    delete reinterpret_cast<DevicePeerHelper *>(finalize_data);
+                },
+                nullptr, &deviceHelper->_wrapper);
+            if (status != napi_ok) {
+                delete deviceHelper; // napi_wrap 失败手动释放（其成员 shared_ptr 会自动析构 device/config）
+                LOG_ERROR("napi wrap 保存对象失败, return code: %{public}d", status);
+                throw WireGuard::WGException("wrap 报错 device 异常");
+            }
+        } catch (const std::exception &e) {
+            std::string error("构造 WireGuardDevice 失败: ");
+            error += e.what();
+            LOG_ERROR("%{public}s", error.data());
+            napi_throw_error(env, TAG.c_str(), error.data());
+        }
+        return jsThis;
+
+    } else {
+        // 使用 WireGuardDevice(...) 作为普通函数调用的转发
+        napi_value cons;
+        const char *constructorName = "WireGuardDevice";
+        napi_get_named_property(env, jsThis, constructorName, &cons);
+        napi_value instance;
+        napi_new_instance(env, cons, argc, args, &instance);
+        return instance;
+    }
+}
+
+napi_value InitVpn(napi_env env, napi_callback_info info) {
+    napi_value jsThis;
+    size_t argc = 1;
+    napi_value args[argc];
+    napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
+    LOG_DEBUG("NAPI InitVpn");
+    try {
+        DevicePeerHelper *deviceHelper = nullptr;
+        auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&deviceHelper));
+        if (state != napi_ok || deviceHelper == nullptr) {
             throw WireGuard::WGException("对象获取失败");
         }
-        try {
-            if (!device) {
-                throw WireGuard::WGException("client 客户端对象为获取到");
+
+        // 必须先通过构造函数创建好 config 和 device（与 d.ts 签名一致）
+        if (!deviceHelper->configPtr || !deviceHelper->device) {
+            throw WireGuard::WGException("Device 尚未构造，请先使用 new WireGuardDevice(config) 创建设备");
+        }
+
+        if (argc < 1) {
+            throw WireGuard::WGException("initVpn 需要 socket fd listener 回调参数");
+        }
+
+        napi_value method_value = args[0];
+        LOG_DEBUG("NAPI InitVpn invoke listener");
+
+        NapiTools::TsfnContext context;
+        napi_status ns = napi_create_reference(env, method_value, 1, &context.callbackRef);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi_create_reference 失败，status=%d", ns);
+        }
+        deviceHelper->_currentListenerContext = context;
+
+        // 创建异步资源名称
+        napi_value async_resource_name;
+        napi_status nameStatus =
+            napi_create_string_utf8(env, "SocketFdListener", NAPI_AUTO_LENGTH, &async_resource_name);
+        if (nameStatus != napi_ok) {
+            throw WireGuard::WGException("创建异步资源名称失败，status=%d", nameStatus);
+        }
+
+        // 创建线程安全函数
+        napi_status tsfnStatus = napi_create_threadsafe_function(
+            env,
+            method_value,                           // ArkTS回调函数
+            nullptr,                                // 异步资源对象（可以为 nullptr）
+            async_resource_name,                    // 异步资源名称（必需，不能为 nullptr）
+            0,                                      // 无限队列
+            1,                                      // 初始线程数
+            &deviceHelper->_currentListenerContext, // 上下文
+            [](napi_env env, void *finalize_data, void *finalize_hint) {
+                NapiTools::TsfnContext *ctx = static_cast<NapiTools::TsfnContext *>(finalize_data);
+                if (ctx && ctx->callbackRef) {
+                    napi_delete_reference(env, ctx->callbackRef);
+                    LOG_DEBUG("回收Ref");
+                    ctx->callbackRef = nullptr;
+                }
+            },
+            nullptr,
+            [](napi_env env, napi_value js_cb, void *, void *data) { // 主线程执行回调
+                napi_value argv[1];
+                int32_t *socketFd = static_cast<int32_t *>(data);
+                LOG_DEBUG("调用 socket fd callback fd=%{public}d", *socketFd);
+                napi_status status = napi_create_int32(env, *socketFd, &argv[0]);
+                status = napi_call_function(env, nullptr, js_cb, 1, argv, nullptr);
+                delete socketFd; // 释放数据
+                if (status != napi_ok) {
+                    LOG_ERROR("socket fd 回调失败，status=%d", status);
+                }
+            },
+            &deviceHelper->_currentSocketFdListener);
+
+        if (tsfnStatus != napi_ok || deviceHelper->_currentSocketFdListener == nullptr) {
+            throw WireGuard::WGException("创建线程安全函数失败，status=%d", tsfnStatus);
+        }
+        LOG_DEBUG("线程安全函数创建成功");
+        std::function<void(int &)> onChange{[deviceHelper](int fd) {
+            try {
+                LOG_DEBUG("接口接收到SocketFD更换 fd=%{public}d", fd);
+                deviceHelper->callbackOnSocketChangeListener(fd);
+                LOG_DEBUG("接口接收到SocketFD更换 fd=%{public}d finish", fd);
+            } catch (const std::exception &e) {
+                LOG_ERROR("回调异常：%s", e.what());
             }
-            device->close();
-            LOG_INFO("wireGuard close invoke");
-        } catch (const std::exception &e) {
-            std::string error("close 异常: ");
-            error += (e.what());
-            LOG_ERROR("%{public}s", error.data());
-            napi_throw_error(env, TAG.data(), error.data());
-            return nullptr;
-        }
-        napi_value result;
-        napi_get_undefined(env, &result);
-        return result;
+        }};
+        LOG_INFO("wireGuard initSocket");
+        // 复用构造阶段已经创建好的 device
+        uint32_t sockFd = deviceHelper->device->initSocketStart(onChange);
+        LOG_INFO("wireGuard initSocket invoke socket_fd: %{public}d", sockFd);
+        napi_value tunnelFd;
+        napi_create_int64(env, sockFd, &tunnelFd);
+        return tunnelFd;
+    } catch (const std::exception &e) {
+        std::string error("初始化异常: ");
+        error += (e.what());
+        LOG_ERROR("%{public}s", error.data());
+        napi_throw_error(env, TAG.data(), error.data());
+        return nullptr;
     }
+}
 
+napi_value Start(napi_env env, napi_callback_info info) {
+    napi_value jsThis;
+    size_t argc = 1;
+    napi_value args[argc];
+    napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
 
-    /*
-     * Struct结构体、Class类获取
-     */
+    // 获取网卡 fd
+    napi_value nvFd = args[0];
+    uint32_t fd{};
+    napi_get_value_uint32(env, nvFd, &fd);
 
-    int64_t getPropInt64_t(napi_env env, napi_value obj, const std::string propertyName) {
-        napi_status status;
-        napi_value listenerPort;
-        status = napi_get_named_property(env, obj, propertyName.c_str(), &listenerPort);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
-        }
-        int64_t result = 0;
-        status = napi_get_value_int64(env, listenerPort, &result);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 的 int64 值失败", propertyName.c_str());
-        }
-        return result;
+    DevicePeerHelper *device;
+    auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&device));
+    if (state != napi_ok || device == nullptr) {
+        throw WireGuard::WGException("对象获取失败");
     }
-    uint32_t getPropUint32_t(napi_env env, napi_value obj, const std::string propertyName) {
-        napi_status status;
-        napi_value listenerPort;
-        status = napi_get_named_property(env, obj, propertyName.c_str(), &listenerPort);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
+    try {
+        LOG_INFO("wireGuard start fd=%{public}d", fd);
+        if (device) {
+            LOG_INFO("wireGuard start getClient");
+            auto currentDevice = device->device;
+            if (currentDevice) {
+                currentDevice->start(fd);
+                LOG_INFO("wireGuard start invoke");
+            } else {
+                throw WireGuard::WGException("currentClient 客户端对象为获取到");
+            }
+        } else {
+            throw WireGuard::WGException("client 客户端对象为获取到");
         }
-        uint32_t result = 0;
-        status = napi_get_value_uint32(env, listenerPort, &result);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 的 uint32 值失败", propertyName.c_str());
-        }
-        return result;
+    } catch (const std::exception &e) {
+        std::string error("start 异常: ");
+        error += (e.what());
+        LOG_ERROR("%{public}s", error.data());
+        napi_throw_error(env, TAG.data(), error.data());
+        return nullptr;
     }
+    napi_value result;
+    napi_get_undefined(env, &result);
+    return result;
+}
 
-    bool isHasProp(napi_env env, napi_value arg, const std::string propertyName) {
-        bool result = false;
-        napi_status status = napi_has_named_property(env, arg, propertyName.c_str(), &result);
-        if (status != napi_ok) {
-            return false;
+napi_value setStreamLogListener(napi_env env, napi_callback_info info) {
+    napi_value jsThis;
+    size_t argc = 1;
+    napi_value args[argc];
+    napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
+    LOG_DEBUG("NAPI setStreamLogListener");
+    try {
+        // 通过napi_unwrap将jsThis之前绑定的C++对象取出，并对其进行操作
+        DevicePeerHelper *deviceHelper = nullptr;
+        auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&deviceHelper));
+        if (state != napi_ok || deviceHelper == nullptr) {
+            throw WireGuard::WGException("对象获取失败");
         }
-        return result;
+
+        napi_value nv_method_value = args[0];
+        NapiTools::TsfnContext context;
+        napi_create_reference(env, nv_method_value, 1, &context.callbackRef);
+        deviceHelper->_currentStreamLogListenerContext = context;
+
+        // 创建异步资源名称（必需，不能为 nullptr）
+        napi_value async_resource_name;
+        napi_status nameStatus =
+            napi_create_string_utf8(env, "StreamLogListener", NAPI_AUTO_LENGTH, &async_resource_name);
+        if (nameStatus != napi_ok) {
+            throw WireGuard::WGException("创建异步资源名称失败，status=%d", nameStatus);
+        }
+
+        napi_status tsfnStatus = napi_create_threadsafe_function(
+            env, nv_method_value, nullptr, async_resource_name, 0, 1, &deviceHelper->_currentStreamLogListenerContext,
+            [](napi_env env, void *finalize_data, void *finalize_hint) {
+                NapiTools::TsfnContext *ctx = static_cast<NapiTools::TsfnContext *>(finalize_data);
+                if (ctx && ctx->callbackRef) {
+                    napi_delete_reference(env, ctx->callbackRef);
+                    LOG_DEBUG("回收Ref");
+                    ctx->callbackRef = nullptr;
+                }
+            },
+            nullptr,
+            [](napi_env env, napi_value js_cb, void *, void *data) { // 主线程执行回调
+                napi_value argv[1];
+                auto *msg = static_cast<WireGuard::StreamLog::Message *>(data);
+                argv[0] = NapiTools::makeStreamLogMessage(env, *msg);
+                napi_status status = napi_call_function(env, nullptr, js_cb, 1, argv, nullptr);
+                delete msg; // 释放堆上的 Message
+                if (status != napi_ok) {
+                    LOG_ERROR("StreamLog TSFN 回调失败，status=%d", status);
+                }
+            },
+            &deviceHelper->_currentStreamLogListener);
+        // 检查线程安全函数是否创建成功
+        if (tsfnStatus != napi_ok || deviceHelper->_currentStreamLogListener == nullptr) {
+            throw WireGuard::WGException("创建线程安全函数失败，status=%d", tsfnStatus);
+        }
+        LOG_DEBUG("线程安全函数创建成功");
+        if (!deviceHelper->device) {
+            throw WireGuard::WGException("device is null");
+        }
+        deviceHelper->device->setStreamLog([deviceHelper](WireGuard::StreamLog::Message msg) {
+            try {
+                deviceHelper->callbackOnStreamLogListener(msg);
+            } catch (const std::exception &e) {
+                LOG_ERROR("回调异常：%s", e.what());
+            }
+        });
+    } catch (const std::exception &e) {
+        std::string error("初始化异常: ");
+        error += (e.what());
+        LOG_ERROR("%{public}s", error.data());
+        napi_throw_error(env, TAG.data(), error.data());
     }
+    return nullptr;
+}
 
-    std::string getPropString(napi_env env, napi_value obj, const std::string propertyName) {
-        napi_status status;
-        napi_value nValue;
-        status = napi_get_named_property(env, obj, propertyName.c_str(), &nValue);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
-        }
-        size_t len = 0;
-        status = napi_get_value_string_utf8(env, nValue, nullptr, 0, &len);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 的字符串长度失败", propertyName.c_str());
-        }
-        std::unique_ptr<char[]> buf(new char[len + 1]);
-        status = napi_get_value_string_utf8(env, nValue, buf.get(), len + 1, &len);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 的字符串内容失败", propertyName.c_str());
-        }
-        return std::string(buf.get(), len);
+napi_value Close(napi_env env, napi_callback_info info) {
+    napi_value jsThis;
+    napi_get_cb_info(env, info, nullptr, nullptr, &jsThis, nullptr);
+
+    DevicePeerHelper *device;
+    auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&device));
+    if (state != napi_ok || device == nullptr) {
+        throw WireGuard::WGException("对象获取失败");
     }
-
-    bool getPropBool(napi_env env, napi_value obj, const std::string propertyName) {
-        napi_status status;
-        napi_value listenerPort;
-        status = napi_get_named_property(env, obj, propertyName.c_str(), &listenerPort);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
+    try {
+        if (!device) {
+            throw WireGuard::WGException("client 客户端对象为获取到");
         }
-        bool result = false;
-        status = napi_get_value_bool(env, listenerPort, &result);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 的 bool 值失败", propertyName.c_str());
-        }
-        return result;
+        device->close();
+        LOG_INFO("wireGuard close invoke");
+    } catch (const std::exception &e) {
+        std::string error("close 异常: ");
+        error += (e.what());
+        LOG_ERROR("%{public}s", error.data());
+        napi_throw_error(env, TAG.data(), error.data());
+        return nullptr;
     }
+    napi_value result;
+    napi_get_undefined(env, &result);
+    return result;
+}
 
-    void GetConnectConfig(napi_env env, napi_value arg, WireGuard::DeviceRegisterConfig &config) {
-        napi_value nvDevice;
-        napi_get_named_property(env, arg, "device", &nvDevice);
-        GetDeviceConfig(env, nvDevice, config.client);
 
-        // 获取 peers
-        std::vector<WireGuard::PeerConfig> peers{};
-        auto findItemCallback = [](napi_env env, napi_value nvItem, uint32_t index) {
-            WireGuard::PeerConfig peer{};
-            GetPeer(env, nvItem, peer);
-            return peer;
-        };
-        getForArray<WireGuard::PeerConfig>(env, arg, "peers", peers, findItemCallback);
-        if (peers.size() == 0) {
-            throw WireGuard::WGException("没有Peer无法通信，至少有一个Peer");
-        }
-        config.peers = std::move(peers);
+/*
+ * Struct结构体、Class类获取
+ */
+
+int64_t getPropInt64_t(napi_env env, napi_value obj, const std::string propertyName) {
+    napi_status status;
+    napi_value listenerPort;
+    status = napi_get_named_property(env, obj, propertyName.c_str(), &listenerPort);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
     }
+    int64_t result = 0;
+    status = napi_get_value_int64(env, listenerPort, &result);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 的 int64 值失败", propertyName.c_str());
+    }
+    return result;
+}
+uint32_t getPropUint32_t(napi_env env, napi_value obj, const std::string propertyName) {
+    napi_status status;
+    napi_value listenerPort;
+    status = napi_get_named_property(env, obj, propertyName.c_str(), &listenerPort);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
+    }
+    uint32_t result = 0;
+    status = napi_get_value_uint32(env, listenerPort, &result);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 的 uint32 值失败", propertyName.c_str());
+    }
+    return result;
+}
 
-    void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &device) {
-        device.device_name = getPropString(env, arg, "deviceName");
-        // 获取 privateKey
-        device.private_key = getPropToDecodeBase64WGKey(env, arg, "privateKey");
+bool isHasProp(napi_env env, napi_value arg, const std::string propertyName) {
+    bool result = false;
+    napi_status status = napi_has_named_property(env, arg, propertyName.c_str(), &result);
+    if (status != napi_ok) {
+        return false;
+    }
+    return result;
+}
 
-        if (isHasProp(env, arg, "listenerPort")) {
-            // 获取 listenerPort
+std::string getPropString(napi_env env, napi_value obj, const std::string propertyName) {
+    napi_status status;
+    napi_value nValue;
+    status = napi_get_named_property(env, obj, propertyName.c_str(), &nValue);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
+    }
+    size_t len = 0;
+    status = napi_get_value_string_utf8(env, nValue, nullptr, 0, &len);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 的字符串长度失败", propertyName.c_str());
+    }
+    std::unique_ptr<char[]> buf(new char[len + 1]);
+    status = napi_get_value_string_utf8(env, nValue, buf.get(), len + 1, &len);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 的字符串内容失败", propertyName.c_str());
+    }
+    return std::string(buf.get(), len);
+}
+
+bool getPropBool(napi_env env, napi_value obj, const std::string propertyName) {
+    napi_status status;
+    napi_value listenerPort;
+    status = napi_get_named_property(env, obj, propertyName.c_str(), &listenerPort);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
+    }
+    bool result = false;
+    status = napi_get_value_bool(env, listenerPort, &result);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 的 bool 值失败", propertyName.c_str());
+    }
+    return result;
+}
+
+void GetConnectConfig(napi_env env, napi_value arg, WireGuard::DeviceRegisterConfig &config) {
+    napi_value nvDevice;
+    napi_get_named_property(env, arg, "device", &nvDevice);
+    GetDeviceConfig(env, nvDevice, config.client);
+
+    // 获取 peers
+    std::vector<WireGuard::PeerConfig> peers{};
+    auto findItemCallback = [](napi_env env, napi_value nvItem, uint32_t index) {
+        WireGuard::PeerConfig peer{};
+        GetPeer(env, nvItem, peer);
+        return peer;
+    };
+    getForArray<WireGuard::PeerConfig>(env, arg, "peers", peers, findItemCallback);
+    if (peers.size() == 0) {
+        throw WireGuard::WGException("没有Peer无法通信，至少有一个Peer");
+    }
+    config.peers = std::move(peers);
+}
+
+void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &device) {
+    device.device_name = getPropString(env, arg, "deviceName");
+    // 获取 privateKey
+    device.private_key = getPropToDecodeBase64WGKey(env, arg, "privateKey");
+
+    if (isHasProp(env, arg, "listenerPort")) {
+        // 获取 listenerPort
+        try {
             auto port = getPropUint32_t(env, arg, "listenerPort");
             if (port > 0 && port < 65535) {
                 device.listener_port = std::make_shared<uint32_t>(port);
             }
-        }
-
-        if (isHasProp(env, arg, "bindAddress")) {
-            napi_value nvIp;
-            napi_get_named_property(env, arg, "bindAddress", &nvIp);
-            device.bind_address = std::make_shared<WireGuard::IPAddress>();
-            GetIPAddress(env, nvIp, *device.bind_address);
+        } catch (const std::exception &e) {
+            LOG_ERROR("没有配置 listenerPort， 获取异常: %{public}s", e.what());
         }
     }
-    void GetPeer(napi_env env, napi_value arg, WireGuard::PeerConfig &peer) {
-        // publicKey
-        peer.public_key = getPropToDecodeBase64WGKey(env, arg, "publicKey");
 
-        // allowedIps - ✅ 使用局部变量
-        std::vector<WireGuard::IpAddressArea> allowedIps;
-        auto findItemCallback = [](napi_env env, napi_value nvItem, uint32_t index) {
-            WireGuard::IpAddressArea allowedIP;
-            GetIpAddressArea(env, nvItem, allowedIP);
-            return allowedIP;
-        };
-        getForArray<WireGuard::IpAddressArea>(env, arg, "allowedIps", allowedIps, findItemCallback);
-        peer.allowedIps = std::move(allowedIps);
+    if (isHasProp(env, arg, "bindAddress")) {
+        napi_value nvIp;
+        napi_get_named_property(env, arg, "bindAddress", &nvIp);
+        device.bind_address = std::make_shared<WireGuard::IPAddress>();
+        GetIPAddress(env, nvIp, *device.bind_address);
+    }
+}
+void GetPeer(napi_env env, napi_value arg, WireGuard::PeerConfig &peer) {
+    // publicKey
+    peer.public_key = getPropToDecodeBase64WGKey(env, arg, "publicKey");
 
-        // endpoint
-        napi_value nvEndpoint;
-        napi_get_named_property(env, arg, "endpoint", &nvEndpoint);
-        GetEndpoint(env, nvEndpoint, peer.endpoint);
+    // allowedIps - ✅ 使用局部变量
+    std::vector<WireGuard::IpAddressArea> allowedIps;
+    auto findItemCallback = [](napi_env env, napi_value nvItem, uint32_t index) {
+        WireGuard::IpAddressArea allowedIP;
+        GetIpAddressArea(env, nvItem, allowedIP);
+        return allowedIP;
+    };
+    getForArray<WireGuard::IpAddressArea>(env, arg, "allowedIps", allowedIps, findItemCallback);
+    peer.allowedIps = std::move(allowedIps);
 
-        // preSharedKey
-        if (isHasProp(env, arg, "preSharedKey")) {
-            try {
-                auto result = getPropToDecodeBase64WGKey(env, arg, "preSharedKey");
-                peer.pre_share_key = std::make_shared<WireGuard::SymmetricKey>(result);
-            } catch (const std::exception &e) {
-                LOG_DEBUG("preSharedKey 未获取到");
-            }
-        } else {
+    // endpoint
+    napi_value nvEndpoint;
+    napi_get_named_property(env, arg, "endpoint", &nvEndpoint);
+    GetEndpoint(env, nvEndpoint, peer.endpoint);
+
+    // preSharedKey
+    if (isHasProp(env, arg, "preSharedKey")) {
+        try {
+            auto result = getPropToDecodeBase64WGKey(env, arg, "preSharedKey");
+            peer.pre_share_key = std::make_shared<WireGuard::SymmetricKey>(result);
+        } catch (const std::exception &e) {
             LOG_DEBUG("preSharedKey 未获取到");
         }
-        // keepaliveInterval
-        if (isHasProp(env, arg, "keepaliveInterval")) {
-            peer.keepaliveInterval = getPropUint32_t(env, arg, "keepaliveInterval");
+    } else {
+        LOG_DEBUG("preSharedKey 未获取到");
+    }
+    // keepaliveInterval
+    if (isHasProp(env, arg, "keepaliveInterval")) {
+        peer.keepaliveInterval = getPropUint32_t(env, arg, "keepaliveInterval");
+    }
+}
+
+void GetEndpoint(napi_env env, napi_value arg, WireGuard::Endpoint &endpoint) {
+    // 获取地址
+    napi_value nvAddress;
+    napi_get_named_property(env, arg, "address", &nvAddress);
+    GetIPAddress(env, nvAddress, endpoint.address);
+    // 获取端口
+    endpoint.port = getPropInt64_t(env, arg, "port");
+}
+
+void setIp(WireGuard::IPAddress &ipAddress, bool isIpv4, std::string ip) {
+    if (isIpv4) {
+        ipAddress.family = WireGuard::IPAddress::IPv4;
+        // 大端序方式保存
+        if (inet_pton(AF_INET, ip.c_str(), &ipAddress.ip.ipv4) <= 0) {
+            throw std::invalid_argument("Ipv4地址不合法：" + ip);
+        }
+    } else {
+        ipAddress.family = WireGuard::IPAddress::IPv6;
+        // 防御性处理：去除 IPv6 地址两端的方括号（如 [2001:db8::1]）
+        // inet_pton 不接受带方括号的 IPv6 格式
+        if (ip.size() >= 2 && ip.front() == '[' && ip.back() == ']') {
+            ip = ip.substr(1, ip.size() - 2);
+        }
+        if (inet_pton(AF_INET6, ip.c_str(), &ipAddress.ip.ipv6) <= 0) {
+            throw std::invalid_argument("Ipv6地址不合法：" + ip);
         }
     }
+}
+void GetIpAddressArea(napi_env env, napi_value arg, WireGuard::IpAddressArea &ipArea) {
+    napi_value nvIpAddress;
+    napi_get_named_property(env, arg, "address", &nvIpAddress);
+    GetIPAddress(env, nvIpAddress, ipArea.address);
 
-    void GetEndpoint(napi_env env, napi_value arg, WireGuard::Endpoint &endpoint) {
-        // 获取地址
-        napi_value nvAddress;
-        napi_get_named_property(env, arg, "address", &nvAddress);
-        GetIPAddress(env, nvAddress, endpoint.address);
-        // 获取端口
-        endpoint.port = getPropInt64_t(env, arg, "port");
-    }
-
-    void setIp(WireGuard::IPAddress &ipAddress, bool isIpv4, std::string ip) {
-        if (isIpv4) {
-            ipAddress.family = WireGuard::IPAddress::IPv4;
-            // 大端序方式保存
-            if (inet_pton(AF_INET, ip.c_str(), &ipAddress.ip.ipv4) <= 0) {
-                throw std::invalid_argument("Ipv4地址不合法：" + ip);
-            }
-        } else {
-            ipAddress.family = WireGuard::IPAddress::IPv6;
-            if (inet_pton(AF_INET6, ip.c_str(), &ipAddress.ip.ipv6) <= 0) {
-                throw std::invalid_argument("Ipv6地址不合法：" + ip);
-            }
+    bool hasCidr;
+    napi_has_named_property(env, arg, "cidr", &hasCidr);
+    if (hasCidr) {
+        auto cidr = getPropUint32_t(env, arg, "cidr");
+        if (cidr > 255) {
+            throw WireGuard::WGException("cidr超出 uint8_t 精度");
         }
-    }
-    void GetIpAddressArea(napi_env env, napi_value arg, WireGuard::IpAddressArea &ipArea) {
-        napi_value nvIpAddress;
-        napi_get_named_property(env, arg, "address", &nvIpAddress);
-        GetIPAddress(env, nvIpAddress, ipArea.address);
-
-        bool hasCidr;
-        napi_has_named_property(env, arg, "cidr", &hasCidr);
-        if (hasCidr) {
-            auto cidr = getPropUint32_t(env, arg, "cidr");
-            if (cidr > 255) {
-                throw WireGuard::WGException("cidr超出 uint8_t 精度");
-            }
-            ipArea.cidr = cidr;
-        } else {
-            // 有/ 有掩码
-            // 表示没有 /
+        ipArea.cidr = cidr;
+    } else {
+        // 有/ 有掩码
+        // 表示没有 /
 //            ipArea.cidr = -1;
-            throw WireGuard::WGException("ip 域必须指定掩码");
-        }
+        throw WireGuard::WGException("ip 域必须指定掩码");
+    }
+}
+
+void GetIPAddress(napi_env env, napi_value arg, WireGuard::IPAddress &ipAddress) {
+    auto ip = getPropString(env, arg, "ip");
+    auto isIpv4 = getPropBool(env, arg, "isIpv4");
+    ipAddress.family = isIpv4 ? WireGuard::IPAddress::IPv4 : WireGuard::IPAddress::IPv6;
+    if (ip.empty()) {
+        throw std::invalid_argument("ip地址不能为空");
     }
 
-    void GetIPAddress(napi_env env, napi_value arg, WireGuard::IPAddress &ipAddress) {
-        auto ip = getPropString(env, arg, "ip");
-        auto isIpv4 = getPropBool(env, arg, "isIpv4");
-        ipAddress.family = isIpv4 ? WireGuard::IPAddress::IPv4 : WireGuard::IPAddress::IPv6;
-        if (ip.empty()) {
-            throw std::invalid_argument("ip地址不能为空");
-        }
+    LOG_DEBUG("设置ip： %{public}s", ip.c_str());
+    setIp(ipAddress, isIpv4, ip);
+}
 
-        LOG_DEBUG("设置ip： %{public}s", ip.c_str());
-        setIp(ipAddress, isIpv4, ip);
+
+template <typename T>
+void getForArray(napi_env env, napi_value obj, const std::string propertyName, std::vector<T> &data,
+                 std::function<T(napi_env env, napi_value nvItem, uint32_t index)> findItemCallback) {
+
+    napi_value nvPeers;
+    auto status = napi_get_named_property(env, obj, propertyName.c_str(), &nvPeers);
+    if (status != napi_ok) {
+        throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
     }
-
-
-    template <typename T>
-    void getForArray(
-        napi_env env, napi_value obj, const std::string propertyName, std::vector<T> &data,
-        std::function<T(napi_env env, napi_value nvItem, uint32_t index)> findItemCallback
-    ) {
-
-        napi_value nvPeers;
-        auto status = napi_get_named_property(env, obj, propertyName.c_str(), &nvPeers);
-        if (status != napi_ok) {
-            throw WireGuard::WGException("获取属性 %s 失败", propertyName.c_str());
+    bool isArray;
+    napi_is_array(env, nvPeers, &isArray);
+    if (isArray) {
+        uint32_t peerSize;
+        napi_get_array_length(env, nvPeers, &peerSize);
+        data.clear();
+        data.reserve(peerSize);
+        for (uint32_t index = 0; index < peerSize; ++index) {
+            napi_value nvItem;
+            napi_get_element(env, nvPeers, index, &nvItem);
+            auto item = findItemCallback(env, nvItem, index);
+            data.push_back(item);
         }
-        bool isArray;
-        napi_is_array(env, nvPeers, &isArray);
-        if (isArray) {
-            uint32_t peerSize;
-            napi_get_array_length(env, nvPeers, &peerSize);
-            data.clear();
-            data.reserve(peerSize);
-            for (uint32_t index = 0; index < peerSize; ++index) {
-                napi_value nvItem;
-                napi_get_element(env, nvPeers, index, &nvItem);
-                auto item = findItemCallback(env, nvItem, index);
-                data.push_back(item);
-            }
-        } else {
-            LOG_INFO("%{}s,不是一个 array ", propertyName.c_str());
-        }
+    } else {
+        LOG_INFO("%{}s,不是一个 array ", propertyName.c_str());
     }
+}
 
-    std::array<uint8_t, 32> getPropToDecodeBase64WGKey(napi_env env, napi_value obj, const std::string propertyName) {
-        auto str = getPropString(env, obj, propertyName);
-        try {
-            return WireGuard::crypto::base642Bin32Array(str);
-        } catch (const WireGuard::WGException &e) {
-            throw WireGuard::WGException(propertyName + " 格式异常，无法转换为32位bin");
-        }
+std::array<uint8_t, 32> getPropToDecodeBase64WGKey(napi_env env, napi_value obj, const std::string propertyName) {
+    auto str = getPropString(env, obj, propertyName);
+    try {
+        return WireGuard::crypto::base642Bin32Array(str);
+    } catch (const WireGuard::WGException &e) {
+        throw WireGuard::WGException(propertyName + " 格式异常，无法转换为32位bin");
     }
+}
 
 };

@@ -21,7 +21,7 @@ import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf } from 'wg_tunnel';
+import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf, getDnsMode } from 'wg_tunnel';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -68,6 +68,7 @@ export default class WGNewConfigViewModel {
       config.publicKey = it.publicKey;
       config.preSharedKey = it.preSharedKey;
       config.setAddress(it.endpoint);
+      config.dnsMode = getDnsMode(it.endpoint);
       config.allowedIpsInput = it.allowedIPs.map((it) => `${it.address.ip}/${it.cidr}`).join(",");
       config.keepaliveInterval = `${it.keepaliveInterval}`;
       return config;
@@ -200,15 +201,15 @@ export default class WGNewConfigViewModel {
       if (dnsIps.includes(",")) {
         dns = await Promise.all(dnsIps.split(",").map(async (it) => {
           return {
-            ip: dnsIps,
-            isIpv4: await WireGuard.Tools.isIpv4(dnsIps)
+            ip: it.trim(),
+            isIpv4: await WireGuard.Tools.isIpv4(it.trim())
           } as IPAddress
         })
         )
       } else {
         dns.push({
-          ip: dnsIps,
-          isIpv4: await WireGuard.Tools.isIpv4(dnsIps)
+          ip: dnsIps.trim(),
+          isIpv4: await WireGuard.Tools.isIpv4(dnsIps.trim())
         })
       }
     }
@@ -243,6 +244,8 @@ export default class WGNewConfigViewModel {
     if (endpoint.type === SiteUrlType.ERROR) {
       throw new WGAppException(`地址格式异常，必须是合法的IP+端口或者域名+端口，value=${config.address}`)
     }
+    endpoint.dnsMode = config.dnsMode;
+    endpoint.forceIpv6 = undefined;
     if (endpoint.port < 0 || endpoint.port > 65535) {
       throw new WGAppException("端口取值范围为：0-65535")
     }
@@ -275,7 +278,7 @@ class InputRegex {
   ipMark = `^\\d{0,3}([.]\\d{0,3}){0,3}(/\\d{0,3})?$` // 包含掩码的Ip
   ipPort = `^\\d{0,3}([.]\\d{0,3}){0,3}(:\\d{0,5})?$` // 报端端口的Ip
   ipArea = `^\\d{0,3}([.]\\d{0,3}){0,3}(/\\d{0,3})?(,\\d{0,3}([.]\\d{0,3}){0,3}(/\\d{0,3})?)?$` // 包含掩码的Ip使用，分割
-  dns = `^\\d{0,3}([.]\\d{0,3}){0,3}(,\\d{0,3}([.]\\d{0,3}){0,3})*$` // 纯ip 组 使用，分割
+  dns = `^[\\w.:/,\\-\\[\\]]*$`
   noSpace = `^[\w.:/,\\-\[\]]*$` // 仅允许英文字符、域名、IP、IPv6、端口允许的字符（字母数字、.、:、/、,、-）
   domainArea = `^[0-9.:/,\\-]*$` // 域名段（包含掩码），使用英文逗号进行多条输入，仅检测输入字符是否合法
 }

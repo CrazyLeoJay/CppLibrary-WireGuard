@@ -88,6 +88,16 @@ export enum SiteUrlType {
 }
 
 /**
+ * DNS解析偏好（互斥单选）
+ */
+export enum DnsResolveMode {
+  PREFER_IPV4 = 0,  // 默认优先IPv4，解析失败回退IPv6
+  PREFER_IPV6 = 1,  // 优先IPv6，解析失败回退IPv4
+  FORCE_IPV6 = 2,   // 强制IPv6，只解析IPv6
+  FORCE_IPV4 = 3,   // 强制IPv4，只解析IPv4
+}
+
+/**
  * 站点：域名或者ip地址 和 端口
  * 域名和ip地址都可
  */
@@ -95,6 +105,8 @@ export interface WebSitePoint {
   ipStrOrDomain: string; // ip地址或者域名
   port: number; // 远程端口，没有默认80
   type: SiteUrlType;
+  forceIpv6?: boolean; // 兼容旧字段（废弃，但保留读取）
+  dnsMode?: DnsResolveMode; // 新的互斥解析偏好
 }
 
 /**

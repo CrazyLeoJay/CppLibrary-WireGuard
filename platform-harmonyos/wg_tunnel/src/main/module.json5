@@ -14,11 +14,16 @@
         "name": "WGVpnExtAbility",
         "srcEntry": "./ets/ability/WGVpnExtAbility.ets",
         "type": "vpn",
+        "exported": false
       }
     ],
     "requestPermissions": [
       {
         "name": "ohos.permission.INTERNET",
+        "reason": "$string:perm_reason_internet"
+      },
+      {
+        "name": "ohos.permission.GET_NETWORK_INFO",
         "reason": "$string:perm_reason_internet"
       }
     ]

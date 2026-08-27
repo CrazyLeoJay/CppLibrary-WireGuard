@@ -16,7 +16,7 @@
 import { commonEventManager } from '@kit.BasicServicesKit';
 import { LLog, StreamLogMessage, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
-import VPNEventStatusParams from './entity/VPNEventStatusParams';
+import VPNEventStatusParams, { VpnEventTag } from './entity/VPNEventStatusParams';
 import WGTools from './WGTools';
 import { WGEventThrow, WGEventThrowForString, WGEventThrowParam, WGEventThrowToString } from '../error/WGEventThrow';
 
@@ -134,8 +134,7 @@ export class WGSystemEventDef {
    * 【跨进程广播】发布VPN状态变化事件
    *
    * 将VPN运行状态通过 CommonEventManager 广播给所有进程。
-   * 广播数据中包含完整的 StatusConfig 和 userManuallyStopped 标记，
-   * 确保主应用进程和VPN进程的状态一致。
+   * 广播数据中包含完整的 StatusConfig，确保主应用进程和VPN进程的状态一致。
    *
    * 【调用场景】
    * 1. VPN进程中：VPN启动成功(startVpn)、VPN停止(stopVpn)、VPN异常(startVpnThrow)
@@ -147,18 +146,14 @@ export class WGSystemEventDef {
    * JSON.stringify 代理对象时 @Trace 属性名会被加 __ob_ 前缀导致反序列化失败，
    * 因此需要通过 toDTO() 转换为无装饰器的纯数据对象（StatusConfigDTO）再序列化。
    *
-   * @param params VPN状态参数，其中 status 和 userManuallyStopped 会自动填充
+   * @param params VPN状态参数，其中 status 会自动填充
    */
   publishVpnChange(params: VPNEventStatusParams) {
     // 自动将当前进程的 StatusConfig 附加到广播数据中
     // VPN进程调用时：附带VPN进程的权威状态（running=true/false, runningConfigId）
-    // 主应用进程调用时：附带主应用进程的本地状态（主要用于传递 userManuallyStopped）
+    // 主应用进程调用时：附带主应用进程的本地状态
     // 通过 toDTO() 转换为纯数据对象，避免 @Trace 代理导致序列化属性名加 __ob_ 前缀
     params.status = WireGuard.statusConfig.getConfig().toDTO()
-    // 跨进程同步 userManuallyStopped 标记：
-    // - VPN进程调用时：附带VPN进程的 userManuallyStopped（vpnStartRun时已清除为false）
-    // - 主应用进程调用时：附带主应用进程的 userManuallyStopped（用户关闭时已设为true）
-    params.userManuallyStopped = WireGuard.statusConfig.isUserManuallyStopped()
     this.publish(VPN_STATUS_CHANGE, JSON.stringify(params))
     LLog.info(TAG, `通知变化：${JSON.stringify(params)}`)
   }
@@ -167,7 +162,7 @@ export class WGSystemEventDef {
    * 【跨进程订阅】订阅VPN状态变化事件
    *
    * 主应用进程和VPN进程都会订阅此事件，收到广播后：
-   * 1. 解析广播数据中的 StatusConfig 和 userManuallyStopped
+   * 1. 解析广播数据中的 StatusConfig
    * 2. 调用 syncFromVpnProcess() 将VPN进程的权威状态同步到本地 AppStorageV2
    *    （无论广播是从VPN进程还是主应用进程发出的，都执行同步以确保一致性）
    * 3. 回调 paramsInvoke 通知UI层更新界面
@@ -175,7 +170,6 @@ export class WGSystemEventDef {
    * 【关键设计】
    * syncFromVpnProcess() 保证了"以VPN进程数据为准"的原则：
    *   - VPN启动/停止时，VPN进程广播的状态是权威的
-   *   - 用户关闭VPN时，主应用进程广播的 userManuallyStopped=true 也会被同步
    *
    * @param paramsInvoke 状态变化回调，返回解析后的 VPNEventStatusParams
    * @returns SubEventCancel 取消订阅的句柄
@@ -187,7 +181,7 @@ export class WGSystemEventDef {
         // 【核心同步逻辑】收到VPN状态变化广播后，将状态同步到本地AppStorageV2
         // 以VPN进程数据为准，确保主应用进程的状态与VPN进程一致
         if (result.status) {
-          WireGuard.statusConfig.syncFromVpnProcess(result.status, result.userManuallyStopped)
+          WireGuard.statusConfig.syncFromVpnProcess(result.status)
         }
         paramsInvoke(result)
       }
@@ -206,7 +200,7 @@ export class WGSystemEventDef {
         if (running) {
           this.publish(VPN_STATUS_QUERY)
         } else {
-          this.publishVpnChange({ isOpen: false, tag: "query for vpn no running" })
+          this.publishVpnChange({ isOpen: false, tag: VpnEventTag.QUERY_NO_RUNNING })
         }
       })
   }
@@ -231,7 +225,7 @@ export class WGSystemEventDef {
   }
 
   publishVpnNoOpen(){
-    WireGuard.event.publishVpnChange({ isOpen: false, tag: "no start vpn" });
+    WireGuard.event.publishVpnChange({ isOpen: false, tag: VpnEventTag.NO_START_VPN });
   }
 }
 

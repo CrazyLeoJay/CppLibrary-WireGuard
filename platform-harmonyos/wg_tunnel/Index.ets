@@ -43,3 +43,5 @@ export * from './src/main/ets/model/entity/WGConfigEntity';
 export * from './src/main/ets/model/entity/PeerEditConfig';
 
 export * from './src/main/ets/model/entity/ClientEditConfig';
+
+export { VpnEventTag } from './src/main/ets/model/entity/VPNEventStatusParams';

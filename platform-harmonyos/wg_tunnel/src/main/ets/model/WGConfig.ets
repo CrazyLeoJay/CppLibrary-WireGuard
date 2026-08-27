@@ -30,7 +30,7 @@ const TAG = "WG状态"
  * 即主应用进程的 AppStorageV2 写入的数据，VPN进程读不到，反之亦然。
  *
  * 【为什么用 AppStorageV2 而非 PersistenceV2】
- * StatusConfig 中的字段（running、runningConfigId、userManuallyStopped）都是运行时状态：
+ * StatusConfig 中的字段（running、runningConfigId）都是运行时状态：
  *   - 应用关闭后VPN进程也会停止，这些值自然失效
  *   - 下次启动会通过跨进程广播重新获取最新状态
  *   - 无需磁盘持久化，AppStorageV2 的内存级存储即可（应用运行期间不被回收，退出即丢失）
@@ -45,8 +45,6 @@ const TAG = "WG状态"
  * 【状态同步机制】
  *   - VPN进程 → 主应用进程：VPN状态变化时通过 WGEvent.publishVpnChange() 广播，
  *     主应用进程在 subscribeVpnChange() 中调用 syncFromVpnProcess() 同步到本地
- *   - 主应用进程 → VPN进程：用户主动关闭VPN时，主应用通过 publishVpnChange() 
- *     广播 userManuallyStopped=true，VPN进程在 subscribeVpnChange() 中同步
  *   - 主应用进程主动查询：onForeground 时调用 publishVpnStatusQuery()，
  *     VPN进程收到后通过 publishVpnChange() 回复最新状态
  *
@@ -69,7 +67,7 @@ class WGStatusImpl {
    * 【仅VPN进程调用】在 WGVpnExtAbility VPN启动成功后调用（VPNChangeHelper.startVpn）
    * 更新后会通过 publishVpnChange() 广播通知主应用进程同步
    *
-   * 状态变更：running=true, runningConfigId=id, userManuallyStopped=false（VPN启动成功说明用户没有主动关闭）
+   * 状态变更：running=true, runningConfigId=id
    *
    * @param configId 当前运行的VPN配置ID
    */
@@ -77,7 +75,6 @@ class WGStatusImpl {
     const config = this.getConfig()
     config.running = true
     config.runningConfigId = configId;
-    config.userManuallyStopped = false; // VPN启动成功，清除用户主动关闭标记，允许后续自动重连
     LLog.info(TAG, `更新状态(running=true):${JSON.stringify(this.getConfig())}`)
   }
 
@@ -86,9 +83,6 @@ class WGStatusImpl {
    *
    * 【仅VPN进程调用】在 WGVpnExtAbility.onDestroy 中调用（VPNChangeHelper.stopVpn）
    * 更新后会通过 publishVpnChange() 广播通知主应用进程同步
-   *
-   * 注意：此处不设置 userManuallyStopped，因为 onDestroy 无法区分是用户主动关闭还是系统强杀，
-   * 用户主动关闭的标记由主应用进程在用户操作时设置并通过广播同步
    *
    * 状态变更：running=false, runningConfigId=undefined
    */
@@ -121,19 +115,12 @@ class WGStatusImpl {
    * 数据流向：VPN进程 (publishVpnChange) → CommonEvent广播 → 主应用进程 (subscribeVpnChange) → syncFromVpnProcess()
    *
    * @param dto VPN进程广播过来的StatusConfigDTO（纯数据，用于跨进程序列化）
-   * @param manuallyStopped 用户是否主动关闭了VPN（跨进程同步的关键标记）
-   *                         undefined = 广播中未携带此字段，不修改本地值
-   *                         true = 用户主动关闭，写入本地以阻止自动重连
-   *                         false = VPN启动成功或重连成功，清除标记允许后续自动重连
    */
-  syncFromVpnProcess(dto: StatusConfigDTO, manuallyStopped?: boolean) {
+  syncFromVpnProcess(dto: StatusConfigDTO) {
     const c = this.getConfig()
     c.runningConfigId = dto.runningConfigId
     c.running = dto.running
-    if (manuallyStopped != undefined) {
-      c.userManuallyStopped = manuallyStopped
-    }
-    LLog.info(TAG, `从VPN进程同步状态: running=${c.running}, configId=${c.runningConfigId}, userManuallyStopped=${c.userManuallyStopped}`)
+    LLog.info(TAG, `从VPN进程同步状态: running=${c.running}, configId=${c.runningConfigId}`)
   }
 
   /**
@@ -149,49 +136,6 @@ class WGStatusImpl {
   isRunning(id: number): boolean {
     const config = this.getConfig();
     return config.running && id == config.runningConfigId;
-  }
-
-  /**
-   * 用户主动关闭VPN - 设置 userManuallyStopped=true 阻止自动重连
-   *
-   * 【主应用进程和VPN进程均可调用】
-   * 调用场景：
-   *   1. 主应用进程：用户在UI界面关闭VPN开关时（WGMainViewModel.changeVpnConfig 或 WGHelper.runWGConfig(isOne=false)）
-   *   2. 自动重连失败时：设置此标记防止反复重连（tryReconnectVpn失败后调用）
-   *
-   * 设置后需要通过 publishVpnChange() 广播通知另一个进程同步，
-   * 否则另一个进程的 AppStorageV2 中 userManuallyStopped 仍为 false
-   */
-  vpnStopByUser() {
-    const config = this.getConfig()
-    config.userManuallyStopped = true;
-    LLog.info(TAG, `用户主动关闭VPN, userManuallyStopped=true`)
-  }
-
-  /**
-   * 检查是否用户主动关闭了VPN
-   *
-   * 用于 shouldAutoReconnect() 判断是否需要自动重连：
-   *   - true = 用户主动关闭，不应自动重连
-   *   - false = VPN非用户主动关闭（可能是系统强杀），应自动重连
-   *
-   * @returns true=用户主动关闭，不应自动重连
-   */
-  isUserManuallyStopped(): boolean {
-    return this.getConfig().userManuallyStopped;
-  }
-
-  /**
-   * 清除用户主动关闭标记 - 设置 userManuallyStopped=false
-   *
-   * 【仅VPN进程调用】在VPN启动成功时调用（VPNChangeHelper.startVpn）
-   * VPN启动成功意味着用户没有主动关闭（或者是重连成功），清除标记允许后续自动重连
-   *
-   * 清除后会通过 publishVpnChange() 广播通知主应用进程同步
-   */
-  clearManuallyStopped() {
-    this.getConfig().userManuallyStopped = false;
-    LLog.info(TAG, `清除用户主动关闭标记, userManuallyStopped=false`)
   }
 }
 
@@ -214,17 +158,11 @@ class WGStatusImpl {
  *   VPN启动成功 → running=true, runningConfigId=id（VPN进程设置，广播同步到主应用）
  *   VPN正常停止 → running=false, runningConfigId=undefined（VPN进程设置，广播同步到主应用）
  *   VPN被系统强杀 → 可能来不及更新，主应用通过 isVpnExtensionRunning() 检测发现不一致
- *
- * userManuallyStopped：
- *   用户主动关闭VPN → true（主应用进程设置，广播同步到VPN进程）
- *   VPN启动成功 → false（VPN进程的 vpnStartRun/clearManuallyStopped 清除，广播同步到主应用）
- *   自动重连失败 → true（主应用进程的 tryReconnectVpn 设置，防止反复重连）
  */
 @ObservedV2
 export class StatusConfig {
   @Trace runningConfigId?: number = undefined;  // 当前运行的VPN配置ID，undefined=未运行
   @Trace running: boolean = false;              // VPN是否正在运行
-  @Trace userManuallyStopped: boolean = false;  // 用户是否主动关闭了VPN（true=阻止自动重连）
 
   /**
    * VPN 是否开启，也表示是否正在运行
@@ -248,7 +186,6 @@ export class StatusConfig {
     const dto = new StatusConfigDTO()
     dto.runningConfigId = this.runningConfigId
     dto.running = this.running
-    dto.userManuallyStopped = this.userManuallyStopped
     return dto
   }
 }
@@ -261,12 +198,11 @@ export class StatusConfig {
  * - StatusConfigDTO：无装饰器的纯数据类，用于跨进程 JSON 序列化/反序列化
  *
  * 不带 @Trace 的属性不会被 ArkUI 框架劫持，JSON.stringify 输出原始属性名，
- * 反序列化时能正常读取 running、runningConfigId、userManuallyStopped。
+ * 反序列化时能正常读取 running、runningConfigId。
  */
 export class StatusConfigDTO {
   runningConfigId?: number = undefined;
   running: boolean = false;
-  userManuallyStopped: boolean = false;
 }
 
 const WGConfig = new WGStatusImpl();
