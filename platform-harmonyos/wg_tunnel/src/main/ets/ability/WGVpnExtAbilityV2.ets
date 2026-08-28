@@ -36,14 +36,24 @@ const TAG = "vpn_ability_v2"
  *
  * 与V1的区别：
  * - V1：启动时通过 want.parameters 传入配置，切换配置需重启整个Extension
- * - V2：启动时不传配置，onCreate后通过事件请求配置；支持热切换/更新/重启配置，无需重启Extension
+ * - V2：支持want.parameters参数直传（API 22+）+ 轮询降级（API 21及容错），支持热切换/更新/重启配置，无需重启Extension
+ *
+ * 参数直传模式（API 22+）：
+ * - runWGConfig启动VEA时通过want.parameters传递id和wgDbConf（JSON字符串）
+ * - onCreate优先从want.parameters读取配置，有效则直接执行VPN连接，跳过轮询延迟
+ * - API 22+设备可享受即时启动（延迟<1秒），无需等待轮询
+ *
+ * 轮询降级模式（API 21及参数丢失场景）：
+ * - API 21设备：startVpnExtensionAbility的want.parameters不会传递到onCreate，自动降级为轮询
+ * - 参数验证失败时（id缺失/无效、wgDbConf缺失/空/无法反序列化）：静默降级为轮询模式
+ * - 轮询模式：3秒间隔请求配置，最多30次，通过CONFIG_QUERY/CONFIG_REQUEST事件获取配置
  *
  * 生命周期：
- * - onCreate：通知主进程VEA存活 → 订阅配置指令 → 轮询请求配置
+ * - onCreate：通知主进程VEA存活 → 订阅配置指令 → 尝试want.parameters直传 → 降级轮询
  * - onDestroy：停止VPN连接 → 通知主进程VEA关闭 → 清理资源
  *
- * 配置指令（VpnConfigAction）：
  * - START：首次启动VPN连接
+ * 配置指令（VpnConfigAction）：
  * - STOP：停止VPN服务但保留VEA进程（用于快速切换）
  * - SWITCH：切换到新配置（先停后启）
  * - RESTART：重启当前配置（DNS重解析）
@@ -84,8 +94,14 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       // 2. 通知主应用进程：VEA进程已启动（主进程收到后订阅CONFIG_QUERY并回复配置）
       VPNChangeHelperV2.onCreate();
 
-      // 3. 启动配置请求轮询
-      this.startConfigQueryPolling();
+      // 3. 尝试从want.parameters直接获取配置参数（API 22+支持，API 21降级为轮询）
+      if (this.tryStartFromWantParameters(want)) {
+        LLog.info(TAG, "WGVpnExtAbilityV2 onCreate - 参数直传模式，跳过轮询");
+      } else {
+        // 参数无效或不存在，降级到轮询模式
+        LLog.info(TAG, "WGVpnExtAbilityV2 onCreate - 降级轮询模式");
+        this.startConfigQueryPolling();
+      }
 
       LLog.info(TAG, "WGVpnExtAbilityV2 onCreate");
     } catch (e) {
@@ -94,6 +110,59 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       VPNChangeHelperV2.startVpnThrow(`${t.message}\n${t.stack}`);
       this.selfTerminate();
     }
+  }
+
+  /**
+   * 尝试从want.parameters中读取id和wgDbConf并直接启动VPN
+   *
+   * API 22+：startVpnExtensionAbility支持want.parameters传递，可直接获取配置
+   * API 21及以下：want.parameters不会传递到onCreate，自动降级为轮询模式
+   *
+   * @param want 启动时传入的Want对象
+   * @returns true=参数有效并已启动VPN，false=参数无效需降级轮询
+   */
+  private tryStartFromWantParameters(want: Want): boolean {
+    const params = want.parameters;
+    if (params == null || params == undefined) {
+      return false;
+    }
+
+    // 读取id参数
+    const rawId = params['id'];
+    if (rawId == undefined || rawId == null) {
+      return false;
+    }
+    const id = Number(rawId);
+    if (isNaN(id)) {
+      return false;
+    }
+
+    // 读取wgDbConf参数（JSON字符串）
+    const rawWgDbConf = params['wgDbConf'];
+    if (rawWgDbConf == undefined || rawWgDbConf == null) {
+      return false;
+    }
+    const wgDbConfStr = String(rawWgDbConf);
+    if (wgDbConfStr.length === 0) {
+      return false;
+    }
+
+    // 反序列化wgDbConf并验证结构
+    let wgDbConf: WGDBConf;
+    try {
+      wgDbConf = JSON.parse(wgDbConfStr) as WGDBConf;
+      if (wgDbConf == null || wgDbConf.name == undefined || wgDbConf.conf == undefined) {
+        return false;
+      }
+    } catch (e) {
+      LLog.warn(TAG, 'want.parameters中wgDbConf反序列化失败，降级轮询');
+      return false;
+    }
+
+    // 参数有效，直接执行VPN连接
+    LLog.info(TAG, 'want.parameters参数有效: id=' + id.toString());
+    this.handleStartConfig(id, wgDbConf);
+    return true;
   }
 
   override onDestroy(): void {
@@ -151,7 +220,7 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
         return;
       }
       this.doConfigQuery();
-    }, 3000);
+    }, 1000);
   }
 
   private stopConfigQueryPolling(): void {
