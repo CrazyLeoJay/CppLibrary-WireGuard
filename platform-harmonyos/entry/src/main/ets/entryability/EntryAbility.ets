@@ -18,11 +18,24 @@ import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, VpnConfigAction, WireGuard } from 'wg_tunnel';
+import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, VpnConfigAction, WGEventThrow, WireGuard } from 'wg_tunnel';
 import { longTaskModel } from '../model/LongTaskModel';
 
 const TAG = "EntryAbility"
 
+/**
+ * 应用主Ability
+ *
+ * 职责：
+ * - 管理VPN事件监听（状态变化、流日志、配置请求、异常事件）
+ * - 管理VPN保活（长时任务 + 通知）
+ * - VPN异常Toast展示：通过subscribeVpnThrow订阅VPN异常事件，在任意页面弹出Toast展示错误原因
+ *   - 'normal'类型且message非空 → "VPN连接异常：{message}"
+ *   - 'none'类型 → "VPN连接异常，原因未知"
+ *   - 'normal'类型且message为空 → "VPN连接异常"
+ *   - 'want_no_get_args'类型不展示Toast（保留WGConfigPreView红色横幅）
+ * - 正常VPN关闭（STOP_VPN / VPN_SERVICE_STOPPED）通过subscribeVpnChange处理，不触发异常Toast
+ */
 export default class EntryAbility extends UIAbility {
   // VPN状态变化监听句柄
   private vpnChangeCancel?: SubEventCancel;
@@ -30,6 +43,10 @@ export default class EntryAbility extends UIAbility {
   private vpnStreamLogCancel?: SubEventCancel;
   // V2: VEA配置请求监听句柄
   private vpnConfigQueryCancel?: SubEventCancel;
+  // VPN异常事件监听句柄
+  private vpnThrowCancel?: SubEventCancel;
+  // 缓存的UIContext，用于在EntryAbility中弹出Toast
+  private uiContext?: UIContext;
 
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {
     try {
@@ -56,6 +73,7 @@ export default class EntryAbility extends UIAbility {
     this.unsubscribeVpnChange();
     this.unsubscribeVpnStreamLogs();
     this.unsubscribeVpnConfigQuery();
+    this.unsubscribeVpnThrow();
     this.stopLongTaskIfNeeded();
     try {
       backgroundTaskManager.off('continuousTaskCancel');
@@ -65,6 +83,8 @@ export default class EntryAbility extends UIAbility {
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     LLog.info(TAG, 'Ability onWindowStageCreate');
+    // 缓存UIContext，供后续Toast展示使用
+    this.uiContext = windowStage.getMainWindowSync().getUIContext();
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         LLog.error(TAG, `加载页面失败: ${JSON.stringify(err)}`);
@@ -110,6 +130,7 @@ export default class EntryAbility extends UIAbility {
     this.subscribeVpnChangeIfNeeded();
     this.subscribeVpnStreamLogsIfNeeded();
     this.subscribeVpnConfigQueryIfNeeded();
+    this.subscribeVpnThrowIfNeeded();
 
     WireGuard.tools.isVpnExtensionRunning().then((running: boolean) => {
       if (running) {
@@ -263,6 +284,46 @@ export default class EntryAbility extends UIAbility {
     LLog.info(TAG, '已注册VEA配置请求监听');
   }
 
+  /**
+   * 注册VPN异常事件监听
+   *
+   * 监听VPN运行过程中的异常断开事件（WGEventThrow），通过Toast向用户展示错误原因。
+   * - type为'normal'且message非空 → 展示"VPN连接异常：{message}"
+   * - type为'none' → 展示"VPN连接异常，原因未知"
+   * - type为'normal'且message为空 → 展示"VPN连接异常"
+   * - type为'want_no_get_args' → 不展示Toast（保留WGConfigPreView的红色横幅）
+   * - uiContext未就绪 → 静默忽略
+   */
+  private subscribeVpnThrowIfNeeded(): void {
+    if (this.vpnThrowCancel != undefined) {
+      return;
+    }
+    this.vpnThrowCancel = WireGuard.event.subscribeVpnThrow((param: WGEventThrow) => {
+      LLog.warn(TAG, `收到VPN异常事件: type=${param.type}, message=${param.message}`);
+      // want_no_get_args由WGConfigPreView红色横幅处理，不重复Toast
+      if (param.type === 'want_no_get_args') {
+        return;
+      }
+      // uiContext未就绪时静默忽略
+      if (!this.uiContext) {
+        LLog.warn(TAG, 'UIContext未就绪，无法展示VPN异常Toast');
+        return;
+      }
+      // 根据type和message构建Toast内容
+      let toastMessage: string;
+      if (param.type === 'normal' && param.message.length > 0) {
+        toastMessage = 'VPN连接异常：' + param.message;
+      } else if (param.type === 'none') {
+        toastMessage = 'VPN连接异常，原因未知';
+      } else {
+        // type为'normal'但message为空，或其他未知类型
+        toastMessage = 'VPN连接异常';
+      }
+      this.uiContext.getPromptAction().showToast({ message: toastMessage });
+    });
+    LLog.info(TAG, '已注册VPN异常事件监听');
+  }
+
   private onVpnServiceStopped(): void {
     LLog.info(TAG, 'VPN服务已停止（VEA进程存活），更新通知');
     longTaskModel.setServiceStopped(true);
@@ -294,6 +355,14 @@ export default class EntryAbility extends UIAbility {
       this.vpnConfigQueryCancel.cancel();
       this.vpnConfigQueryCancel = undefined;
       LLog.info(TAG, '已取消VEA配置请求监听');
+    }
+  }
+
+  private unsubscribeVpnThrow(): void {
+    if (this.vpnThrowCancel != undefined) {
+      this.vpnThrowCancel.cancel();
+      this.vpnThrowCancel = undefined;
+      LLog.info(TAG, '已取消VPN异常事件监听');
     }
   }
 }
