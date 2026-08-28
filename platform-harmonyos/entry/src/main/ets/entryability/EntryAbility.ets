@@ -83,14 +83,19 @@ export default class EntryAbility extends UIAbility {
 
   onWindowStageCreate(windowStage: window.WindowStage): void {
     LLog.info(TAG, 'Ability onWindowStageCreate');
-    // 缓存UIContext，供后续Toast展示使用
-    this.uiContext = windowStage.getMainWindowSync().getUIContext();
     windowStage.loadContent('pages/Index', (err) => {
       if (err.code) {
         LLog.error(TAG, `加载页面失败: ${JSON.stringify(err)}`);
         return;
       }
       LLog.info(TAG, '页面加载成功');
+      // loadContent完成后才能安全获取UIContext，否则窗口状态异常(1300002)
+      try {
+        this.uiContext = windowStage.getMainWindowSync().getUIContext();
+        LLog.info(TAG, 'UIContext缓存成功');
+      } catch (e) {
+        LLog.error(TAG, `获取UIContext失败: ${(e as BusinessError).message}`);
+      }
     });
   }
 
@@ -319,7 +324,10 @@ export default class EntryAbility extends UIAbility {
         // type为'normal'但message为空，或其他未知类型
         toastMessage = 'VPN连接异常';
       }
-      this.uiContext.getPromptAction().showToast({ message: toastMessage });
+      try {
+        this.uiContext.getPromptAction().showToast({ message: toastMessage });
+      } catch (error) {
+      }
     });
     LLog.info(TAG, '已注册VPN异常事件监听');
   }
