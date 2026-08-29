@@ -17,7 +17,7 @@
 
 计划实现下述途径使用：
 
-- [x] HarmonyOs App
+- [x] HarmonyOs App	[<img src="README.assets/华为应用市场icon.png" alt="华为应用市场icon" width="25" />华为鸿蒙应用市场 —— WG-VPN](https://appgallery.huawei.com/app/detail?id=site.leojay.wireguard&channelId=SHARE&source=appshare)
 - [ ] Android app
 
 其他端开发完善后再考虑，不过我有很多设想，以待后续拓展。
