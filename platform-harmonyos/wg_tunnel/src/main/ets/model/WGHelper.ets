@@ -130,14 +130,17 @@ export namespace WireGuard {
   }
 
   /**
-   * 执行一个 WireGuard 配置（V2模式：无参数启动VEA）
+   * 执行一个 WireGuard 配置（V2模式：参数直传+轮询降级）
    *
    * - isOne=true：启动VPN
    *   1. 缓存配置到 pendingConfig
    *   2. 检测VEA是否运行：
    *      - 运行中 → 直接发 SWITCH 指令（热切换，无需重启VEA）
-   *      - 未运行 → 无参数启动VEA，VEA onCreate后通过CONFIG_QUERY请求配置，
-   *        EntryAbility从缓存读取并回复CONFIG_REQUEST(START)
+   *      - 未运行 → 携带参数启动VEA，want.parameters传递：
+   *        - id: number类型，配置ID
+   *        - wgDbConf: string类型，WGDBConf的JSON.stringify序列化字符串
+   *        V2 onCreate优先从want.parameters获取配置直接执行（API 22+）；
+   *        API 21设备不支持want.parameters传递，自动降级为轮询模式
    *
    * - isOne=false：关闭VPN
    *   1. 清除缓存
@@ -170,12 +173,16 @@ export namespace WireGuard {
         });
         LLog.info(TAG, `VEA运行中，发送SWITCH指令: configId=${id}`);
       } else {
-        // VEA未运行 → 启动VEA（无参数），配置通过CONFIG_QUERY/CONFIG_REQUEST事件下发
-        LLog.info(TAG, "VEA未运行，启动VPN（V2无参数模式）");
+        // VEA未运行 → 启动VEA并携带配置参数（API 22+支持want.parameters直传，API 21降级为轮询）
+        LLog.info(TAG, "VEA未运行，启动VPN（V2参数直传模式）");
         await vpnExtension.startVpnExtensionAbility({
           deviceId: '',
           bundleName: packageName,
           abilityName: abilityName,
+          parameters: {
+            'id': id,
+            'wgDbConf': JSON.stringify(config),
+          },
         })
           .catch((e: BusinessError) => {
             switch (e.code) {

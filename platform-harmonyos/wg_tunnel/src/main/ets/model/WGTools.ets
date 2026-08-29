@@ -155,7 +155,7 @@ class WGToolsImpl {
    * @returns 读取到的配置列表
    * @throws WGAppException
    */
-  private async zipAndReadWGConfig(context: Context, resUrl: string): Promise<WGConf[]> {
+  async zipAndReadWGConfig(context: Context, resUrl: string): Promise<WGConf[]> {
     const cacheDir = WireGuard.Paths.getZipDecodeTmpDir(context)
     const copyFile = `${cacheDir}/wg.confs.zip`
     const decodeDir = `${cacheDir}/wg.confs.decode`
@@ -200,7 +200,7 @@ class WGToolsImpl {
     }
   }
 
-  private async validateZipFile(resUrl: string): Promise<void> {
+  async validateZipFile(resUrl: string): Promise<void> {
     if (!resUrl || resUrl.length === 0) {
       throw new WGAppException("文件路径为空")
     }
@@ -232,7 +232,7 @@ class WGToolsImpl {
     }
   }
 
-  private async checkFileSize(resUrl: string): Promise<void> {
+  async checkFileSize(resUrl: string): Promise<void> {
     try {
       let path = resUrl;
       if (path.startsWith("file://")) {
@@ -248,7 +248,7 @@ class WGToolsImpl {
     }
   }
 
-  private async listConfFiles(dirPath: string): Promise<string[]> {
+  async listConfFiles(dirPath: string): Promise<string[]> {
     LLog.info(TAG, `查找配置：${dirPath}`)
     try {
       const files = await fs.listFile(dirPath, {
@@ -278,7 +278,7 @@ class WGToolsImpl {
     }
   }
 
-  private async readSingleConfig(filePath: string): Promise<WGConf | undefined> {
+  async readSingleConfig(filePath: string): Promise<WGConf | undefined> {
     const fileName = filePath.substring(filePath.lastIndexOf('/') + 1)
     const configName = fileName.substring(0, fileName.lastIndexOf('.'))
 
@@ -310,7 +310,7 @@ class WGToolsImpl {
     }
   }
 
-  private async readAllConfigs(filePaths: string[]): Promise<WGConf[]> {
+  async readAllConfigs(filePaths: string[]): Promise<WGConf[]> {
     const configs: WGConf[] = []
 
     for (const filePath of filePaths) {
@@ -327,7 +327,7 @@ class WGToolsImpl {
     return configs
   }
 
-  private async deleteDir(dirPath: string): Promise<void> {
+  async deleteDir(dirPath: string): Promise<void> {
     try {
       await fs.rmdir(dirPath)
       LLog.debug(TAG, `缓存目录已删除: ${dirPath}`)
@@ -336,7 +336,7 @@ class WGToolsImpl {
     }
   }
 
-  private async confFileReadToConfig(resUrl: string): Promise<WGConf> {
+  async confFileReadToConfig(resUrl: string): Promise<WGConf> {
     await this.checkFileSize(resUrl)
 
     const config = await this.readSingleConfig(resUrl)
