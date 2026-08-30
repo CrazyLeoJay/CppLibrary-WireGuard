@@ -617,7 +617,7 @@ void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &devi
                 device.listener_port = std::make_shared<uint32_t>(port);
             }
         } catch (const std::exception &e) {
-            LOG_ERROR("没有配置 listenerPort， 获取异常: %{public}s", e.what());
+            LOG_WARN("没有配置 listenerPort， 获取异常: %{public}s", e.what());
         }
     }
 
@@ -660,7 +660,13 @@ void GetPeer(napi_env env, napi_value arg, WireGuard::PeerConfig &peer) {
     }
     // keepaliveInterval
     if (isHasProp(env, arg, "keepaliveInterval")) {
-        peer.keepaliveInterval = getPropUint32_t(env, arg, "keepaliveInterval");
+        try {
+            // 保活间隔时间如果获取失败默认为0
+            peer.keepaliveInterval = getPropUint32_t(env, arg, "keepaliveInterval");
+        } catch (const std::exception &e) {
+            LOG_WARN("属性 keepaliveInterval 未获取到，默认为 0");
+            peer.keepaliveInterval = 0;
+        }
     }
 }
 
