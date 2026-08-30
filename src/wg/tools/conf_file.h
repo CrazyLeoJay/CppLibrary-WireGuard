@@ -69,6 +69,8 @@ namespace WireGuard {
             std::vector<IPAddress> dns;
             std::shared_ptr<uint32_t> ListenPort{nullptr}; // 监听端口
             std::shared_ptr<uint32_t> mtu{nullptr}; // 设置网络接口的最大传输单元（MTU）
+            std::vector<std::string> excludedApplications; // 排除的应用包名列表
+            std::vector<std::string> includedApplications; // 包含的应用包名列表
         };
 
         struct WGConfPeer {

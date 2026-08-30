@@ -475,6 +475,10 @@ namespace WireGuard {
                         conf.inter.configName = value;
                     } else if (key == "MTU") {
                         conf.inter.mtu = std::make_shared<uint32_t>(std::stoi(value));
+                    } else if (key == "ExcludedApplications") {
+                        conf.inter.excludedApplications = split(value, ',');
+                    } else if (key == "IncludedApplications") {
+                        conf.inter.includedApplications = split(value, ',');
                     }
                 } else if (inPeer && currentPeer) {
                     if (key == "PublicKey") {
@@ -521,6 +525,8 @@ namespace WireGuard {
             std::memcpy(drc.client.private_key.data(), conf.inter.privateKey.data(), PRIVATE_KEY_LEN);
             drc.client.listener_port = conf.inter.ListenPort;
             drc.client.bind_address = std::make_shared<IPAddress>(conf.inter.ipArea.address);
+            drc.client.excludedApplications = conf.inter.excludedApplications;
+            drc.client.includedApplications = conf.inter.includedApplications;
 
             for (const auto &wgPeer: conf.peers) {
                 PeerConfig pc{};
@@ -572,6 +578,20 @@ namespace WireGuard {
             }
             if (inter.mtu) {
                 str += "\nMTU=" + std::to_string(*inter.mtu);
+            }
+            if (!inter.excludedApplications.empty()) {
+                str += "\nExcludedApplications=";
+                for (size_t i = 0; i < inter.excludedApplications.size(); ++i) {
+                    if (i > 0) str += ",";
+                    str += inter.excludedApplications[i];
+                }
+            }
+            if (!inter.includedApplications.empty()) {
+                str += "\nIncludedApplications=";
+                for (size_t i = 0; i < inter.includedApplications.size(); ++i) {
+                    if (i > 0) str += ",";
+                    str += inter.includedApplications[i];
+                }
             }
 
             for (const auto &peer: conf.peers) {
