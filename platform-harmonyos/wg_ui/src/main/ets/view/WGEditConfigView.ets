@@ -15,11 +15,13 @@
  *
  */
 import WGEditConfigViewModel from '../view_model/WGEditConfigViewModel';
+import { ClipboardStatus } from '../view_model/WGEditConfigViewModel';
 import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
-import { LLog, DnsResolveMode } from 'wg_tunnel';
+import { LLog, DnsResolveMode, AppFilterMode, AppIconCache, WGSettingsPrefs } from 'wg_tunnel';
+import { pasteboard } from '@kit.BasicServicesKit';
 
 const TAG = "编辑界面";
 
@@ -194,18 +196,208 @@ struct InterfaceEditCardView {
       }
       .width('100%')
 
-      // Text('应用过滤')
-      //   .onClick(() => {
-      //
-      //   })
-      //   .textAlign(TextAlign.Center)
-      //   .align(Alignment.Center)
-      //   .layoutGravity(LocalizedAlignment.CENTER)
-      //   .width('100%')
-      //   .height('auto')
-      //   .padding('16vp')
+      // 应用过滤模块
+      AppFilterEditModule({ vm: this.vm })
     }
     .cardBackgroundStyle()
+  }
+}
+
+/**
+ * 应用过滤编辑模块
+ */
+@ComponentV2
+struct AppFilterEditModule {
+  @Param @Require vm: WGEditConfigViewModel
+
+  get isFilterOn(): boolean {
+    return this.vm.client.filterMode !== AppFilterMode.NONE;
+  }
+
+  get modeHintText(): string {
+    if (this.vm.client.filterMode === AppFilterMode.EXCLUDED) {
+      return '黑名单：列出的应用不经过VPN隧道，其他应用走VPN';
+    }
+    if (this.vm.client.filterMode === AppFilterMode.INCLUDED) {
+      return '白名单：仅列出的应用经过VPN隧道，其他应用不走VPN';
+    }
+    return '';
+  }
+
+  get clipboardButtonText(): string {
+    if (this.vm.clipboardStatus === ClipboardStatus.HAS_VALUE) {
+      return `从剪贴板获取（${this.vm.clipboardBundleName ?? ''}）`;
+    }
+    if (this.vm.clipboardStatus === ClipboardStatus.NO_PERMISSION) {
+      return '从剪贴板获取（无权限）';
+    }
+    return '从剪贴板获取（无值）';
+  }
+
+  aboutToAppear(): void {
+    const context = this.getUIContext().getHostContext() as Context;
+    this.vm.checkClipboard(context).catch((e: BusinessError) => {
+      LLog.warn(TAG, `checkClipboard failed: ${JSON.stringify(e)}`);
+    });
+    // 监听剪贴板内容变化，自动更新按钮状态
+    try {
+      const pasteboard_ = pasteboard.getSystemPasteboard();
+      pasteboard_.on('update', () => {
+        LLog.info(TAG, 'Clipboard content changed, re-checking');
+        this.vm.checkClipboard(context).catch((e: BusinessError) => {
+          LLog.warn(TAG, `checkClipboard on update failed: ${JSON.stringify(e)}`);
+        });
+      });
+    } catch (e) {
+      LLog.warn(TAG, `Failed to register clipboard listener: ${JSON.stringify(e)}`);
+    }
+  }
+
+  aboutToDisappear(): void {
+    try {
+      const pasteboard_ = pasteboard.getSystemPasteboard();
+      pasteboard_.off('update');
+    } catch (e) {
+      // ignore
+    }
+  }
+
+  build() {
+    Column({ space: '12vp' }) {
+      // 标题行 + Switch
+      Row() {
+        Text('应用过滤')
+          .fontSize('16fp')
+          .fontWeight(FontWeight.Medium)
+        Blank().layoutWeight(1)
+        Toggle({
+          type: ToggleType.Switch,
+          isOn: this.isFilterOn,
+        })
+          .onChange((isOn: boolean) => {
+            if (isOn) {
+              const defaultMode = WGSettingsPrefs.getDefaultFilterMode();
+              this.vm.client.filterMode = (defaultMode === AppFilterMode.INCLUDED) ? AppFilterMode.INCLUDED : AppFilterMode.EXCLUDED;
+            } else {
+              this.vm.client.filterMode = AppFilterMode.NONE;
+              this.vm.client.filterApps = [];
+            }
+          })
+      }
+      .width('100%')
+
+      // Switch 打开后显示内容
+      if (this.isFilterOn) {
+        // 模式切换标签行
+        Row({ space: '8vp' }) {
+          this.buildModeTab(AppFilterMode.EXCLUDED, '黑名单')
+          this.buildModeTab(AppFilterMode.INCLUDED, '白名单')
+        }
+        .width('100%')
+
+        // 提示文字
+        Text(this.modeHintText)
+          .fontSize('12fp')
+          .fontColor(Color.Gray)
+          .width('100%')
+
+        // 包名输入行列表
+        Repeat(this.vm.client.filterApps)
+          .each((it) => {
+            Row({ space: '8vp' }) {
+              // 应用图标（24x24vp）
+              AppIconImage({ bundleName: it.item, iconSize: 24 })
+              TextInput({ text: it.item, placeholder: '输入应用包名' })
+                .layoutWeight(1)
+                .fontSize('14fp')
+                .borderRadius('6vp')
+                .onChange((value: string) => {
+                  this.vm.client.filterApps[it.index] = value;
+                })
+              SymbolGlyph($r('sys.symbol.minus_circle'))
+                .fontSize('24fp')
+                .fontColor([$r('app.color.wg_new_card_item_select_color')])
+                .onClick(() => {
+                  this.vm.client.filterApps.splice(it.index, 1);
+                })
+            }
+            .width('100%')
+          })
+
+        // 虚线框添加按钮
+        Row() {
+          SymbolGlyph($r('sys.symbol.plus'))
+            .fontSize('16fp')
+            .fontColor([Color.Gray])
+          Text('添加应用')
+            .fontSize('14fp')
+            .fontColor(Color.Gray)
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .padding('12vp')
+        .border({
+          width: 1,
+          color: Color.Gray,
+          radius: 6,
+          style: BorderStyle.Dashed,
+        })
+        .onClick(() => {
+          this.vm.client.filterApps.push('');
+        })
+
+        // 从剪贴板获取按钮
+        Row() {
+          Text(this.clipboardButtonText)
+            .fontSize('14fp')
+            .fontColor(Color.Gray)
+            .maxLines(2)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
+        }
+        .width('100%')
+        .justifyContent(FlexAlign.Center)
+        .padding('12vp')
+        .border({
+          width: 1,
+          color: Color.Gray,
+          radius: 6,
+          style: BorderStyle.Solid,
+        })
+        .onClick(() => {
+          const context = this.getUIContext().getHostContext() as Context;
+          this.vm.addFromClipboard(context).catch((e: BusinessError) => {
+            LLog.warn(TAG, `addFromClipboard failed: ${JSON.stringify(e)}`);
+          });
+        })
+
+        // 说明文字
+        Text('因系统限制，无法获取已安装应用列表，需手动输入应用包名')
+          .fontSize('12fp')
+          .fontColor(Color.Gray)
+          .width('100%')
+      }
+    }
+    .width('100%')
+  }
+
+  @Builder
+  buildModeTab(mode: AppFilterMode, desc: string) {
+    Text(desc)
+      .fontSize('12fp')
+      .fontColor(this.vm.client.filterMode === mode ? Color.White : Color.Gray)
+      .backgroundColor(this.vm.client.filterMode === mode
+        ? $r('app.color.wg_new_card_item_select_color')
+        : Color.Transparent)
+      .borderRadius('8vp')
+      .padding({ top: '6vp', bottom: '6vp', left: '8vp', right: '8vp' })
+      .textAlign(TextAlign.Center)
+      .layoutWeight(1)
+      .onClick(() => {
+        if (this.vm.client.filterMode !== mode) {
+          this.vm.client.filterMode = mode;
+          this.vm.client.filterApps = [];
+        }
+      })
   }
 }
 
@@ -340,5 +532,41 @@ struct PeerEditCardView {
       .onClick(() => {
         this.data.dnsMode = mode;
       })
+  }
+}
+
+/**
+ * 应用图标显示组件
+ * 有缓存显示缓存图标，无缓存显示默认占位图标
+ */
+@ComponentV2
+struct AppIconImage {
+  @Param bundleName: string = '';
+  @Param iconSize: number = 24;
+  @Local iconPath: string | undefined = undefined;
+
+  async aboutToAppear(): Promise<void> {
+    if (this.bundleName && this.bundleName.length > 0) {
+      try {
+        this.iconPath = await AppIconCache.getAppIcon(this.bundleName);
+      } catch (e) {
+        this.iconPath = undefined;
+      }
+    }
+  }
+
+  build() {
+    if (this.iconPath && this.iconPath.length > 0) {
+      Image(this.iconPath)
+        .width(`${this.iconSize}vp`)
+        .height(`${this.iconSize}vp`)
+        .borderRadius('4vp')
+        .objectFit(ImageFit.Cover)
+    } else {
+      // 占位图标：使用系统符号
+      SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+        .fontSize(`${this.iconSize}fp`)
+        .fontColor([Color.Gray])
+    }
   }
 }

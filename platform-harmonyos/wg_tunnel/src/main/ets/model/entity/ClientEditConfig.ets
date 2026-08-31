@@ -15,6 +15,8 @@
  *
  */
 
+import { AppFilterMode } from './AppFilterMode';
+
 /**
  * @author leojay`fu
  */
@@ -49,4 +51,6 @@ export default class ClientEditConfig {
    * 数据中心内部高速网络（支持 Jumbo Frame）：设为 9000
    */
   @Trace mtu?: number; // 配置MTU
+  @Trace filterMode: AppFilterMode = AppFilterMode.NONE; // 应用过滤模式
+  @Trace filterApps: string[] = []; // 包名列表
 }

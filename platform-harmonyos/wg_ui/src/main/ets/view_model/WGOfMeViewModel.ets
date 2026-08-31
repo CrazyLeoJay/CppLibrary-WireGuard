@@ -16,7 +16,7 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { UIContext } from '@ohos.arkui.UIContext';
 import pasteboard from '@ohos.pasteboard';
-import { LLog, WireGuard } from 'wg_tunnel';
+import { LLog, WireGuard, WGSettingsPrefs, AppFilterMode } from 'wg_tunnel';
 import fs from '@ohos.file.fs';
 import { zlib } from '@kit.BasicServicesKit';
 import { fileUri, picker } from '@kit.CoreFileKit';
@@ -41,6 +41,8 @@ export default class WGSettingViewModel {
   nav: NavPathStack;
   @Trace appName: string = ""
   @Trace appVersion: string = ""
+  @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
+  @Trace defaultFilterMode: number = WGSettingsPrefs.getDefaultFilterMode();
   email: string = email
 
   constructor(nav: NavPathStack) {
@@ -51,6 +53,26 @@ export default class WGSettingViewModel {
     const msg = await bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_WITH_APPLICATION)
     this.appName = msg.appInfo.name
     this.appVersion = msg.versionName
+  }
+
+  /**
+   * 切换开发者模式
+   */
+  toggleDeveloperMode(): void {
+    this.developerMode = !this.developerMode;
+    WGSettingsPrefs.setDeveloperMode(this.developerMode);
+    LLog.info(TAG, `开发者模式: ${this.developerMode}`);
+  }
+
+  /**
+   * 切换默认过滤模式（黑名单 ↔ 白名单）
+   */
+  toggleDefaultFilterMode(): void {
+    this.defaultFilterMode = this.defaultFilterMode === AppFilterMode.EXCLUDED
+      ? AppFilterMode.INCLUDED
+      : AppFilterMode.EXCLUDED;
+    WGSettingsPrefs.setDefaultFilterMode(this.defaultFilterMode);
+    LLog.info(TAG, `默认过滤模式切换为: ${this.defaultFilterMode === AppFilterMode.INCLUDED ? '白名单' : '黑名单'}`);
   }
 
   clickToWireGuardWebSite(context: UIContext) {

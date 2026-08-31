@@ -72,6 +72,8 @@ export interface WGConfInterface {
   listenerPort?: number,
   dns: IPAddress[];
   mtu?: number;
+  excludedApplications?: string[];
+  includedApplications?: string[];
 }
 
 export interface WGConfPeer {

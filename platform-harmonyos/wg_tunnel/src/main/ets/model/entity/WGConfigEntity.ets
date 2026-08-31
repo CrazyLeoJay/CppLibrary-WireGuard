@@ -31,6 +31,8 @@ export interface VPNConfig {
   vpnIp?: IPAddressArea,
   dns?: IPAddress[], //
   mtu?: number, // mtu 空则为自动
+  excludedApplications?: string[], // 排除的应用包名列表
+  includedApplications?: string[], // 包含的应用包名列表
 }
 
 /**

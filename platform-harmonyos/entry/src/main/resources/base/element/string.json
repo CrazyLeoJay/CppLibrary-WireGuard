@@ -19,6 +19,10 @@
     {
       "name": "vpn_notification_text",
       "value": "WireGuard VPN正在后台运行中"
+    },
+    {
+      "name": "perm_reason_read_pasteboard",
+      "value": "用于从剪贴板读取应用市场链接并自动解析应用包名，无此权限时仍可手动输入包名"
     }
   ]
 }

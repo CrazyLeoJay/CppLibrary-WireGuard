@@ -141,6 +141,19 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
     dnsAddresses: dns.map((it) => it.ip),
     routes: routes,
   }
+
+  // 应用过滤映射：确保 trustedApplications 和 blockedApplications 互斥
+  // includedApplications → trustedApplications（白名单）
+  // excludedApplications → blockedApplications（黑名单）
+  // 如果两者都有值（不应出现），优先使用 trustedApplications
+  const includedApps = config.vpn.includedApplications;
+  const excludedApps = config.vpn.excludedApplications;
+  if (includedApps && includedApps.length > 0) {
+    vpnConfig.trustedApplications = includedApps;
+  } else if (excludedApps && excludedApps.length > 0) {
+    vpnConfig.blockedApplications = excludedApps;
+  }
+
   return vpnConfig;
 }
 
@@ -198,6 +211,8 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
     vpn: {
       vpnIp: conf.conf.inter.ipArea,
       dns: conf.conf.inter.dns,
+      excludedApplications: conf.conf.inter.excludedApplications,
+      includedApplications: conf.conf.inter.includedApplications,
     },
     device: {
       deviceName: conf.name,

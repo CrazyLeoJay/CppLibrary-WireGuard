@@ -24,7 +24,9 @@ import {
   WGDBConf,
   WGEventThrow,
   getDnsMode,
-  dnsModeDesc
+  dnsModeDesc,
+  AppFilterMode,
+  AppIconCache
 } from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
@@ -182,6 +184,41 @@ export default struct WGConfigPreView {
   }
 }
 
+/**
+ * 预览界面应用图标显示组件（20x20vp）
+ * 有缓存显示缓存图标，无缓存显示默认占位图标
+ */
+@ComponentV2
+struct PreviewAppIconImage {
+  @Param bundleName: string = '';
+  @Local iconPath: string | undefined = undefined;
+
+  async aboutToAppear(): Promise<void> {
+    if (this.bundleName && this.bundleName.length > 0) {
+      try {
+        this.iconPath = await AppIconCache.getAppIcon(this.bundleName);
+      } catch (e) {
+        this.iconPath = undefined;
+      }
+    }
+  }
+
+  build() {
+    if (this.iconPath && this.iconPath.length > 0) {
+      Image(this.iconPath)
+        .width('20vp')
+        .height('20vp')
+        .borderRadius('3vp')
+        .objectFit(ImageFit.Cover)
+    } else {
+      // 占位图标
+      SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+        .fontSize('20fp')
+        .fontColor([Color.Gray])
+    }
+  }
+}
+
 @Styles
 function cardBackgroundStyle() {
   .backgroundColor($r('app.color.wg_new_card_background_color'))
@@ -223,6 +260,38 @@ struct InterfaceCardView {
     this.vpnThrow.cancel()
   }
 
+  get filterMode(): AppFilterMode {
+    const included = this.data.conf.inter.includedApplications;
+    const excluded = this.data.conf.inter.excludedApplications;
+    if (included && included.length > 0) {
+      return AppFilterMode.INCLUDED;
+    }
+    if (excluded && excluded.length > 0) {
+      return AppFilterMode.EXCLUDED;
+    }
+    return AppFilterMode.NONE;
+  }
+
+  get filterAppsText(): string {
+    if (this.filterMode === AppFilterMode.INCLUDED) {
+      return this.data.conf.inter.includedApplications?.join(', ') ?? '';
+    }
+    if (this.filterMode === AppFilterMode.EXCLUDED) {
+      return this.data.conf.inter.excludedApplications?.join(', ') ?? '';
+    }
+    return '';
+  }
+
+  get filterApps(): string[] {
+    if (this.filterMode === AppFilterMode.INCLUDED) {
+      return this.data.conf.inter.includedApplications ?? [];
+    }
+    if (this.filterMode === AppFilterMode.EXCLUDED) {
+      return this.data.conf.inter.excludedApplications ?? [];
+    }
+    return [];
+  }
+
   build() {
     Stack() {
       Column({ space: '16vp' }) {
@@ -256,6 +325,39 @@ struct InterfaceCardView {
         Column({ space: ConfigColumnSpace }) {
           Text('DNS服务器').width('100%').TagStyle()
           Text(this.vm.dns!!).width('100%').TagContentStyle()
+        }
+
+        // 应用过滤摘要
+        if (this.filterMode !== AppFilterMode.NONE) {
+          Column({ space: ConfigColumnSpace }) {
+            Text('应用过滤').width('100%').TagStyle()
+            Row({ space: '8vp' }) {
+              Text(this.filterMode === AppFilterMode.EXCLUDED ? '黑名单' : '白名单')
+                .fontSize('12fp')
+                .fontColor(Color.White)
+                .backgroundColor($r('app.color.wg_new_card_item_select_color'))
+                .borderRadius('8vp')
+                .padding({ left: '6vp', right: '6vp', top: '2vp', bottom: '2vp' })
+            }
+            .width('100%')
+
+            // 显示每个包名及其图标
+            if (this.filterApps.length > 0) {
+              Column({ space: '4vp' }) {
+                Repeat(this.filterApps)
+                  .each((it) => {
+                    Row({ space: '6vp' }) {
+                      PreviewAppIconImage({ bundleName: it.item })
+                      Text(it.item)
+                        .fontSize('14fp')
+                        .layoutWeight(1)
+                    }
+                    .width('100%')
+                  })
+              }
+              .width('100%')
+            }
+          }
         }
       }
       .cardBackgroundStyle()

@@ -627,6 +627,22 @@ void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &devi
         device.bind_address = std::make_shared<WireGuard::IPAddress>();
         GetIPAddress(env, nvIp, *device.bind_address);
     }
+
+    // 读取 excludedApplications（可选 string 数组）
+    if (isHasProp(env, arg, "excludedApplications")) {
+        auto callback = [](napi_env env, napi_value nvItem, uint32_t index) {
+            return NapiTools::napiGetString(env, nvItem, "excludedApplications");
+        };
+        getForArray<std::string>(env, arg, "excludedApplications", device.excludedApplications, callback);
+    }
+
+    // 读取 includedApplications（可选 string 数组）
+    if (isHasProp(env, arg, "includedApplications")) {
+        auto callback = [](napi_env env, napi_value nvItem, uint32_t index) {
+            return NapiTools::napiGetString(env, nvItem, "includedApplications");
+        };
+        getForArray<std::string>(env, arg, "includedApplications", device.includedApplications, callback);
+    }
 }
 void GetPeer(napi_env env, napi_value arg, WireGuard::PeerConfig &peer) {
     // publicKey

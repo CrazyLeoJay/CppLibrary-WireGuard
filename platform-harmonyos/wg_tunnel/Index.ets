@@ -44,6 +44,14 @@ export * from './src/main/ets/model/entity/PeerEditConfig';
 
 export * from './src/main/ets/model/entity/ClientEditConfig';
 
+export * from './src/main/ets/model/entity/AppFilterMode';
+
+export * from './src/main/ets/model/AppIconCache';
+
+export * from './src/main/ets/model/ClipboardParser';
+
+export * from './src/main/ets/model/WGSettingsPrefs';
+
 export { VpnEventTag } from './src/main/ets/model/entity/VPNEventStatusParams';
 
 export { VpnConfigAction, VpnConfigRequestParams } from './src/main/ets/model/entity/VpnConfigAction';
