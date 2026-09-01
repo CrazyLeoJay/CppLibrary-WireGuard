@@ -65,6 +65,18 @@ export interface WGConf {
   peers: WGConfPeer[]
 }
 
+/**
+ * 应用过滤条目的元数据
+ * 与 excludedApplications/includedApplications 中的 bundleName 一一对应
+ * 存储在 WGConfInterface.appFilterMeta 中，key 为 bundleName
+ */
+export interface AppFilterMeta {
+  /** 应用名称（如"微信"），分享添加时自动填充 */
+  appName?: string;
+  /** 是否通过分享面板添加（分享条目不可编辑，只能删除） */
+  isShared?: boolean;
+}
+
 export interface WGConfInterface {
   deviceName: string;
   privateKey: string;
@@ -74,6 +86,8 @@ export interface WGConfInterface {
   mtu?: number;
   excludedApplications?: string[];
   includedApplications?: string[];
+  /** 应用过滤元数据，key 为 bundleName，记录应用名和来源 */
+  appFilterMeta?: Record<string, AppFilterMeta>;
 }
 
 export interface WGConfPeer {

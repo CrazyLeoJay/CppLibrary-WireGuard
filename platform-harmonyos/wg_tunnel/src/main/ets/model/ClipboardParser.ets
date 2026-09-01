@@ -79,4 +79,36 @@ export class ClipboardParser {
 
     return undefined;
   }
+
+  /**
+   * 从文本中提取华为应用市场完整 URL
+   * 支持 store:// 和 https:// 两种协议格式
+   *
+   * @param text 文本内容（可能包含应用市场链接）
+   * @returns 提取的完整 URL，未匹配返回 undefined
+   */
+  static extractAppGalleryUrl(text: string): string | undefined {
+    if (!text || text.length === 0) {
+      return undefined;
+    }
+
+    // 匹配 https://appgallery.huawei.com/app/detail?id=xxx
+    const httpsPattern = new RegExp('https://appgallery\\.huawei\\.com/app/detail\\?id=[a-zA-Z0-9_.&=]+');
+    const httpsMatch = httpsPattern.exec(text);
+    if (httpsMatch !== null && httpsMatch.length > 0) {
+      LLog.info(TAG, `extractAppGalleryUrl: found https URL: ${httpsMatch[0]}`);
+      return httpsMatch[0];
+    }
+
+    // 匹配 store://appgallery.huawei.com/app/detail?id=xxx（转为 https 协议）
+    const storePattern = new RegExp('store://appgallery\\.huawei\\.com/app/detail\\?id=[a-zA-Z0-9_.&=]+');
+    const storeMatch = storePattern.exec(text);
+    if (storeMatch !== null && storeMatch.length > 0) {
+      const url = storeMatch[0].replace('store://', 'https://');
+      LLog.info(TAG, `extractAppGalleryUrl: found store URL, converted to: ${url}`);
+      return url;
+    }
+
+    return undefined;
+  }
 }

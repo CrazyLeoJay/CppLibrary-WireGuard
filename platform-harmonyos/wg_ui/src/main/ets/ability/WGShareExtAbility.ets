@@ -18,9 +18,8 @@ import { ShareExtensionAbility, UIExtensionContentSession, Want } from '@kit.Abi
 import { systemShare } from '@kit.ShareKit';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
-import { AppIconCache } from 'wg_tunnel/src/main/ets/model/AppIconCache';
-import { ClipboardParser } from 'wg_tunnel/src/main/ets/model/ClipboardParser';
 import { WGSettingsPrefs } from 'wg_tunnel/src/main/ets/model/WGSettingsPrefs';
+import { ShareParserFactory, ShareParseResult } from 'wg_tunnel/src/main/ets/model/ShareRecordParser';
 import { BusinessError } from '@kit.BasicServicesKit';
 import '../view/ShareConfigView'; // 导入命名路由页面，确保 @Entry({ routeName }) 注册生效
 
@@ -30,18 +29,21 @@ const TAG = 'WGShareExtAbility';
  * 分享扩展Ability
  *
  * 接收其他应用通过系统分享面板分享到本应用的内容，
- * 从分享内容中解析目标应用包名（链接 id 参数），
+ * 通过 ShareParserFactory 工厂模式按 UTD 类型路由到对应解析器，
+ * 从分享内容中解析目标应用包名、名称、AppGallery URL 等信息，
  * 加载配置选择页面 ShareConfigView。
  *
+ * 支持的分享格式:
+ * - com.android.apk (APK文件分享) — 从文件路径提取包名，不抓取图标
+ * - general.hyperlink (应用市场链接分享) — 从URL id参数提取包名，抓取图标
+ * - 其他UTD类型 — 回退到通用解析器
+ *
  * ShareExtensionAbility 运行在独立的 UIExtension 进程中，
- * 与主应用的 UIAbility 进程隔离。此设计确保：
- * - 应用在前台时接收分享不会重启主应用
- * - 分享操作完成后 ExtensionAbility 进程自动销毁
- * - 与主 UIAbility 的生命周期完全独立
+ * 与主应用的 UIAbility 进程隔离。
  */
 export default class WGShareExtAbility extends ShareExtensionAbility {
   override onSessionCreate(want: Want, session: UIExtensionContentSession): void {
-    LLog.info(TAG, 'onSessionCreate entry — ShareExtensionAbility runs in independent UIExtension process');
+    LLog.info(TAG, 'onSessionCreate — ShareExtensionAbility runs in independent UIExtension process');
 
     // 记录进程信息
     try {
@@ -57,14 +59,6 @@ export default class WGShareExtAbility extends ShareExtensionAbility {
       LLog.info(TAG, 'Database initialized in ShareExtension process');
     } catch (e) {
       LLog.error(TAG, { error: e, message: 'Failed to initialize database in ShareExtension process' });
-    }
-
-    // 初始化 AppIconCache
-    try {
-      AppIconCache.init(this.context);
-      LLog.info(TAG, 'AppIconCache initialized in ShareExtension process');
-    } catch (e) {
-      LLog.error(TAG, { error: e, message: 'Failed to initialize AppIconCache' });
     }
 
     // 初始化设置偏好
@@ -87,15 +81,17 @@ export default class WGShareExtAbility extends ShareExtensionAbility {
     const storage: LocalStorage = new LocalStorage();
     storage.setOrCreate('bundleName', '');
     storage.setOrCreate('appName', '');
+    storage.setOrCreate('appGalleryUrl', '');
+    storage.setOrCreate('shouldFetchIcon', false);
     storage.setOrCreate('session', session);
 
-    // 从分享内容中解析包名，获取应用名称，提取 debug 数据
+    // 从分享内容中解析包名（使用工厂模式按UTD类型路由）
     systemShare.getSharedData(want).then((data: systemShare.SharedData) => {
       const records = data.getRecords();
       LLog.info(TAG, `getSharedData: ${records.length} record(s)`);
 
-      let parsedBundleName: string | undefined = undefined;
       const debugInfos: ShareDebugRecordInfo[] = [];
+      let bestResult: ShareParseResult | undefined = undefined;
 
       for (const record of records) {
         const info: ShareDebugRecordInfo = {
@@ -109,30 +105,25 @@ export default class WGShareExtAbility extends ShareExtensionAbility {
         debugInfos.push(info);
         LLog.info(TAG, `ShareRecord: utd=${info.utd}, content=${info.content}, uri=${info.uri}`);
 
-        // 优先从 content 解析，其次从 uri 解析
-        if (parsedBundleName === undefined && info.content.length > 0) {
-          parsedBundleName = ClipboardParser.parseBundleName(info.content);
-        }
-        if (parsedBundleName === undefined && info.uri.length > 0) {
-          parsedBundleName = ClipboardParser.parseBundleName(info.uri);
+        // 使用工厂模式解析：按UTD类型自动路由到对应解析器
+        if (bestResult === undefined) {
+          const result = ShareParserFactory.parse(info.utd, info.content, info.uri, info.title, info.label);
+          if (result !== undefined) {
+            bestResult = result;
+            LLog.info(TAG, `Factory parsed: bundleName=${result.bundleName}, appName=${result.appName}, shouldFetchIcon=${result.shouldFetchIcon}`);
+          }
         }
       }
 
-      if (parsedBundleName !== undefined && parsedBundleName.length > 0) {
-        LLog.info(TAG, `Parsed bundleName from share content: ${parsedBundleName}`);
-        storage.setOrCreate('bundleName', parsedBundleName);
-
-        // 异步获取应用名称
-        AppIconCache.getAppName(parsedBundleName, this.context).then((name: string | undefined) => {
-          if (name && name.length > 0) {
-            LLog.info(TAG, `Got appName for ${parsedBundleName}: ${name}`);
-            storage.setOrCreate('appName', name);
-          }
-        }).catch((e: BusinessError) => {
-          LLog.warn(TAG, { error: e, message: `Failed to get appName for ${parsedBundleName}` });
-        });
+      // 将解析结果写入 LocalStorage
+      if (bestResult !== undefined) {
+        storage.setOrCreate('bundleName', bestResult.bundleName);
+        storage.setOrCreate('appName', bestResult.appName);
+        storage.setOrCreate('appGalleryUrl', bestResult.appGalleryUrl);
+        storage.setOrCreate('shouldFetchIcon', bestResult.shouldFetchIcon);
+        LLog.info(TAG, `Parsed result stored: bundleName=${bestResult.bundleName}, shouldFetchIcon=${bestResult.shouldFetchIcon}`);
       } else {
-        LLog.info(TAG, 'Failed to parse bundleName from share content');
+        LLog.info(TAG, 'Failed to parse any share record');
       }
 
       storage.setOrCreate('shareDebugInfos', JSON.stringify(debugInfos));
@@ -144,20 +135,20 @@ export default class WGShareExtAbility extends ShareExtensionAbility {
     // 通过命名路由加载配置选择页面
     try {
       session.loadContentByName('ShareConfigView', storage);
-      LLog.info(TAG, 'ShareConfigView loaded via loadContentByName — independent of main UIAbility lifecycle');
+      LLog.info(TAG, 'ShareConfigView loaded via loadContentByName');
     } catch (e) {
       LLog.error(TAG, { error: e, message: 'Failed to load ShareConfigView via loadContentByName' });
     }
 
-    LLog.info(TAG, 'onSessionCreate exit — foreground sharing works without restarting main app');
+    LLog.info(TAG, 'onSessionCreate exit');
   }
 
   override onSessionDestroy(session: UIExtensionContentSession): void {
-    LLog.info(TAG, 'onSessionDestroy — ShareExtension process session destroyed independently');
+    LLog.info(TAG, 'onSessionDestroy');
   }
 
   override onForeground(): void {
-    LLog.info(TAG, 'onForeground — ShareExtensionAbility lifecycle is independent of main UIAbility');
+    LLog.info(TAG, 'onForeground');
   }
 
   override onBackground(): void {

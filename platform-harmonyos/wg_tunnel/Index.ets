@@ -46,11 +46,13 @@ export * from './src/main/ets/model/entity/ClientEditConfig';
 
 export * from './src/main/ets/model/entity/AppFilterMode';
 
-export * from './src/main/ets/model/AppIconCache';
+export * from './src/main/ets/model/entity/AppFilterMeta';
 
 export * from './src/main/ets/model/ClipboardParser';
 
 export * from './src/main/ets/model/WGSettingsPrefs';
+
+export * from './src/main/ets/model/ShareRecordParser';
 
 export { VpnEventTag } from './src/main/ets/model/entity/VPNEventStatusParams';
 

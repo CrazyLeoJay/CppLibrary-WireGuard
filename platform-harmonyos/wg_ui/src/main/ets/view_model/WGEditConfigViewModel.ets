@@ -16,7 +16,6 @@
  */
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
-import { AppIconCache } from 'wg_tunnel/src/main/ets/model/AppIconCache';
 import { ClipboardParser } from 'wg_tunnel/src/main/ets/model/ClipboardParser';
 import { pasteboard } from '@kit.BasicServicesKit';
 import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
@@ -24,7 +23,7 @@ import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf, getDnsMode, AppFilterMode } from 'wg_tunnel';
+import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf, getDnsMode, AppFilterMode, AppFilterItem, AppFilterMeta } from 'wg_tunnel';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -81,12 +80,19 @@ export default class WGNewConfigViewModel {
     // 加载应用过滤配置
     const excludedApps = config.conf.inter.excludedApplications;
     const includedApps = config.conf.inter.includedApplications;
+    const filterMeta = config.conf.inter.appFilterMeta;
     if (includedApps && includedApps.length > 0) {
       this.client.filterMode = AppFilterMode.INCLUDED;
-      this.client.filterApps = includedApps.slice();
+      this.client.filterApps = includedApps.map((name: string): AppFilterItem => {
+        const meta = filterMeta?.[name];
+        return { bundleName: name, appName: meta?.appName, isShared: meta?.isShared };
+      });
     } else if (excludedApps && excludedApps.length > 0) {
       this.client.filterMode = AppFilterMode.EXCLUDED;
-      this.client.filterApps = excludedApps.slice();
+      this.client.filterApps = excludedApps.map((name: string): AppFilterItem => {
+        const meta = filterMeta?.[name];
+        return { bundleName: name, appName: meta?.appName, isShared: meta?.isShared };
+      });
     } else {
       this.client.filterMode = AppFilterMode.NONE;
       this.client.filterApps = [];
@@ -135,22 +141,6 @@ export default class WGNewConfigViewModel {
       }
     } else {
       this.client.publicKey = undefined;
-    }
-  }
-
-  /**
-   * 监听 filterApps 变化，当有新包名添加时触发图标缓存
-   */
-  @Monitor("client.filterApps")
-  onFilterAppsChange(): void {
-    const apps = this.client.filterApps;
-    for (const appName of apps) {
-      if (appName && appName.length > 0) {
-        // 异步触发图标获取，不阻塞主流程
-        AppIconCache.getAppIcon(appName).catch((e: BusinessError) => {
-          LLog.warn(TAG, { error: e, message: `Failed to fetch icon for ${appName}` });
-        });
-      }
     }
   }
 
@@ -281,7 +271,7 @@ export default class WGNewConfigViewModel {
       }
       const bundleName = ClipboardParser.parseBundleName(text);
       if (bundleName !== undefined && bundleName.length > 0) {
-        this.client.filterApps.push(bundleName);
+        this.client.filterApps.push({ bundleName: bundleName, isShared: false });
         LLog.info(TAG, `addFromClipboard: added bundleName=${bundleName} to filterApps`);
         this.clipboardStatus = ClipboardStatus.HAS_VALUE;
         this.clipboardBundleName = bundleName;
@@ -394,19 +384,36 @@ export default class WGNewConfigViewModel {
     // 根据 filterMode 构建过滤字段，确保互斥
     let excludedApplications: string[] | undefined = undefined;
     let includedApplications: string[] | undefined = undefined;
+    let appFilterMeta: Record<string, AppFilterMeta> | undefined = undefined;
     if (this.client.filterMode === AppFilterMode.EXCLUDED) {
-      const apps = this.client.filterApps
-        .map((it) => it.trim())
-        .filter((it) => it.length > 0);
-      if (apps.length > 0) {
-        excludedApplications = apps;
+      const items = this.client.filterApps
+        .filter((it) => it.bundleName.trim().length > 0);
+      if (items.length > 0) {
+        excludedApplications = items.map((it) => it.bundleName.trim());
+        const meta: Record<string, AppFilterMeta> = {};
+        for (const item of items) {
+          if (item.appName || item.isShared) {
+            meta[item.bundleName.trim()] = { appName: item.appName, isShared: item.isShared };
+          }
+        }
+        if (Object.keys(meta).length > 0) {
+          appFilterMeta = meta;
+        }
       }
     } else if (this.client.filterMode === AppFilterMode.INCLUDED) {
-      const apps = this.client.filterApps
-        .map((it) => it.trim())
-        .filter((it) => it.length > 0);
-      if (apps.length > 0) {
-        includedApplications = apps;
+      const items = this.client.filterApps
+        .filter((it) => it.bundleName.trim().length > 0);
+      if (items.length > 0) {
+        includedApplications = items.map((it) => it.bundleName.trim());
+        const meta: Record<string, AppFilterMeta> = {};
+        for (const item of items) {
+          if (item.appName || item.isShared) {
+            meta[item.bundleName.trim()] = { appName: item.appName, isShared: item.isShared };
+          }
+        }
+        if (Object.keys(meta).length > 0) {
+          appFilterMeta = meta;
+        }
       }
     }
 
@@ -421,6 +428,7 @@ export default class WGNewConfigViewModel {
           dns: dns,
           excludedApplications: excludedApplications,
           includedApplications: includedApplications,
+          appFilterMeta: appFilterMeta,
         },
         peers: dbPeers,
       }

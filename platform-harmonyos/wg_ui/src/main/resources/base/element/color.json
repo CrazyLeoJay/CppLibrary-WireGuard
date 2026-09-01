@@ -27,6 +27,54 @@
     {
       "name": "symbol_color",
       "value": "#000"
+    },
+    {
+      "name": "share_primary_text",
+      "value": "#E6000000"
+    },
+    {
+      "name": "share_secondary_text",
+      "value": "#99000000"
+    },
+    {
+      "name": "share_tertiary_text",
+      "value": "#FF666666"
+    },
+    {
+      "name": "share_placeholder_text",
+      "value": "#FF999999"
+    },
+    {
+      "name": "share_debug_accent",
+      "value": "#FF6600"
+    },
+    {
+      "name": "share_debug_content_text",
+      "value": "#FF333333"
+    },
+    {
+      "name": "share_debug_content_bg",
+      "value": "#FFF5F5F5"
+    },
+    {
+      "name": "share_debug_border",
+      "value": "#FFD4A8"
+    },
+    {
+      "name": "share_btn_cancel_bg",
+      "value": "#0D000000"
+    },
+    {
+      "name": "share_btn_cancel_text",
+      "value": "#E6000000"
+    },
+    {
+      "name": "share_btn_warning_bg",
+      "value": "#FFE84026"
+    },
+    {
+      "name": "share_unselected_border",
+      "value": "#FFCCCCCC"
     }
   ]
 }

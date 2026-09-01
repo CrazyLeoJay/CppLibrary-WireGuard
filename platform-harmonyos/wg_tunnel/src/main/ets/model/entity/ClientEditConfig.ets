@@ -16,6 +16,7 @@
  */
 
 import { AppFilterMode } from './AppFilterMode';
+import { AppFilterItem } from './AppFilterMeta';
 
 /**
  * @author leojay`fu
@@ -52,5 +53,5 @@ export default class ClientEditConfig {
    */
   @Trace mtu?: number; // 配置MTU
   @Trace filterMode: AppFilterMode = AppFilterMode.NONE; // 应用过滤模式
-  @Trace filterApps: string[] = []; // 包名列表
+  @Trace filterApps: AppFilterItem[] = []; // 包名列表（含元数据）
 }

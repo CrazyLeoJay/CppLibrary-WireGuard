@@ -20,7 +20,7 @@ import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
-import { LLog, DnsResolveMode, AppFilterMode, AppIconCache, WGSettingsPrefs } from 'wg_tunnel';
+import { LLog, DnsResolveMode, AppFilterMode, WGSettingsPrefs, AppFilterItem } from 'wg_tunnel';
 import { pasteboard } from '@kit.BasicServicesKit';
 
 const TAG = "编辑界面";
@@ -277,7 +277,8 @@ struct AppFilterEditModule {
           .onChange((isOn: boolean) => {
             if (isOn) {
               const defaultMode = WGSettingsPrefs.getDefaultFilterMode();
-              this.vm.client.filterMode = (defaultMode === AppFilterMode.INCLUDED) ? AppFilterMode.INCLUDED : AppFilterMode.EXCLUDED;
+              this.vm.client.filterMode =
+                (defaultMode === AppFilterMode.INCLUDED) ? AppFilterMode.INCLUDED : AppFilterMode.EXCLUDED;
             } else {
               this.vm.client.filterMode = AppFilterMode.NONE;
               this.vm.client.filterApps = [];
@@ -305,15 +306,51 @@ struct AppFilterEditModule {
         Repeat(this.vm.client.filterApps)
           .each((it) => {
             Row({ space: '8vp' }) {
-              // 应用图标（24x24vp）
-              AppIconImage({ bundleName: it.item, iconSize: 24 })
-              TextInput({ text: it.item, placeholder: '输入应用包名' })
+              // 图标：分享条目用 share.svg，手动条目用占位符号
+              if (it.item.isShared) {
+                Image($r('app.media.share'))
+                  .width('24vp')
+                  .height('24vp')
+                  .fillColor($r('app.color.share_debug_accent'))
+              } else {
+                SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+                  .fontSize('24fp')
+                  .fontColor([Color.Gray])
+              }
+
+              if (it.item.isShared) {
+                // 分享条目：只读显示，不可编辑包名
+                Column({ space: '2vp' }) {
+                  if (it.item.appName && it.item.appName.length > 0) {
+                    Text(it.item.appName)
+                      .fontSize('14fp')
+                      .fontWeight(FontWeight.Medium)
+                      .maxLines(1)
+                      .textOverflow({ overflow: TextOverflow.Ellipsis })
+                  }
+                  Text(it.item.bundleName)
+                    .fontSize('12fp')
+                    .fontColor($r('app.color.share_secondary_text'))
+                    .maxLines(1)
+                    .textOverflow({ overflow: TextOverflow.Ellipsis })
+                }
                 .layoutWeight(1)
-                .fontSize('14fp')
-                .borderRadius('6vp')
-                .onChange((value: string) => {
-                  this.vm.client.filterApps[it.index] = value;
-                })
+                .alignItems(HorizontalAlign.Start)
+              } else {
+                // 手动条目：可编辑 TextInput
+                TextInput({ text: it.item.bundleName, placeholder: '输入应用包名' })
+                  .layoutWeight(1)
+                  .fontSize('14fp')
+                  .borderRadius('6vp')
+                  .onChange((value: string) => {
+                    this.vm.client.filterApps[it.index] = {
+                      bundleName: value,
+                      appName: it.item.appName,
+                      isShared: it.item.isShared,
+                    };
+                  })
+              }
+
               SymbolGlyph($r('sys.symbol.minus_circle'))
                 .fontSize('24fp')
                 .fontColor([$r('app.color.wg_new_card_item_select_color')])
@@ -343,7 +380,7 @@ struct AppFilterEditModule {
           style: BorderStyle.Dashed,
         })
         .onClick(() => {
-          this.vm.client.filterApps.push('');
+          this.vm.client.filterApps.push({ bundleName: '', isShared: false });
         })
 
         // 从剪贴板获取按钮
@@ -389,7 +426,12 @@ struct AppFilterEditModule {
         ? $r('app.color.wg_new_card_item_select_color')
         : Color.Transparent)
       .borderRadius('8vp')
-      .padding({ top: '6vp', bottom: '6vp', left: '8vp', right: '8vp' })
+      .padding({
+        top: '6vp',
+        bottom: '6vp',
+        left: '8vp',
+        right: '8vp'
+      })
       .textAlign(TextAlign.Center)
       .layoutWeight(1)
       .onClick(() => {
@@ -526,7 +568,12 @@ struct PeerEditCardView {
         ? $r('app.color.wg_new_card_item_select_color')
         : Color.Transparent)
       .borderRadius('8vp')
-      .padding({ top: '6vp', bottom: '6vp', left: '4vp', right: '4vp' })
+      .padding({
+        top: '6vp',
+        bottom: '6vp',
+        left: '4vp',
+        right: '4vp'
+      })
       .textAlign(TextAlign.Center)
       .layoutWeight(1)
       .onClick(() => {
@@ -535,38 +582,4 @@ struct PeerEditCardView {
   }
 }
 
-/**
- * 应用图标显示组件
- * 有缓存显示缓存图标，无缓存显示默认占位图标
- */
-@ComponentV2
-struct AppIconImage {
-  @Param bundleName: string = '';
-  @Param iconSize: number = 24;
-  @Local iconPath: string | undefined = undefined;
 
-  async aboutToAppear(): Promise<void> {
-    if (this.bundleName && this.bundleName.length > 0) {
-      try {
-        this.iconPath = await AppIconCache.getAppIcon(this.bundleName);
-      } catch (e) {
-        this.iconPath = undefined;
-      }
-    }
-  }
-
-  build() {
-    if (this.iconPath && this.iconPath.length > 0) {
-      Image(this.iconPath)
-        .width(`${this.iconSize}vp`)
-        .height(`${this.iconSize}vp`)
-        .borderRadius('4vp')
-        .objectFit(ImageFit.Cover)
-    } else {
-      // 占位图标：使用系统符号
-      SymbolGlyph($r('sys.symbol.square_grid_2x2'))
-        .fontSize(`${this.iconSize}fp`)
-        .fontColor([Color.Gray])
-    }
-  }
-}
