@@ -251,7 +251,10 @@ export struct WGMainView {
           ListItem() {
             MainItemView({ vm: this.vm, data: it.item, index: it.index })
               .onClick(() => {
-                WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
+                WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id }, () => {
+                  LLog.info(TAG, "onPop 从预览页返回，刷新列表")
+                  this.vm.loadConfigs();
+                });
               })
           }
           .swipeAction({

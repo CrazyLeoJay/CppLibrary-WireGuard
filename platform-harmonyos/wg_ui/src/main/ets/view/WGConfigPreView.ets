@@ -81,6 +81,10 @@ export struct WGConfigPreViewNavDest {
     //   main: `WireGuard：${this.vm.configName}`,
     //   sub: this.subTitle,
     // })
+    .onBackPressed(()=>{
+      this.vm.nav.pop({});
+      return true;
+    })
     .onReady((data) => {
       if (data.pathStack instanceof NavPathStack) {
         this.vm.nav = data.pathStack
@@ -90,7 +94,6 @@ export struct WGConfigPreViewNavDest {
         const params = data.pathInfo.param as WGConfigPreViewParams;
         this.vm.params = params;
         this.vm.loadData(params);
-        // 打开预览界面时主动查询VPN状态，获取VPN进程实际连接IP
         WireGuard.event.publishVpnStatusQuery();
       } else {
         LLog.warn(TAG, "未得到参数！")
