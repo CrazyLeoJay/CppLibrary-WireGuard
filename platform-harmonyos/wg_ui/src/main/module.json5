@@ -6,6 +6,62 @@
     "deviceTypes": [
       "default",
       "tablet"
+    ],
+    "extensionAbilities": [
+      {
+        "name": "WGShareExtAbility",
+        "srcEntry": "./ets/ability/WGShareExtAbility.ets",
+        "type": "share",
+        "exported": true,
+        "label": "$string:share_ability_label",
+        "description": "$string:share_ability_desc",
+        "icon": "$media:wg_icon_foreground",
+        "skills": [
+          {
+            "actions": [
+              "ohos.want.action.sendData"
+            ],
+            "uris": [
+              {
+                "scheme": "file",
+                "utd": "general.object",
+                "maxFileSupported": 1
+              },
+//              {
+//                "scheme": "file",
+//                "utd": "general.url",
+//                "maxFileSupported": 1
+//              },
+//              {
+//                "scheme": "file",
+//                "utd": "'general.hyperlink",
+//                "maxFileSupported": 1
+//              },
+//              {
+//                "scheme": "file",
+//                "utd": "general.symlink",
+//                "maxFileSupported": 1
+//              },    {
+//                "scheme": "file",
+//                "utd": "general.html",
+//                "maxFileSupported": 1
+//              },
+            ]
+          }
+        ]
+      }
+    ],
+    "requestPermissions": [
+      {
+        "name": "ohos.permission.GET_BUNDLE_INFO",
+        "reason": "$string:perm_reason_get_bundle_info",
+        "usedScene": {
+          "abilities": [
+            "WGShareExtAbility"
+          ],
+          "when": "inuse"
+        }
+      }
     ]
   }
 }

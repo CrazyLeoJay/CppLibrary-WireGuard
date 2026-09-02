@@ -288,6 +288,8 @@ namespace WireGuard {
         PrivateKey private_key{};
         std::shared_ptr<uint32_t> listener_port{nullptr}; // 监听端口默认没有，这样socket可以随机选择一个端口进行绑定
         std::shared_ptr<IPAddress> bind_address{nullptr};
+        std::vector<std::string> excludedApplications; // 排除的应用包名列表
+        std::vector<std::string> includedApplications; // 包含的应用包名列表
     };
 
     /**

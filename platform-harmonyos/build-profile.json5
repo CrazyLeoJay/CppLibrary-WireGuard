@@ -1,65 +1,65 @@
 {
-  "app": {
-    "signingConfigs": [
+  app: {
+    signingConfigs: [
       {
-        "name": "default",
-        "type": "HarmonyOS",
-        "material": {
-          "certpath": "C:/Users/Leojay/.ohos/config/default_platform-harmonyos_thSWZrpAD9ugR6ZGzvZnaeNv6cjyP4OVwQDuCuHxzJ8=.cer",
-          "keyAlias": "debugKey",
-          "keyPassword": "0000001AAD9A5169003A4868978CA1A84B0D838FB95C1526AA452440B8817A2FAF346B675A3A3CCF913B",
-          "profile": "C:/Users/Leojay/.ohos/config/default_platform-harmonyos_thSWZrpAD9ugR6ZGzvZnaeNv6cjyP4OVwQDuCuHxzJ8=.p7b",
-          "signAlg": "SHA256withECDSA",
-          "storeFile": "C:/Users/Leojay/.ohos/config/default_platform-harmonyos_thSWZrpAD9ugR6ZGzvZnaeNv6cjyP4OVwQDuCuHxzJ8=.p12",
-          "storePassword": "0000001A82DD552311949693D446315352C1A0795493535659C830726A954094B8ADC8857C6088C321E5"
-        }
-      }
+        name: 'default',
+        type: 'HarmonyOS',
+        material: {
+          certpath: 'C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_iJ7G2DIQzRIwU7btNzBF2DVvN94cbCYmsCjzWULjT8=.cer',
+          keyAlias: 'debugKey',
+          keyPassword: '0000001b5d52d2a5891f9ddb2c6401ad1060c93e2ffb9a6f803b8d55004c6d5a1fb2c0a73c356d19cf2c3d',
+          profile: 'C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_iJ7G2DIQzRIwU7btNzBF2DVvN94cbCYmsCjzWULjT8=.p7b',
+          signAlg: 'SHA256withECDSA',
+          storeFile: 'C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_iJ7G2DIQzRIwU7btNzBF2DVvN94cbCYmsCjzWULjT8=.p12',
+          storePassword: '0000001b5d52d2a5891f9ddb2c6401ad1060c93e2ffb9a6f803b8d55004c6d5a1fb2c0a73c356d19cf2c3d',
+        },
+      },
     ],
-    "products": [
+    products: [
       {
-        "name": "default",
-        "signingConfig": "default",
-        "targetSdkVersion": "6.1.1(24)",
-        "compatibleSdkVersion": "6.0.1(21)",
-        "runtimeOS": "HarmonyOS",
-        "buildOption": {
-          "strictMode": {
-            "caseSensitiveCheck": true,
-            "useNormalizedOHMUrl": true
+        name: 'default',
+        signingConfig: 'default',
+        targetSdkVersion: '6.1.1(24)',
+        compatibleSdkVersion: '6.0.1(21)',
+        runtimeOS: 'HarmonyOS',
+        buildOption: {
+          strictMode: {
+            caseSensitiveCheck: true,
+            useNormalizedOHMUrl: true,
           },
-          "nativeCompiler": "BiSheng"
-        }
-      }
+          nativeCompiler: 'BiSheng',
+        },
+      },
     ],
-    "buildModeSet": [
+    buildModeSet: [
       {
-        "name": "debug"
+        name: 'debug',
       },
       {
-        "name": "release"
-      }
-    ]
+        name: 'release',
+      },
+    ],
   },
-  "modules": [
+  modules: [
     {
-      "name": "entry",
-      "srcPath": "./entry",
-      "targets": [
+      name: 'entry',
+      srcPath: './entry',
+      targets: [
         {
-          "name": "default",
-          "applyToProducts": [
-            "default"
-          ]
-        }
-      ]
+          name: 'default',
+          applyToProducts: [
+            'default',
+          ],
+        },
+      ],
     },
     {
-      "name": "wg_tunnel",
-      "srcPath": "./wg_tunnel",
+      name: 'wg_tunnel',
+      srcPath: './wg_tunnel',
     },
     {
-      "name": "wg_ui",
-      "srcPath": "./wg_ui",
-    }
-  ]
+      name: 'wg_ui',
+      srcPath: './wg_ui',
+    },
+  ],
 }

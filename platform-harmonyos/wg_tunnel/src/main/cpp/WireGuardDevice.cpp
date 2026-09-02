@@ -617,7 +617,7 @@ void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &devi
                 device.listener_port = std::make_shared<uint32_t>(port);
             }
         } catch (const std::exception &e) {
-            LOG_ERROR("没有配置 listenerPort， 获取异常: %{public}s", e.what());
+            LOG_WARN("没有配置 listenerPort， 获取异常: %{public}s", e.what());
         }
     }
 
@@ -626,6 +626,22 @@ void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &devi
         napi_get_named_property(env, arg, "bindAddress", &nvIp);
         device.bind_address = std::make_shared<WireGuard::IPAddress>();
         GetIPAddress(env, nvIp, *device.bind_address);
+    }
+
+    // 读取 excludedApplications（可选 string 数组）
+    if (isHasProp(env, arg, "excludedApplications")) {
+        auto callback = [](napi_env env, napi_value nvItem, uint32_t index) {
+            return NapiTools::napiGetString(env, nvItem, "excludedApplications");
+        };
+        getForArray<std::string>(env, arg, "excludedApplications", device.excludedApplications, callback);
+    }
+
+    // 读取 includedApplications（可选 string 数组）
+    if (isHasProp(env, arg, "includedApplications")) {
+        auto callback = [](napi_env env, napi_value nvItem, uint32_t index) {
+            return NapiTools::napiGetString(env, nvItem, "includedApplications");
+        };
+        getForArray<std::string>(env, arg, "includedApplications", device.includedApplications, callback);
     }
 }
 void GetPeer(napi_env env, napi_value arg, WireGuard::PeerConfig &peer) {
@@ -660,7 +676,13 @@ void GetPeer(napi_env env, napi_value arg, WireGuard::PeerConfig &peer) {
     }
     // keepaliveInterval
     if (isHasProp(env, arg, "keepaliveInterval")) {
-        peer.keepaliveInterval = getPropUint32_t(env, arg, "keepaliveInterval");
+        try {
+            // 保活间隔时间如果获取失败默认为0
+            peer.keepaliveInterval = getPropUint32_t(env, arg, "keepaliveInterval");
+        } catch (const std::exception &e) {
+            LOG_WARN("属性 keepaliveInterval 未获取到，默认为 0");
+            peer.keepaliveInterval = 0;
+        }
     }
 }
 

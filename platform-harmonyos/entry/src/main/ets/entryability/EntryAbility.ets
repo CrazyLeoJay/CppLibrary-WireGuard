@@ -18,7 +18,7 @@ import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, VpnConfigAction, WGEventThrow, WireGuard } from 'wg_tunnel';
+import { LLog, StreamLogMessage, SubEventCancel, VpnEventTag, VpnConfigAction, WGEventThrow, WireGuard, WGSettingsPrefs } from 'wg_tunnel';
 import { longTaskModel } from '../model/LongTaskModel';
 
 const TAG = "EntryAbility"
@@ -55,6 +55,11 @@ export default class EntryAbility extends UIAbility {
       LLog.error(TAG, `设置颜色模式失败: ${JSON.stringify(err)}`);
     }
     LLog.info(TAG, 'Ability onCreate');
+
+    // 初始化设置偏好（WGSettingsPrefs 用于开发者模式、默认过滤模式等设置项的持久化）
+    WGSettingsPrefs.init(this.context).catch((e: BusinessError) => {
+      LLog.warn(TAG, `WGSettingsPrefs 初始化失败: ${(e as BusinessError).message}`);
+    });
 
     // 初始化VPN事件监听（backgroundTaskManager要求UIAbilityContext，因此放在EntryAbility中）
     this.initVpnListeners();

@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>WG-VPN 文档 · WireGuard for HarmonyOS</title>
+  <meta name="description" content="WG-VPN —— 基于 WireGuard 白皮书、使用 C++14 跨平台实现的 HarmonyOS VPN 应用。使用指南、功能说明、意见反馈。" />
+  <link rel="icon" href="assets/favicon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="assets/wg-icon.webp" />
+
+  <link id="wgBaseTheme" rel="stylesheet" href="https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/dark.css" />
+
+  <style>
+    /* ===== 令牌兜底（默认：自定义·暗夜蓝）===== */
+    :root {
+      --theme-color: #3b82f6;
+      --wg-brand: #3b82f6; --wg-brand-strong: #1d4ed8; --wg-brand-soft: rgba(59,130,246,.15);
+      --wg-bg: #0b1220; --wg-surface: #0b1220; --wg-surface-2: #0f172a;
+      --wg-ink: #eaf2ff; --wg-muted: #b9c8e8; --wg-border: #1e2a44; --wg-code-bg: #0f172a;
+      --wg-quote-bg: rgba(59,130,246,.15); --wg-quote-border: #3b82f6; --wg-quote-ink: #dbeafe;
+    }
+
+    /* ===== 自定义配色主题（变量换肤）===== */
+    html.theme-c-dark {
+      --theme-color: #3b82f6;
+      --wg-brand: #3b82f6; --wg-brand-strong: #1d4ed8; --wg-brand-soft: rgba(59,130,246,.15);
+      --wg-bg: #0b1220; --wg-surface: #0b1220; --wg-surface-2: #0f172a;
+      --wg-ink: #eaf2ff; --wg-muted: #b9c8e8; --wg-border: #1e2a44; --wg-code-bg: #0f172a;
+      --wg-quote-bg: rgba(59,130,246,.15); --wg-quote-border: #3b82f6; --wg-quote-ink: #dbeafe;
+    }
+    html.theme-c-obsidian {
+      --theme-color: #f43f5e;
+      --wg-brand: #f43f5e; --wg-brand-strong: #be123c; --wg-brand-soft: rgba(244,63,94,.14);
+      --wg-bg: #0d0d0f; --wg-surface: #0d0d0f; --wg-surface-2: #141417;
+      --wg-ink: #ecebea; --wg-muted: #9a9a9a; --wg-border: #2a2a30; --wg-code-bg: #141417;
+      --wg-quote-bg: rgba(244,63,94,.12); --wg-quote-border: #f43f5e; --wg-quote-ink: #ffe4e6;
+    }
+    html.theme-c-forest {
+      --theme-color: #22c55e;
+      --wg-brand: #22c55e; --wg-brand-strong: #15803d; --wg-brand-soft: rgba(34,197,94,.14);
+      --wg-bg: #0a1712; --wg-surface: #0a1712; --wg-surface-2: #0f1f18;
+      --wg-ink: #e7f6ec; --wg-muted: #a7c4b1; --wg-border: #1e3a2b; --wg-code-bg: #0f1f18;
+      --wg-quote-bg: rgba(34,197,94,.12); --wg-quote-border: #22c55e; --wg-quote-ink: #d1fae5;
+    }
+    html.theme-c-violet {
+      --theme-color: #8b5cf6;
+      --wg-brand: #8b5cf6; --wg-brand-strong: #6d28d9; --wg-brand-soft: rgba(139,92,246,.16);
+      --wg-bg: #130a1f; --wg-surface: #130a1f; --wg-surface-2: #1a1030;
+      --wg-ink: #ede9fe; --wg-muted: #bfaef0; --wg-border: #2c1d4a; --wg-code-bg: #1a1030;
+      --wg-quote-bg: rgba(139,92,246,.14); --wg-quote-border: #8b5cf6; --wg-quote-ink: #ede9fe;
+    }
+    html.theme-c-teal {
+      --theme-color: #14b8a6;
+      --wg-brand: #14b8a6; --wg-brand-strong: #0d9488; --wg-brand-soft: rgba(20,184,166,.15);
+      --wg-bg: #08212b; --wg-surface: #08212b; --wg-surface-2: #0c2b36;
+      --wg-ink: #d5f5f0; --wg-muted: #94c7c0; --wg-border: #1c4553; --wg-code-bg: #0c2b36;
+      --wg-quote-bg: rgba(20,184,166,.13); --wg-quote-border: #14b8a6; --wg-quote-ink: #ccfbf1;
+    }
+    html.theme-c-light {
+      --theme-color: #2563eb;
+      --wg-brand: #2563eb; --wg-brand-strong: #1d4ed8; --wg-brand-soft: rgba(37,99,235,.12);
+      --wg-bg: #f6f8fb; --wg-surface: #ffffff; --wg-surface-2: #eef2f7;
+      --wg-ink: #1f2937; --wg-muted: #5b6b83; --wg-border: #e5e7eb; --wg-code-bg: #eef2f7;
+      --wg-quote-bg: rgba(37,99,235,.08); --wg-quote-border: #2563eb; --wg-quote-ink: #1f2937;
+    }
+
+    /* ===== 官方主题令牌（供我的布局组件/切换器适配）===== */
+    html.theme-vue {
+      --theme-color: #42b983; --wg-brand: #42b983; --wg-brand-strong: #2c8753; --wg-brand-soft: rgba(66,185,131,.12);
+      --wg-bg: #ffffff; --wg-surface: #ffffff; --wg-surface-2: #f4f4f4;
+      --wg-ink: #34495e; --wg-muted: #7f8c8d; --wg-border: #e0e0e0; --wg-code-bg: #f8f8f8;
+      --wg-quote-bg: rgba(66,185,131,.08); --wg-quote-border: #42b983; --wg-quote-ink: #34495e;
+    }
+    html.theme-buble {
+      --theme-color: #3367d6; --wg-brand: #3367d6; --wg-brand-strong: #2450a8; --wg-brand-soft: rgba(51,103,214,.12);
+      --wg-bg: #ffffff; --wg-surface: #ffffff; --wg-surface-2: #f0f0f0;
+      --wg-ink: #333333; --wg-muted: #777777; --wg-border: #e6e6e6; --wg-code-bg: #f7f7f7;
+      --wg-quote-bg: rgba(51,103,214,.08); --wg-quote-border: #3367d6; --wg-quote-ink: #333333;
+    }
+    html.theme-dark {
+      --theme-color: #42b983; --wg-brand: #42b983; --wg-brand-strong: #2c8753; --wg-brand-soft: rgba(66,185,131,.15);
+      --wg-bg: #23272f; --wg-surface: #23272f; --wg-surface-2: #2c313c;
+      --wg-ink: #aab2c0; --wg-muted: #8a93a5; --wg-border: #3a4148; --wg-code-bg: #2c313c;
+      --wg-quote-bg: rgba(66,185,131,.15); --wg-quote-border: #42b983; --wg-quote-ink: #aab2c0;
+    }
+    html.theme-pure {
+      --theme-color: #444444; --wg-brand: #444444; --wg-brand-strong: #000000; --wg-brand-soft: rgba(0,0,0,.08);
+      --wg-bg: #ffffff; --wg-surface: #ffffff; --wg-surface-2: #fafafa;
+      --wg-ink: #000000; --wg-muted: #666666; --wg-border: #eeeeee; --wg-code-bg: #f6f6f6;
+      --wg-quote-bg: rgba(0,0,0,.05); --wg-quote-border: #444444; --wg-quote-ink: #000000;
+    }
+
+    body {
+      font-family: "Inter", "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+
+    /* ===== 封面背景由 docsify 自动生成（随机渐变，每次变化）；文字用深色保证可读 ===== */
+    .cover-main img { max-height: 220px; filter: drop-shadow(0 1px 3px rgba(15,23,42,.55)) drop-shadow(0 5px 14px rgba(15,23,42,.35)); }
+    .cover-main h1 { color: #1f2937 !important; }
+    .cover-main .cover-desc, .cover-main blockquote { color: #334155 !important; }
+    .cover-main blockquote { border-left: 0; }
+    /* 封面内联的应用市场小图标（与文字同高） */
+    .cover-main img[src*="appgallery-icon"] {
+      display: inline-block;
+      width: 1em; height: 1em;
+      max-width: 1em; max-height: 1em;
+      margin: 0 .35em 0 0;
+      vertical-align: -0.15em;
+      filter: none;
+    }
+    /* 仅作用于底部按钮链接，避免误伤标题/副标题的 anchor */
+    .cover-main > p a {
+      color: #1f2937 !important;
+      border: 2px solid var(--wg-brand) !important;
+      border-radius: 999px;
+      padding: .5rem 1.4rem;
+      margin: .4rem;
+      display: inline-block;
+      text-decoration: none;
+    }
+    .cover-main > p a:last-child { background: var(--wg-brand) !important; color: #fff !important; }
+
+    /* ===== 布局 / 组件（对所有主题生效）===== */
+    .markdown-section {
+      max-width: 900px;
+      padding: 3rem 2rem;
+    }
+    /* 通用图片（图标兜底） */
+    .markdown-section img {
+      border-radius: .6rem;
+      border: 1px solid var(--wg-border);
+      box-shadow: 0 6px 18px rgba(0,0,0,.25);
+      display: block;
+      max-width: min(100%, 300px);
+      max-height: 540px;
+      width: auto;
+      height: auto;
+      margin: 1rem auto;
+    }
+    /* 实机截图：统一宽度，长图高度按比例 */
+    .markdown-section img[src*="screens-webp"] { width: 300px; max-width: 100%; max-height: none; height: auto; }
+    /* 正文里内联的应用市场图标（左图右文、与文字同高、可点击） */
+    .markdown-section img[src*="appgallery-icon"] {
+      display: inline-block;
+      width: 1.1em; height: 1.1em;
+      max-width: 1.1em; max-height: 1.1em;
+      margin: 0 .35em 0 0;
+      vertical-align: -0.2em;
+      border: 0; box-shadow: none; border-radius: 0;
+    }
+    /* 连续图片：并排居中、自动换行 */
+    .markdown-section .img-row {
+      display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start;
+      gap: 1rem; margin: 1rem 0;
+    }
+    .markdown-section .img-row p { margin: 0; flex: 0 1 auto; }
+    .markdown-section .img-row img { margin: 0; }
+    /* 单张图片：左文右图两列，窄屏堆叠 */
+    .markdown-section .media-row {
+      display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1.5rem; align-items: start; margin: 1.5rem 0;
+    }
+    .markdown-section .media-row .media-text { min-width: 0; }
+    .markdown-section .media-row .media-text p { margin-top: 0; }
+    .markdown-section .media-row .media-img .img-row { margin: 0; }
+    .markdown-section .media-row .media-img img[src*="screens-webp"] { width: 100%; margin: 0; }
+    @media (max-width: 767.98px) { .markdown-section .media-row { grid-template-columns: 1fr; } }
+    /* 自定义两列章节：<!-- wg-media --> 标记，文字在左、图片在右 */
+    .markdown-section .media-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 300px;
+      gap: 1.5rem;
+      align-items: start;
+      margin: 1.5rem 0;
+    }
+    .markdown-section .media-layout-text { min-width: 0; }
+    .markdown-section .media-layout-text > :first-child { margin-top: 0; }
+    .markdown-section .media-layout-img img[src*="screens-webp"] {
+      display: block;
+      margin: 0 auto;
+      max-width: 100%;
+      width: 100%;
+      height: auto;
+    }
+    @media (max-width: 767.98px) { .markdown-section .media-layout { grid-template-columns: 1fr; } }
+    /* 表格 */
+    .markdown-section table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .92rem; }
+    .markdown-section table th, .markdown-section table td { border: 1px solid var(--wg-border); padding: .5rem .7rem; }
+    .markdown-section table th { background: var(--wg-surface-2); }
+
+    /* ===== 自定义配色覆盖（仅 wg-custom 时生效，让官方主题独立呈现）===== */
+    html.wg-custom { background: var(--wg-bg); }
+    html.wg-custom body { background: var(--wg-bg); color: var(--wg-ink); }
+    /* 菜单展开/合并按钮：改成一个紧凑的圆形汉堡按钮（修复成绿色宽条） */
+    .sidebar-toggle {
+      position: fixed !important;
+      top: auto !important;
+      bottom: 1rem !important;
+      left: 1rem !important;
+      width: 46px !important;
+      height: 46px !important;
+      border-radius: 50% !important;
+      background: var(--wg-brand) !important;
+      box-shadow: 0 6px 18px rgba(0,0,0,.25) !important;
+      display: flex !important;
+      align-items: center !important;
+      justify-content: center !important;
+      z-index: 9999 !important;
+    }
+    .sidebar-toggle:hover { filter: brightness(1.1); }
+    .sidebar-toggle .sidebar-toggle-button {
+      position: static !important;
+      display: flex !important;
+      flex-direction: column !important;
+      align-items: center !important;
+      justify-content: center !important;
+      width: 20px !important;
+      height: auto !important;
+      transform: none !important;
+    }
+    .sidebar-toggle .sidebar-toggle-button span {
+      width: 20px !important;
+      height: 2px !important;
+      background: #fff !important;
+      border-radius: 1px !important;
+      margin: 2px 0 !important;
+      display: block !important;
+      position: static !important;
+      transform: none !important;
+    }
+    html.wg-custom .app-name {
+      background: transparent;
+      color: var(--wg-ink) !important;
+      padding: 1.05rem 1.2rem !important; font-weight: 700 !important; letter-spacing: .02em;
+      border-bottom: 1px solid var(--wg-border);
+    }
+    html.wg-custom .app-name-link { color: var(--wg-ink) !important; }
+    html.wg-custom .sidebar { background-color: var(--wg-surface); border-right: 1px solid var(--wg-border); }
+    html.wg-custom .sidebar .nav > ul { padding-left: 0.4rem; }
+    html.wg-custom .sidebar li > p { font-weight: 500; color: var(--wg-ink); }
+    html.wg-custom .sidebar .sidebar-nav li a { color: var(--wg-muted); border-radius: .45rem; transition: background .15s ease, color .15s ease; }
+    html.wg-custom .sidebar .sidebar-nav li a:hover { color: var(--wg-ink); background: var(--wg-brand-soft); }
+    html.wg-custom .sidebar .sidebar-nav li.active > a { color: var(--wg-ink); background: var(--wg-brand-soft); }
+    html.wg-custom .markdown-section { background: transparent; color: var(--wg-ink); }
+    html.wg-custom .markdown-section :is(h1,h2,h3,h4,h5,h6) { color: var(--wg-ink); }
+    html.wg-custom .markdown-section h1, html.wg-custom .markdown-section h2 { border-bottom: 1px solid var(--wg-border); padding-bottom: .35rem; }
+    html.wg-custom .markdown-section a { color: var(--wg-brand); }
+    html.wg-custom .markdown-section strong { color: var(--wg-ink); }
+    html.wg-custom .markdown-section blockquote { background: var(--wg-quote-bg); border-left: 4px solid var(--wg-quote-border); border-radius: .3rem; padding: .8rem 1rem; color: var(--wg-quote-ink); }
+    html.wg-custom .markdown-section code { background: var(--wg-code-bg); border-radius: .3rem; color: var(--wg-ink); }
+    html.wg-custom .markdown-section pre { background: var(--wg-code-bg); border-radius: .5rem; }
+    html.wg-custom .markdown-section pre code { background: transparent; }
+    html.wg-custom .search input { background-color: var(--wg-surface-2) !important; border: 1px solid var(--wg-border) !important; color: var(--wg-ink) !important; }
+
+    .docsify-copy-code-button { background: var(--wg-brand) !important; }
+
+    /* ===== 主题切换器 ===== */
+    .wg-theme { position: fixed; right: 1.2rem; bottom: 1.2rem; z-index: 9999; }
+    .wg-theme-btn {
+      width: 46px; height: 46px; border-radius: 50%;
+      border: 1px solid var(--wg-border); background: var(--wg-surface); color: var(--wg-ink);
+      font-size: 1.25rem; cursor: pointer; display: grid; place-items: center;
+      box-shadow: 0 8px 20px rgba(0,0,0,.25); transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .wg-theme-btn:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(0,0,0,.3); }
+    .wg-theme-panel {
+      position: absolute; right: 0; bottom: 58px; background: var(--wg-surface); border: 1px solid var(--wg-border);
+      border-radius: .8rem; padding: .5rem; min-width: 168px; box-shadow: 0 10px 30px rgba(0,0,0,.3);
+      display: none; flex-direction: column; gap: .25rem; max-height: 70vh; overflow-y: auto;
+    }
+    .wg-theme-panel.open { display: flex; }
+    .wg-theme-group { font-size: .72rem; color: var(--wg-muted); letter-spacing: .05em; padding: .4rem .6rem .2rem; text-transform: uppercase; }
+    .wg-theme-item {
+      display: flex; align-items: center; gap: .6rem; width: 100%; padding: .5rem .6rem; border: 0;
+      background: transparent; color: var(--wg-ink); border-radius: .5rem; cursor: pointer; font-size: .92rem; text-align: left;
+    }
+    .wg-theme-item:hover { background: var(--wg-brand-soft); }
+    .wg-theme-item.active { background: var(--wg-brand-soft); }
+    .wg-theme-item .swatch { width: 18px; height: 18px; border-radius: 5px; display: inline-block; border: 1px solid rgba(127,127,127,.4); flex: 0 0 auto; }
+    .wg-theme-item .label { flex: 1; }
+    .wg-theme-item.active .label::after { content: "✓"; color: var(--wg-brand); margin-left: .4rem; }
+    @media (max-width: 767px) { .wg-theme { right: .8rem; bottom: .8rem; } }
+  </style>
+</head>
+<body>
+  <div id="app">请稍候，文档正在加载…</div>
+
+  <script>
+    window.$docsify = {
+      name: 'WG-VPN',
+      nameLink: '/',
+      repo: '',
+      loadSidebar: true,
+      coverpage: true,
+      auto2top: true,
+      subMaxLevel: 3,
+      maxLevel: 4,
+      topMargin: 12,
+      alias: {
+        '/.*/_sidebar.md': '/_sidebar.md',
+        '/.*/_coverpage.md': '/_coverpage.md',
+        '/.*/_navbar.md': '/_navbar.md'
+      },
+      search: {
+        maxAge: 86400000,
+        paths: 'auto',
+        placeholder: '搜索文档…',
+        noData: '没有找到结果',
+        depth: 4
+      },
+      copyCode: {
+        buttonText: '复制',
+        errorText: '复制失败'
+      },
+      plugins: [
+        function (hook, vm) {
+          hook.afterEach(function (html) {
+            // 0) 提取并保护自定义"media-layout"章节，避免被下方规则改写
+            //    ① 成对标记：<!-- wg-media-start --> … <!-- wg-media-end -->（精确范围）
+            var mediaBlocks = [];
+            let out = html.replace(
+              /<!--\s*wg-media-start\s*-->([\s\S]*?)<!--\s*wg-media-end\s*-->/g,
+              function (m, inner) {
+                mediaBlocks.push('<div class="media-layout">' + inner + '</div>');
+                return '@@WG_MEDIA_' + (mediaBlocks.length - 1) + '@@';
+              }
+            );
+            //    ② 单标记：<!-- wg-media --> 到下一个标题（默认为章节）
+            out = out.replace(
+              /<!--\s*wg-media\s*-->([\s\S]*?)(?=<h[12]\b|$)/g,
+              function (m, inner) {
+                mediaBlocks.push('<div class="media-layout">' + inner + '</div>');
+                return '@@WG_MEDIA_' + (mediaBlocks.length - 1) + '@@';
+              }
+            );
+            // 表格包裹（横向滚动）
+            out = out
+              .replace(/<table>/g, '<div class="table-wrap"><table>')
+              .replace(/<\/table>/g, '</table></div>');
+            // 将连续出现的 <p><img ...></p> 合并为一个并排居中的容器，一行放不下自动换行
+            out = out.replace(
+              /((?:<p>\s*<img[^>]*?>\s*<\/p>\s*)+)/g,
+              function (m) { return '<div class="img-row">' + m + '</div>'; }
+            );
+            // 单张图片：与其上方紧跟的说明文字组成“左文右图”两列
+            out = out.replace(
+              /((?:<p>(?:(?!<\/p>).)*?<\/p>\s*)+)(<div class="img-row"><p><img[^>]*?><\/p><\/div>)/g,
+              function (m, text, imgRow) {
+                return '<div class="media-row"><div class="media-text">' + text + '</div><div class="media-img">' + imgRow + '</div></div>';
+              }
+            );
+            // 恢复 media-layout 章节
+            out = out.replace(/@@WG_MEDIA_(\d+)@@/g, function (m, i) { return mediaBlocks[+i]; });
+            return out;
+          });
+          // 将 media-layout 内容拆分为「文字左、图片右」两列
+          hook.doneEach(function () {
+            document.querySelectorAll('.media-layout').forEach(function (sec) {
+              if (sec.dataset.split) return;
+              sec.dataset.split = '1';
+              var left = document.createElement('div'); left.className = 'media-layout-text';
+              var right = document.createElement('div'); right.className = 'media-layout-img';
+              Array.prototype.slice.call(sec.childNodes).forEach(function (node) {
+                var hasImg = node.nodeType === 1 && (node.tagName === 'IMG' || (node.querySelector && node.querySelector('img')));
+                (hasImg ? right : left).appendChild(node);
+              });
+              sec.innerHTML = '';
+              sec.appendChild(left); sec.appendChild(right);
+            });
+          });
+        }
+      ]
+    };
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/search.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/emoji.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify-copy-code@2/dist/docsify-copy-code.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/docsify@4/lib/plugins/zoom-image.min.js"></script>
+
+  <!-- 主题切换器 -->
+  <div class="wg-theme" id="wgTheme">
+    <button class="wg-theme-btn" id="wgThemeBtn" type="button" title="切换主题" aria-label="切换主题">🎨</button>
+    <div class="wg-theme-panel" id="wgThemePanel"></div>
+  </div>
+  <script>
+    (function () {
+      var CDN = 'https://cdn.jsdelivr.net/npm/docsify@4/lib/themes/';
+      var AUTO_ID = 'auto';
+      // 官方内置主题（docsify CSS），切换时替换基础样式表
+      var OFFICIAL = [
+        { id: 'vue',   name: 'Vue（官方 css）',  accent: '#42b983', css: CDN + 'vue.css' },
+        { id: 'buble', name: 'Buble（官方 css）', accent: '#3367d6', css: CDN + 'buble.css' },
+        { id: 'dark',  name: 'Dark（官方 css）',  accent: '#42b983', css: CDN + 'dark.css' },
+        { id: 'pure',  name: 'Pure（官方 css）',  accent: '#444444', css: CDN + 'pure.css' }
+      ];
+      // 自定义配色主题（变量换肤）
+      var CUSTOM = [
+        { id: 'c-dark',     name: '暗夜蓝', accent: '#3b82f6' },
+        { id: 'c-obsidian', name: '曜石黑', accent: '#f43f5e' },
+        { id: 'c-forest',   name: '森林绿', accent: '#22c55e' },
+        { id: 'c-violet',   name: '紫罗兰', accent: '#8b5cf6' },
+        { id: 'c-teal',     name: '湖水青', accent: '#14b8a6' },
+        { id: 'c-light',    name: '晨光白', accent: '#2563eb' }
+      ];
+      var KEY = 'wg-theme-v2';
+      var root = document.documentElement;
+      var baseLink = document.getElementById('wgBaseTheme');
+      var btn = document.getElementById('wgThemeBtn');
+      var panel = document.getElementById('wgThemePanel');
+      var mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+
+      function allIds() {
+        return [AUTO_ID].concat(OFFICIAL.map(function (t) { return t.id; })).concat(CUSTOM.map(function (t) { return t.id; }));
+      }
+      function findOfficial(id) {
+        for (var i = 0; i < OFFICIAL.length; i++) { if (OFFICIAL[i].id === id) return OFFICIAL[i]; }
+        return null;
+      }
+      function systemDark() { return mq ? mq.matches : false; }
+      // 解析：auto → 深色用 dark、浅色用 vue；其余用原主题
+      function resolve(id) {
+        if (id === AUTO_ID) return systemDark() ? 'dark' : 'vue';
+        return id;
+      }
+      function current() {
+        var s = null;
+        try { s = localStorage.getItem(KEY); } catch (e) {}
+        return allIds().indexOf(s) > -1 ? s : AUTO_ID;
+      }
+      function applyTheme(effId) {
+        allIds().forEach(function (t) { root.classList.remove('theme-' + t); });
+        if (findOfficial(effId)) {
+          root.classList.remove('wg-custom');
+          if (baseLink) baseLink.href = findOfficial(effId).css;
+        } else {
+          root.classList.add('wg-custom');
+          if (baseLink) baseLink.href = CDN + 'dark.css';
+        }
+        root.classList.add('theme-' + effId);
+      }
+      function setActive(id) {
+        var items = panel.querySelectorAll('.wg-theme-item');
+        items.forEach(function (it) {
+          it.classList.toggle('active', it.getAttribute('data-theme') === id);
+        });
+      }
+      function select(id) {
+        applyTheme(resolve(id));
+        setActive(id);
+        try { localStorage.setItem(KEY, id); } catch (e) {}
+        panel.classList.remove('open');
+      }
+
+      // 顶部“跟随系统”入口
+      var lab = document.createElement('div');
+      lab.className = 'wg-theme-group';
+      lab.textContent = '主题';
+      panel.appendChild(lab);
+      (function () {
+        var it = document.createElement('button');
+        it.type = 'button';
+        it.className = 'wg-theme-item';
+        it.setAttribute('data-theme', AUTO_ID);
+        it.innerHTML = '<span class="swatch" style="background:linear-gradient(135deg,#eaf2ff 50%,#10151f 50%)"></span><span class="label">跟随系统（浅=vue / 深=dark）</span>';
+        it.addEventListener('click', function () { select(AUTO_ID); });
+        panel.appendChild(it);
+      })();
+
+      function addGroup(label, list) {
+        var g = document.createElement('div');
+        g.className = 'wg-theme-group';
+        g.textContent = label;
+        panel.appendChild(g);
+        list.forEach(function (t) {
+          var it = document.createElement('button');
+          it.type = 'button';
+          it.className = 'wg-theme-item';
+          it.setAttribute('data-theme', t.id);
+          it.innerHTML = '<span class="swatch" style="background:' + t.accent + '"></span><span class="label">' + t.name + '</span>';
+          it.addEventListener('click', function () { select(t.id); });
+          panel.appendChild(it);
+        });
+      }
+      addGroup('官方主题（docsify CSS）', OFFICIAL);
+      addGroup('自定义配色', CUSTOM);
+
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        panel.classList.toggle('open');
+      });
+      document.addEventListener('click', function (e) {
+        if (!e.target.closest('.wg-theme')) panel.classList.remove('open');
+      });
+
+      // 初始应用
+      var mode = current();
+      applyTheme(resolve(mode));
+      setActive(mode);
+      // 跟随系统变化
+      if (mq && mq.addEventListener) {
+        mq.addEventListener('change', function () {
+          if (current() === AUTO_ID) {
+            applyTheme(resolve(AUTO_ID));
+            setActive(AUTO_ID);
+          }
+        });
+      }
+    })();
+  </script>
+</body>
+</html>

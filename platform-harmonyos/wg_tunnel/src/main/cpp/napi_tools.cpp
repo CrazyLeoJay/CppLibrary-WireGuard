@@ -213,6 +213,56 @@ namespace NapiTools {
                 }
             }
 
+            // 读取 excludedApplications（可选 string 数组）
+            bool hasExcludedApps;
+            ns = napi_has_named_property(env, obj, "excludedApplications", &hasExcludedApps);
+            if (ns == napi_ok && hasExcludedApps) {
+                napi_value nvExcludedApps;
+                ns = napi_get_named_property(env, obj, "excludedApplications", &nvExcludedApps);
+                if (ns == napi_ok) {
+                    bool isArray;
+                    ns = napi_is_array(env, nvExcludedApps, &isArray);
+                    if (ns == napi_ok && isArray) {
+                        uint32_t arrLen;
+                        ns = napi_get_array_length(env, nvExcludedApps, &arrLen);
+                        if (ns == napi_ok) {
+                            for (uint32_t i = 0; i < arrLen; ++i) {
+                                napi_value nvItem;
+                                ns = napi_get_element(env, nvExcludedApps, i, &nvItem);
+                                if (ns == napi_ok) {
+                                    inter.excludedApplications.push_back(napiGetString(env, nvItem, "excludedApplications"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 读取 includedApplications（可选 string 数组）
+            bool hasIncludedApps;
+            ns = napi_has_named_property(env, obj, "includedApplications", &hasIncludedApps);
+            if (ns == napi_ok && hasIncludedApps) {
+                napi_value nvIncludedApps;
+                ns = napi_get_named_property(env, obj, "includedApplications", &nvIncludedApps);
+                if (ns == napi_ok) {
+                    bool isArray;
+                    ns = napi_is_array(env, nvIncludedApps, &isArray);
+                    if (ns == napi_ok && isArray) {
+                        uint32_t arrLen;
+                        ns = napi_get_array_length(env, nvIncludedApps, &arrLen);
+                        if (ns == napi_ok) {
+                            for (uint32_t i = 0; i < arrLen; ++i) {
+                                napi_value nvItem;
+                                ns = napi_get_element(env, nvIncludedApps, i, &nvItem);
+                                if (ns == napi_ok) {
+                                    inter.includedApplications.push_back(napiGetString(env, nvItem, "includedApplications"));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             return inter;
         }
 
@@ -460,6 +510,74 @@ namespace NapiTools {
                 if (ns != napi_ok) {
                     THROW_WG_EXCEPTION(
                         "createWGConfInterface方法：设置mtu属性失败，napi_set_named_property返回错误码=%d", ns
+                    );
+                }
+            }
+
+            // 写入 excludedApplications（非空时写入 string 数组）
+            if (!inter.excludedApplications.empty()) {
+                napi_value nvExcludedApps;
+                ns = napi_create_array(env, &nvExcludedApps);
+                if (ns != napi_ok) {
+                    THROW_WG_EXCEPTION(
+                        "createWGConfInterface方法：创建excludedApplications数组失败，napi_create_array返回错误码=%d", ns
+                    );
+                }
+                uint32_t idx = 0;
+                for (const auto &app : inter.excludedApplications) {
+                    napi_value nvItem;
+                    ns = napi_create_string_utf8(env, app.c_str(), app.length(), &nvItem);
+                    if (ns != napi_ok) {
+                        THROW_WG_EXCEPTION(
+                            "createWGConfInterface方法：创建excludedApplications字符串失败，napi_create_string_utf8返回错误码=%d", ns
+                        );
+                    }
+                    ns = napi_set_element(env, nvExcludedApps, idx, nvItem);
+                    if (ns != napi_ok) {
+                        THROW_WG_EXCEPTION(
+                            "createWGConfInterface方法：设置excludedApplications数组元素失败，索引=%d，napi_set_element返回错误码=%d", idx, ns
+                        );
+                    }
+                    idx++;
+                }
+                ns = napi_set_named_property(env, result, "excludedApplications", nvExcludedApps);
+                if (ns != napi_ok) {
+                    THROW_WG_EXCEPTION(
+                        "createWGConfInterface方法：设置excludedApplications属性失败，napi_set_named_property返回错误码=%d", ns
+                    );
+                }
+            }
+
+            // 写入 includedApplications（非空时写入 string 数组）
+            if (!inter.includedApplications.empty()) {
+                napi_value nvIncludedApps;
+                ns = napi_create_array(env, &nvIncludedApps);
+                if (ns != napi_ok) {
+                    THROW_WG_EXCEPTION(
+                        "createWGConfInterface方法：创建includedApplications数组失败，napi_create_array返回错误码=%d", ns
+                    );
+                }
+                uint32_t idx = 0;
+                for (const auto &app : inter.includedApplications) {
+                    napi_value nvItem;
+                    ns = napi_create_string_utf8(env, app.c_str(), app.length(), &nvItem);
+                    if (ns != napi_ok) {
+                        THROW_WG_EXCEPTION(
+                            "createWGConfInterface方法：创建includedApplications字符串失败，napi_create_string_utf8返回错误码=%d", ns
+                        );
+                    }
+                    ns = napi_set_element(env, nvIncludedApps, idx, nvItem);
+                    if (ns != napi_ok) {
+                        THROW_WG_EXCEPTION(
+                            "createWGConfInterface方法：设置includedApplications数组元素失败，索引=%d，napi_set_element返回错误码=%d", idx, ns
+                        );
+                    }
+                    idx++;
+                }
+                ns = napi_set_named_property(env, result, "includedApplications", nvIncludedApps);
+                if (ns != napi_ok) {
+                    THROW_WG_EXCEPTION(
+                        "createWGConfInterface方法：设置includedApplications属性失败，napi_set_named_property返回错误码=%d", ns
                     );
                 }
             }

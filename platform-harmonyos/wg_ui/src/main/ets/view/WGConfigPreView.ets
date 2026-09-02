@@ -24,7 +24,8 @@ import {
   WGDBConf,
   WGEventThrow,
   getDnsMode,
-  dnsModeDesc
+  dnsModeDesc,
+  AppFilterMode
 } from 'wg_tunnel';
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
@@ -223,6 +224,48 @@ struct InterfaceCardView {
     this.vpnThrow.cancel()
   }
 
+  get filterMode(): AppFilterMode {
+    const included = this.data.conf.inter.includedApplications;
+    const excluded = this.data.conf.inter.excludedApplications;
+    if (included && included.length > 0) {
+      return AppFilterMode.INCLUDED;
+    }
+    if (excluded && excluded.length > 0) {
+      return AppFilterMode.EXCLUDED;
+    }
+    return AppFilterMode.NONE;
+  }
+
+  get filterAppsText(): string {
+    if (this.filterMode === AppFilterMode.INCLUDED) {
+      return this.data.conf.inter.includedApplications?.join(', ') ?? '';
+    }
+    if (this.filterMode === AppFilterMode.EXCLUDED) {
+      return this.data.conf.inter.excludedApplications?.join(', ') ?? '';
+    }
+    return '';
+  }
+
+  get filterApps(): string[] {
+    if (this.filterMode === AppFilterMode.INCLUDED) {
+      return this.data.conf.inter.includedApplications ?? [];
+    }
+    if (this.filterMode === AppFilterMode.EXCLUDED) {
+      return this.data.conf.inter.excludedApplications ?? [];
+    }
+    return [];
+  }
+
+  /** 获取包名对应的应用名（从 appFilterMeta 中读取） */
+  getAppName(bundleName: string): string | undefined {
+    return this.data.conf.inter.appFilterMeta?.[bundleName]?.appName;
+  }
+
+  /** 判断包名是否为分享添加 */
+  isAppShared(bundleName: string): boolean {
+    return this.data.conf.inter.appFilterMeta?.[bundleName]?.isShared ?? false;
+  }
+
   build() {
     Stack() {
       Column({ space: '16vp' }) {
@@ -256,6 +299,83 @@ struct InterfaceCardView {
         Column({ space: ConfigColumnSpace }) {
           Text('DNS服务器').width('100%').TagStyle()
           Text(this.vm.dns!!).width('100%').TagContentStyle()
+        }
+
+        // 应用过滤摘要
+        if (this.filterMode !== AppFilterMode.NONE) {
+          Column({ space: ConfigColumnSpace }) {
+            Row({ space: '8vp' }) {
+              Text('应用过滤').TagStyle()
+              Text(this.filterMode === AppFilterMode.EXCLUDED ? '黑名单' : '白名单')
+                .fontSize('12fp')
+                .fontColor(Color.White)
+                .backgroundColor($r('app.color.wg_new_card_item_select_color'))
+                .borderRadius('8vp')
+                .padding({
+                  left: '6vp',
+                  right: '6vp',
+                  top: '2vp',
+                  bottom: '2vp'
+                })
+            }
+            .width('100%')
+
+            // 显示每个包名及其图标和应用名
+            if (this.filterApps.length > 0) {
+              Column({ space: '8vp' }) {
+                Repeat(this.filterApps)
+                  .each((it) => {
+                    Row({ space: '6vp' }) {
+                      // 图标：分享条目用 share.svg，手动条目用占位符号
+                      if (this.isAppShared(it.item)) {
+                        Image($r('app.media.share'))
+                          .width('20vp')
+                          .height('20vp')
+                          .fillColor($r('app.color.share_debug_accent'))
+                      } else {
+                        SymbolGlyph($r('sys.symbol.square_grid_2x2'))
+                          .fontSize('20fp')
+                          .fontColor([Color.Gray])
+                      }
+                      if (this.getAppName(it.item)) {
+                        Column({ space: '1vp' }) {
+                          Text(this.getAppName(it.item)!)
+                            .fontSize('14fp')
+                            .fontWeight(FontWeight.Medium)
+                            .maxLines(1)
+                            .textOverflow({ overflow: TextOverflow.Ellipsis })
+                          Text(it.item)
+                            .fontSize('11fp')
+                            .fontColor($r('app.color.share_secondary_text'))
+                            .maxLines(1)
+                            .textOverflow({ overflow: TextOverflow.Ellipsis })
+                        }
+                        .layoutWeight(1)
+                        .alignItems(HorizontalAlign.Start)
+                      } else {
+                        Text(it.item)
+                          .fontSize('14fp')
+                          .layoutWeight(1)
+                      }
+                      if (this.isAppShared(it.item)) {
+                        Text('分享')
+                          .fontSize('10fp')
+                          .fontColor($r('app.color.share_debug_accent'))
+                          .border({ width: 1, color: $r('app.color.share_debug_accent'), radius: 4 })
+                          .padding({
+                            left: '4vp',
+                            right: '4vp',
+                            top: '1vp',
+                            bottom: '1vp'
+                          })
+                      }
+                    }
+                    .width('100%')
+                  })
+              }
+              .width('100%')
+            }
+          }
         }
       }
       .cardBackgroundStyle()
@@ -318,7 +438,8 @@ struct PeerCardView {
 
       Column({ space: ConfigColumnSpace }) {
         Text('路由的IP地址（段）').width('100%').TagStyle()
-        Text(`${this.data.allowedIPs.map((it) => `${it.address.ip}/${it.cidr ?? (it.address.isIpv4 ? 32 : 128)}`).join(", ")}`)
+        Text(`${this.data.allowedIPs.map((it) => `${it.address.ip}/${it.cidr ?? (it.address.isIpv4 ? 32 : 128)}`)
+          .join(", ")}`)
           .width('100%')
           .TagContentStyle()
       }

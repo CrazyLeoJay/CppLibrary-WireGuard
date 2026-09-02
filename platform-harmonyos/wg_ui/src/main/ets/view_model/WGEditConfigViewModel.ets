@@ -16,17 +16,28 @@
  */
 import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
+import { ClipboardParser } from 'wg_tunnel/src/main/ets/model/ClipboardParser';
 import { pasteboard } from '@kit.BasicServicesKit';
+import { abilityAccessCtrl, Permissions } from '@kit.AbilityKit';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf, getDnsMode } from 'wg_tunnel';
+import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf, getDnsMode, AppFilterMode, AppFilterItem, AppFilterMeta } from 'wg_tunnel';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 
 const TAG = "创建VPN"
+
+/**
+ * 剪贴板状态枚举
+ */
+export enum ClipboardStatus {
+  HAS_VALUE,     // 剪贴板有内容且可解析出包名
+  NO_VALUE,      // 剪贴板为空或内容无法解析出包名
+  NO_PERMISSION  // 没有剪贴板读取权限
+}
 
 /**
  * 主页数据持有
@@ -36,6 +47,8 @@ export default class WGNewConfigViewModel {
   nav: NavPathStack = new NavPathStack();
   @Trace client: ClientEditConfig = new ClientEditConfig(); // 客户端配置
   @Trace peers: PeerEditConfig[] = []; // 对等端配置列表
+  @Trace clipboardStatus: ClipboardStatus = ClipboardStatus.NO_VALUE; // 剪贴板状态
+  @Trace clipboardBundleName: string | undefined = undefined; // 剪贴板解析出的包名
   inputRegex = new InputRegex();
   dbId?: number;
   /**
@@ -63,6 +76,28 @@ export default class WGNewConfigViewModel {
     this.client.dnsIps = config.conf.inter.dns?.map((it) => it.ip)
       .join(",")
     this.client.mtu = config.conf.inter.mtu
+
+    // 加载应用过滤配置
+    const excludedApps = config.conf.inter.excludedApplications;
+    const includedApps = config.conf.inter.includedApplications;
+    const filterMeta = config.conf.inter.appFilterMeta;
+    if (includedApps && includedApps.length > 0) {
+      this.client.filterMode = AppFilterMode.INCLUDED;
+      this.client.filterApps = includedApps.map((name: string): AppFilterItem => {
+        const meta = filterMeta?.[name];
+        return { bundleName: name, appName: meta?.appName, isShared: meta?.isShared };
+      });
+    } else if (excludedApps && excludedApps.length > 0) {
+      this.client.filterMode = AppFilterMode.EXCLUDED;
+      this.client.filterApps = excludedApps.map((name: string): AppFilterItem => {
+        const meta = filterMeta?.[name];
+        return { bundleName: name, appName: meta?.appName, isShared: meta?.isShared };
+      });
+    } else {
+      this.client.filterMode = AppFilterMode.NONE;
+      this.client.filterApps = [];
+    }
+
     this.peers = config.conf.peers.map((it) => {
       const config = new PeerEditConfig();
       config.publicKey = it.publicKey;
@@ -122,6 +157,133 @@ export default class WGNewConfigViewModel {
       })
     } catch (error) {
       LLog.info(TAG, `将公钥复制进入系统剪贴板 异常！！！！：${error}`)
+    }
+  }
+
+  /**
+   * 请求剪贴板读取权限
+   * @returns true 如果权限已授予，false 如果权限被拒绝
+   */
+  private async requestClipboardPermission(context: Context): Promise<boolean> {
+    const atManager = abilityAccessCtrl.createAtManager();
+    try {
+      const grantStatus = await atManager.checkAccessToken(
+        context.applicationInfo.accessTokenId,
+        'ohos.permission.READ_PASTEBOARD' as Permissions
+      );
+      if (grantStatus === abilityAccessCtrl.GrantStatus.PERMISSION_GRANTED) {
+        return true;
+      }
+    } catch (e) {
+      LLog.warn(TAG, `checkAccessToken error: ${JSON.stringify(e)}`);
+    }
+    // 权限未授予，发起运行时请求
+    try {
+      const result = await atManager.requestPermissionsFromUser(context, ['ohos.permission.READ_PASTEBOARD'] as Permissions[]);
+      if (result.authResults.length > 0 && result.authResults[0] === 0) {
+        LLog.info(TAG, 'requestClipboardPermission: granted');
+        return true;
+      }
+      LLog.warn(TAG, 'requestClipboardPermission: denied');
+      return false;
+    } catch (e) {
+      LLog.warn(TAG, `requestPermissionsFromUser error: ${JSON.stringify(e)}`);
+      return false;
+    }
+  }
+
+  /**
+   * 检查剪贴板状态，更新 clipboardStatus 和 clipboardBundleName
+   */
+  async checkClipboard(context?: Context): Promise<void> {
+    LLog.info(TAG, 'checkClipboard: checking clipboard status');
+    // 如果提供了 context，先请求权限
+    if (context) {
+      const hasPermission = await this.requestClipboardPermission(context);
+      if (!hasPermission) {
+        this.clipboardStatus = ClipboardStatus.NO_PERMISSION;
+        this.clipboardBundleName = undefined;
+        return;
+      }
+    }
+    try {
+      const hasData = await systemPasteboard.hasData();
+      if (!hasData) {
+        LLog.info(TAG, 'checkClipboard: no data in clipboard');
+        this.clipboardStatus = ClipboardStatus.NO_VALUE;
+        this.clipboardBundleName = undefined;
+        return;
+      }
+      const pasteData = await systemPasteboard.getData();
+      const text = pasteData.getPrimaryText();
+      if (!text || text.length === 0) {
+        LLog.info(TAG, 'checkClipboard: clipboard data has no text');
+        this.clipboardStatus = ClipboardStatus.NO_VALUE;
+        this.clipboardBundleName = undefined;
+        return;
+      }
+      const bundleName = ClipboardParser.parseBundleName(text);
+      if (bundleName !== undefined && bundleName.length > 0) {
+        LLog.info(TAG, `checkClipboard: parsed bundleName=${bundleName}, status=HAS_VALUE`);
+        this.clipboardStatus = ClipboardStatus.HAS_VALUE;
+        this.clipboardBundleName = bundleName;
+      } else {
+        LLog.info(TAG, 'checkClipboard: text found but no bundleName parsed, status=NO_VALUE');
+        this.clipboardStatus = ClipboardStatus.NO_VALUE;
+        this.clipboardBundleName = undefined;
+      }
+    } catch (error) {
+      LLog.warn(TAG, `checkClipboard error: ${JSON.stringify(error)}`);
+      this.clipboardStatus = ClipboardStatus.NO_PERMISSION;
+      this.clipboardBundleName = undefined;
+    }
+  }
+
+  /**
+   * 从剪贴板读取内容并解析包名，添加到过滤列表
+   */
+  async addFromClipboard(context?: Context): Promise<void> {
+    LLog.info(TAG, 'addFromClipboard: reading clipboard and adding to filter');
+    // 先请求权限
+    if (context) {
+      const hasPermission = await this.requestClipboardPermission(context);
+      if (!hasPermission) {
+        this.clipboardStatus = ClipboardStatus.NO_PERMISSION;
+        this.clipboardBundleName = undefined;
+        return;
+      }
+    }
+    try {
+      const hasData = await systemPasteboard.hasData();
+      if (!hasData) {
+        LLog.info(TAG, 'addFromClipboard: no data in clipboard');
+        this.clipboardStatus = ClipboardStatus.NO_VALUE;
+        this.clipboardBundleName = undefined;
+        return;
+      }
+      const pasteData = await systemPasteboard.getData();
+      const text = pasteData.getPrimaryText();
+      if (!text || text.length === 0) {
+        LLog.info(TAG, 'addFromClipboard: clipboard data has no text');
+        this.clipboardStatus = ClipboardStatus.NO_VALUE;
+        this.clipboardBundleName = undefined;
+        return;
+      }
+      const bundleName = ClipboardParser.parseBundleName(text);
+      if (bundleName !== undefined && bundleName.length > 0) {
+        this.client.filterApps.push({ bundleName: bundleName, isShared: false });
+        LLog.info(TAG, `addFromClipboard: added bundleName=${bundleName} to filterApps`);
+        this.clipboardStatus = ClipboardStatus.HAS_VALUE;
+        this.clipboardBundleName = bundleName;
+      } else {
+        LLog.info(TAG, 'addFromClipboard: text found but no bundleName parsed');
+        this.clipboardStatus = ClipboardStatus.NO_VALUE;
+        this.clipboardBundleName = undefined;
+      }
+    } catch (error) {
+      LLog.warn(TAG, `addFromClipboard error: ${JSON.stringify(error)}`);
+      this.clipboardStatus = ClipboardStatus.NO_PERMISSION;
+      this.clipboardBundleName = undefined;
     }
   }
 
@@ -218,6 +380,43 @@ export default class WGNewConfigViewModel {
       throw new WGAppException("至少包含一个 Peer")
     }
     const dbPeers = await Promise.all(this.peers.map((it) => this.checkForPeer(it)));
+
+    // 根据 filterMode 构建过滤字段，确保互斥
+    let excludedApplications: string[] | undefined = undefined;
+    let includedApplications: string[] | undefined = undefined;
+    let appFilterMeta: Record<string, AppFilterMeta> | undefined = undefined;
+    if (this.client.filterMode === AppFilterMode.EXCLUDED) {
+      const items = this.client.filterApps
+        .filter((it) => it.bundleName.trim().length > 0);
+      if (items.length > 0) {
+        excludedApplications = items.map((it) => it.bundleName.trim());
+        const meta: Record<string, AppFilterMeta> = {};
+        for (const item of items) {
+          if (item.appName || item.isShared) {
+            meta[item.bundleName.trim()] = { appName: item.appName, isShared: item.isShared };
+          }
+        }
+        if (Object.keys(meta).length > 0) {
+          appFilterMeta = meta;
+        }
+      }
+    } else if (this.client.filterMode === AppFilterMode.INCLUDED) {
+      const items = this.client.filterApps
+        .filter((it) => it.bundleName.trim().length > 0);
+      if (items.length > 0) {
+        includedApplications = items.map((it) => it.bundleName.trim());
+        const meta: Record<string, AppFilterMeta> = {};
+        for (const item of items) {
+          if (item.appName || item.isShared) {
+            meta[item.bundleName.trim()] = { appName: item.appName, isShared: item.isShared };
+          }
+        }
+        if (Object.keys(meta).length > 0) {
+          appFilterMeta = meta;
+        }
+      }
+    }
+
     return {
       name: this.client.deviceName,
       conf: {
@@ -226,7 +425,10 @@ export default class WGNewConfigViewModel {
           ipArea: ipAddress,
           listenerPort: this.client.listenerPort,
           mtu: this.client.mtu,
-          dns: dns
+          dns: dns,
+          excludedApplications: excludedApplications,
+          includedApplications: includedApplications,
+          appFilterMeta: appFilterMeta,
         },
         peers: dbPeers,
       }

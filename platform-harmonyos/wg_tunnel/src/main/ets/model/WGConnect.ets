@@ -141,6 +141,23 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
     dnsAddresses: dns.map((it) => it.ip),
     routes: routes,
   }
+
+  // 校验：trustedApplications 和 blockedApplications 互斥
+  const includedApps = config.vpn.includedApplications;
+  const excludedApps = config.vpn.excludedApplications;
+  const hasIncluded = includedApps !== undefined && includedApps.length > 0;
+  const hasExcluded = excludedApps !== undefined && excludedApps.length > 0;
+  if (hasIncluded && hasExcluded) {
+    throw new WGAppException('黑名单(excludedApplications)和白名单(includedApplications)不能同时有值');
+  }
+
+  // 应用过滤映射：includedApplications → trustedApplications（白名单），excludedApplications → blockedApplications（黑名单）
+  if (hasIncluded) {
+    vpnConfig.trustedApplications = includedApps;
+  } else if (hasExcluded) {
+    vpnConfig.blockedApplications = excludedApps;
+  }
+
   return vpnConfig;
 }
 
@@ -191,13 +208,19 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
       allowedIps: item.allowedIPs,
       preSharedKey: item.preSharedKey,
       keepaliveInterval: item.keepaliveInterval
-    } as PeerConfig
-  }))
+   } as PeerConfig
+   }))
+
+  // 校验：excludedApplications 和 includedApplications 互斥
+  validateAppFilterMutualExclusion(conf);
+
   return {
     name: conf.name,
     vpn: {
       vpnIp: conf.conf.inter.ipArea,
       dns: conf.conf.inter.dns,
+      excludedApplications: conf.conf.inter.excludedApplications,
+      includedApplications: conf.conf.inter.includedApplications,
     },
     device: {
       deviceName: conf.name,
@@ -205,5 +228,19 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
       listenerPort: conf.conf.inter.listenerPort,
     },
     peers: peers,
+  }
+}
+
+/**
+ * 校验 excludedApplications 和 includedApplications 互斥
+ * 两者最多只能有一个有值，否则抛出异常
+ */
+function validateAppFilterMutualExclusion(conf: WGDBConf): void {
+  const excluded = conf.conf.inter.excludedApplications;
+  const included = conf.conf.inter.includedApplications;
+  const hasExcluded = excluded !== undefined && excluded.length > 0;
+  const hasIncluded = included !== undefined && included.length > 0;
+  if (hasExcluded && hasIncluded) {
+    throw new WGAppException('黑名单(excludedApplications)和白名单(includedApplications)不能同时有值');
   }
 }

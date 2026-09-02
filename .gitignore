@@ -6,6 +6,8 @@ cmake-build-debug
 build
 build_wsl
 *.tmp.conf
+spec
+build_*
 .cache
 .deveco
 .hvigor
