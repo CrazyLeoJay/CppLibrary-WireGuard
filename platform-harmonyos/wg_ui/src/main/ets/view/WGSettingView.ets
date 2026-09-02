@@ -15,6 +15,8 @@
  */
 import { LLog, AppFilterMode } from 'wg_tunnel';
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { ComponentContent, promptAction } from '@kit.ArkUI';
 
 const TAG = "设置界面"
 /** 编译时决定，release 构建时此常量为 false，开发者选项不显示 */
@@ -407,8 +409,66 @@ struct WGSettingView {
           this.vm.clickToMyGitHubWebSite(this.getUIContext());
         })
       }
+
+      ListItem() {
+        Row() {
+          Text('联系我')
+            .fontSize('18fp')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .listGroupItemStyle()
+        .onClick(() => {
+          this.showWechatQRCodeDialog();
+        })
+      }
     }
     .listGroupStyle()
+  }
+
+  showWechatQRCodeDialog() {
+    const contentNode = new ComponentContent(this.getUIContext(), wrapBuilder(buildWechatQRCodeDialog),
+      {} as WechatQRCodeDialogParams
+    );
+    this.getUIContext()
+      .getPromptAction()
+      .openCustomDialogWithController(contentNode, new promptAction.DialogController(), {
+        alignment: DialogAlignment.Center,
+        autoCancel: true
+      })
+      .then(() => {
+        contentNode.dispose();
+      })
+      .catch((e: BusinessError) => {
+        LLog.info(TAG, e);
+      });
+  }
+}
+
+interface WechatQRCodeDialogParams {}
+
+@Builder
+function buildWechatQRCodeDialog(_params: WechatQRCodeDialogParams) {
+  WechatQRCodeDialogContent()
+}
+
+@ComponentV2
+struct WechatQRCodeDialogContent {
+  build() {
+    Column() {
+      Image($r('app.media.wechat_qrcode'))
+        .width('260vp')
+        .height('260vp')
+        .objectFit(ImageFit.Contain)
+        .borderRadius('16vp')
+
+      Text('微信扫码联系')
+        .fontSize('16fp')
+        .fontColor('#ff707070')
+        .margin({ top: '16vp' })
+    }
+    .padding('24vp')
+    .alignItems(HorizontalAlign.Center)
   }
 }
 
