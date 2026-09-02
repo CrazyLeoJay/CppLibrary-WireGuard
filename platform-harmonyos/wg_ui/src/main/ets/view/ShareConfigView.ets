@@ -328,35 +328,55 @@ struct ShareConfigContent {
 
   @Builder
   buildConfigItem(config: WGDBConf, index: number) {
-    Row({ space: '12vp' }) {
-      if (this.vm.selectedIndex === index) {
-        SymbolGlyph($r('sys.symbol.checkmark_circle_fill'))
-          .fontSize('24fp')
-          .fontColor([$r('app.color.wg_new_card_item_select_color')])
-      } else {
-        SymbolGlyph($r('sys.symbol.circle'))
-          .fontSize('24fp')
-          .fontColor([$r('app.color.share_unselected_border')])
-      }
-
-      Column({ space: '4vp' }) {
-        Text(config.name)
-          .fontSize('16fp')
-          .fontWeight(FontWeight.Medium)
-        if (this.vm.getFilterMode(config) !== AppFilterMode.NONE) {
-          Text(this.vm.getFilterMode(config) === AppFilterMode.EXCLUDED ? '黑名单模式' : '白名单模式')
-            .fontSize('12fp')
-            .fontColor($r('app.color.share_tertiary_text'))
+    Column({ space: '8vp' }) {
+      Row({ space: '12vp' }) {
+        if (this.vm.selectedIndex === index) {
+          SymbolGlyph($r('sys.symbol.checkmark_circle_fill'))
+            .fontSize('24fp')
+            .fontColor([$r('app.color.wg_new_card_item_select_color')])
         } else {
-          Text(`未启用过滤（将自动开启${this.vm.getDefaultFilterModeText()}模式）`)
-            .fontSize('12fp')
-            .fontColor(Color.Orange)
+          SymbolGlyph($r('sys.symbol.circle'))
+            .fontSize('24fp')
+            .fontColor([$r('app.color.share_unselected_border')])
+        }
+
+        Column({ space: '4vp' }) {
+          Text(config.name)
+            .fontSize('16fp')
+            .fontWeight(FontWeight.Medium)
+          if (this.vm.getFilterMode(config) !== AppFilterMode.NONE) {
+            Text(this.vm.getFilterMode(config) === AppFilterMode.EXCLUDED ? '黑名单模式' : '白名单模式')
+              .fontSize('12fp')
+              .fontColor($r('app.color.share_tertiary_text'))
+          } else if (this.vm.selectedIndex === index) {
+            Text(`未启用过滤（将开启${this.vm.getDefaultFilterModeText()}模式）`)
+              .fontSize('12fp')
+              .fontColor(Color.Orange)
+          } else {
+            Text('未启用过滤')
+              .fontSize('12fp')
+              .fontColor($r('app.color.share_tertiary_text'))
+          }
+        }
+        .layoutWeight(1)
+        .alignItems(HorizontalAlign.Start)
+
+        if (this.vm.selectedIndex === index && this.vm.getFilterMode(config) === AppFilterMode.NONE) {
+          Row({ space: '4vp' }) {
+            Text(this.vm.tempFilterMode === AppFilterMode.EXCLUDED ? '黑名单' : '白名单')
+              .fontSize('12fp')
+              .fontColor($r('app.color.share_secondary_text'))
+            Toggle({ type: ToggleType.Switch, isOn: this.vm.tempFilterMode === AppFilterMode.INCLUDED })
+              .size({ width: '44vp', height: '24vp' })
+              .selectedColor($r('app.color.wg_new_card_item_select_color'))
+              .onChange((isOn: boolean) => {
+                this.vm.tempFilterMode = isOn ? AppFilterMode.INCLUDED : AppFilterMode.EXCLUDED;
+              })
+          }
         }
       }
-      .layoutWeight(1)
-      .alignItems(HorizontalAlign.Start)
+      .width('100%')
     }
-    .width('100%')
     .padding('12vp')
     .backgroundColor(this.vm.selectedIndex === index
       ? $r('app.color.wg_new_card_background_color')
@@ -371,7 +391,7 @@ struct ShareConfigContent {
       style: BorderStyle.Solid,
     })
     .onClick(() => {
-      this.vm.selectedIndex = index;
+      this.vm.onConfigSelected(index);
     })
   }
 }

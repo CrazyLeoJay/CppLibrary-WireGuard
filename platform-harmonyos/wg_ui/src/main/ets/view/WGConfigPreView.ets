@@ -81,7 +81,7 @@ export struct WGConfigPreViewNavDest {
     //   main: `WireGuard：${this.vm.configName}`,
     //   sub: this.subTitle,
     // })
-    .onBackPressed(()=>{
+    .onBackPressed(() => {
       this.vm.nav.pop({});
       return true;
     })
@@ -493,7 +493,11 @@ struct PeerCardView {
 
       Column({ space: ConfigColumnSpace }) {
         Text(`连接保活时间`).width('100%').TagStyle()
-        Text(`每隔 ${this.data.keepaliveInterval ?? 25} 秒`).width('100%').TagContentStyle()
+        if (this.data.keepaliveInterval) {
+          Text(`每隔 ${this.data.keepaliveInterval ?? 0} 秒`).width('100%').TagContentStyle()
+        } else {
+          Text(`不发送心跳包`).width('100%').TagContentStyle()
+        }
       }
 
       if (this.vm.isVpnOpen) {
