@@ -75,6 +75,14 @@
     {
       "name": "share_unselected_border",
       "value": "#FFCCCCCC"
+    },
+    {
+      "name": "swipe_delete_bg_color",
+      "value": "#FFE84026"
+    },
+    {
+      "name": "swipe_delete_text_color",
+      "value": "#FFFFFF"
     }
   ]
 }

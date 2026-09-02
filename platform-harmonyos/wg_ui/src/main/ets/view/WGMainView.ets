@@ -135,6 +135,8 @@ function buildDialog(params: QRCodeNewParams) {
 export struct WGMainView {
   @Param vm: WGMainViewModel = new WGMainViewModel();
   @Local isShow: boolean = true;
+  @Local isSwipeActionDelete: boolean = false;
+  listScroller: ListScroller = new ListScroller();
   funcBtn: MenuElement[] = [
     {
       value: "选择conf或者zip文件导入配置",
@@ -243,7 +245,7 @@ export struct WGMainView {
 
   @LocalBuilder
   buildConfigListView() {
-    List() {
+    List({ scroller: this.listScroller }) {
       Repeat(this.vm.wgList)
         .each((it) => {
           ListItem() {
@@ -258,7 +260,14 @@ export struct WGMainView {
                 this.itemEndFunsView(it);
               },
               onAction: () => {
-                LLog.info(TAG, "item row to end");
+                this.listScroller.closeAllSwipeActions();
+                this.vm.deleteConfig(it.index, it.item);
+              },
+              onEnterActionArea: () => {
+                this.isSwipeActionDelete = true;
+              },
+              onExitActionArea: () => {
+                this.isSwipeActionDelete = false
               }
             },
             start: undefined,
@@ -282,19 +291,32 @@ export struct WGMainView {
     Text("快来添加一个新配置吧")
   }
 
+  @Styles
+  deleteStyle(){
+    .width('120vp')
+    .height('100%')
+
+  }
+
   @LocalBuilder
   itemEndFunsView(it: RepeatItem<MainItemData>) {
     Row() {
-      Text("删除")
-        .textAlign(TextAlign.Center)
-        .fontColor(Color.White)
-        .width('150vp')
-        .height('100%')
-        .backgroundColor(Color.Red)
-        .onClick(() => {
-          this.vm.deleteConfig(it.index, it.item);
-        })
-    }
+      if (this.isSwipeActionDelete) {
+        Text("松开删除")
+          .textAlign(TextAlign.Center)
+          .fontColor($r('app.color.swipe_delete_text_color'))
+          .deleteStyle()
+      } else {
+        Text("删除")
+          .textAlign(TextAlign.Center)
+          .fontColor($r('app.color.swipe_delete_text_color'))
+          .deleteStyle()
+          .onClick(() => {
+            this.listScroller.closeAllSwipeActions();
+            this.vm.deleteConfig(it.index, it.item);
+          })
+      }
+    }.backgroundColor($r('app.color.swipe_delete_bg_color'))
   }
 
   newConfigDialog(wgConf: WGConf) {
