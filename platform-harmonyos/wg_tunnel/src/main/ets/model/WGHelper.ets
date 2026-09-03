@@ -25,7 +25,7 @@ import { LLog } from '../tools/LLog';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { KeyPair, WGConf } from './entity/napi_entity';
 import ParamsRegex from './ParamsRegex';
-import WGConfig from './WGConfig';
+import WGConfig, { computeConfMd5 } from './WGConfig';
 import WGEvent from './WGEvent';
 import WGTools from './WGTools';
 import { VpnConfigAction, VpnConfigRequestParams } from './entity/VpnConfigAction';
@@ -161,6 +161,7 @@ export namespace WireGuard {
     if (isOne) {
       // 1. 缓存配置
       WireGuard.config.runArg.set(id, config);
+      WireGuard.config.runArg.setRunningMd5(computeConfMd5(config));
 
       // 2. 检测VEA是否运行
       const isRunning = await WGTools.isVpnExtensionRunning();
@@ -230,12 +231,19 @@ export namespace WireGuard {
       LLog.warn(TAG, 'VEA未运行，无法切换配置，请先启动VPN');
       throw new WGAppException({ e: new Error("VEA未运行，无法切换配置"), message: "VEA未运行，无法切换配置" });
     }
+    const newMd5 = computeConfMd5(wgDbConf);
+    const currentMd5 = WireGuard.config.runArg.getRunningMd5();
+    if (newMd5 === currentMd5) {
+      LLog.info(TAG, `配置未变化，跳过切换: configId=${configId}, md5=${newMd5}`);
+      return;
+    }
     event.publishVpnConfigRequest({
       action: VpnConfigAction.SWITCH,
       configId: configId,
       wgDbConf: wgDbConf,
     });
-    LLog.info(TAG, `已发送切换配置指令: configId=${configId}`);
+    WireGuard.config.runArg.setRunningMd5(newMd5);
+    LLog.info(TAG, `已发送切换配置指令: configId=${configId}, md5=${newMd5}`);
   }
 
   /**

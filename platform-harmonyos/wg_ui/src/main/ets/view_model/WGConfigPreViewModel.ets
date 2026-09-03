@@ -87,6 +87,13 @@ export default class WGConfigPreViewModel {
   async updateData() {
     if (this.params) {
       this.loadData(this.params);
+      if (this.data && WireGuard.config.status.isRunning(this.params.id)) {
+        try {
+          await WireGuard.switchVpnConfig(this.params.id, this.data);
+        } catch (e) {
+          LLog.error(TAG, `切换VPN配置失败: ${JSON.stringify(e)}`);
+        }
+      }
     }
   }
 

@@ -74,7 +74,12 @@ export async function dnsResolveByMode(domain: string, mode: DnsResolveMode): Pr
         break;
       case DnsResolveMode.PREFER_IPV4:
       default:
-        result = await native.dnsToIp(domain);
+        try {
+          result = await native.dnsToIpWithType(domain, 4);
+        } catch (e) {
+          LLog.warn(TAG, `IPv4解析失败，回退IPv6: domain=${domain}, error=${e}`)
+          result = await systemDnsResolve(domain, true);
+        }
         break;
     }
     LLog.info(TAG, `dnsResolveByMode: domain=${domain}, resolved=${result}`)
