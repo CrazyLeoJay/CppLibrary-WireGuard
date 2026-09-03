@@ -13,14 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import { IS_DEBUG } from '../EnvConfig';
 import { LLog, AppFilterMode } from 'wg_tunnel';
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ComponentContent, promptAction } from '@kit.ArkUI';
 
 const TAG = "设置界面"
-/** 编译时决定，release 构建时此常量为 false，开发者选项不显示 */
-const IS_DEBUG = true;
 
 /**
  * 设置界面
@@ -358,6 +357,32 @@ struct WGSettingView {
     ListItemGroup({
       header: this.buildForMeTitle(),
     }) {
+      ListItem() {
+        Row() {
+          Text('WG-VPN 主页')
+            .fontSize('18fp')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .listGroupItemStyle()
+        .onClick(() => {
+          this.vm.clickToWgVpnHome(this.getUIContext());
+        })
+      }
+
+      ListItem() {
+        Row() {
+          Text('使用说明')
+            .fontSize('18fp')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .listGroupItemStyle()
+        .onClick(() => {
+          this.vm.clickToUserGuide(this.getUIContext());
+        })
+      }
+
       ListItem() {
         Row() {
           Text('WireGuard 官网')

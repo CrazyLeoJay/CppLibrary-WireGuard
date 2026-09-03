@@ -28,7 +28,10 @@ const wireguardPapersSite = "https://www.wireguard.com/papers/wireguard.pdf"
 const myGitHubProjectSite = "https://github.com/CrazyLeoJay/CppLibrary-WireGuard/tree/master-harmonyos"
 const myGitHubSite = "https://github.com/CrazyLeoJay"
 const email = "crazyleojay@163.com"
-const OPEN_SOURCE_NOTICE = "https://github.com/CrazyLeoJay/CppLibrary-WireGuard/blob/master/NOTICE"
+// const OPEN_SOURCE_NOTICE = "https://github.com/CrazyLeoJay/CppLibrary-WireGuard/blob/master/NOTICE"
+const OPEN_SOURCE_NOTICE = "https://raw.githubusercontent.com/CrazyLeoJay/CppLibrary-WireGuard/refs/heads/master/NOTICE"
+const WG_VPN_HOME = "http://www.leojay.site/CppLibrary-WireGuard/"
+const USER_GUIDE = "http://www.leojay.site/CppLibrary-WireGuard/wg-vpn/docs/#/%E4%BD%BF%E7%94%A8%E6%8C%87%E5%8D%97"
 
 /**
  * 设置界面数据配置
@@ -76,61 +79,38 @@ export default class WGSettingViewModel {
   }
 
   clickToWireGuardWebSite(context: UIContext) {
-    (context.getHostContext() as common.UIAbilityContext).startAbility({
-      action: 'ohos.want.action.viewData', // 固定操作类型
-      entities: ['entity.system.browsable'], // 标识可浏览实体
-      uri: wireguardSite      // 目标链接
-    })
-      .then(() => console.info('浏览器拉起成功'))
-      .catch((err: BusinessError) => {
-        console.error(`失败代码: ${err.code}, 错误信息: ${err.message}`);
-      });
+    this.openUrl(context, wireguardSite);
   }
 
   clickToPapersWebSite(context: UIContext) {
-    (context.getHostContext() as common.UIAbilityContext).startAbility({
-      action: 'ohos.want.action.viewData', // 固定操作类型
-      entities: ['entity.system.browsable'], // 标识可浏览实体
-      uri: wireguardPapersSite      // 目标链接
-    })
-      .then(() => console.info('浏览器拉起成功'))
-      .catch((err: BusinessError) => {
-        console.error(`失败代码: ${err.code}, 错误信息: ${err.message}`);
-      });
+    this.openUrl(context, wireguardPapersSite);
   }
 
   clickToMyGitHubWebSite(context: UIContext) {
-    (context.getHostContext() as common.UIAbilityContext).startAbility({
-      action: 'ohos.want.action.viewData', // 固定操作类型
-      entities: ['entity.system.browsable'], // 标识可浏览实体
-      uri: myGitHubSite      // 目标链接
-    })
-      .then(() => console.info('浏览器拉起成功'))
-      .catch((err: BusinessError) => {
-        console.error(`失败代码: ${err.code}, 错误信息: ${err.message}`);
-      });
+    this.openUrl(context, myGitHubSite);
   }
 
-  /**
-   * 开源库声明
-   */
   clickToOpenSourceNotice(context: UIContext) {
-    (context.getHostContext() as common.UIAbilityContext).startAbility({
-      action: 'ohos.want.action.viewData', // 固定操作类型
-      entities: ['entity.system.browsable'], // 标识可浏览实体
-      uri: OPEN_SOURCE_NOTICE      // 目标链接
-    })
-      .then(() => console.info('浏览器拉起成功'))
-      .catch((err: BusinessError) => {
-        console.error(`失败代码: ${err.code}, 错误信息: ${err.message}`);
-      });
+    this.openUrl(context, OPEN_SOURCE_NOTICE);
   }
 
   clickToMyGitHubProjectWebSite(context: UIContext) {
+    this.openUrl(context, myGitHubProjectSite);
+  }
+
+  clickToWgVpnHome(context: UIContext) {
+    this.openUrl(context, WG_VPN_HOME);
+  }
+
+  clickToUserGuide(context: UIContext) {
+    this.openUrl(context, USER_GUIDE);
+  }
+
+  private openUrl(context: UIContext, url: string) {
     (context.getHostContext() as common.UIAbilityContext).startAbility({
-      action: 'ohos.want.action.viewData', // 固定操作类型
-      entities: ['entity.system.browsable'], // 标识可浏览实体
-      uri: myGitHubProjectSite      // 目标链接
+      action: 'ohos.want.action.viewData',
+      entities: ['entity.system.browsable'],
+      uri: url
     })
       .then(() => console.info('浏览器拉起成功'))
       .catch((err: BusinessError) => {

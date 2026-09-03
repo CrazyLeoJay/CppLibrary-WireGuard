@@ -14,13 +14,12 @@
  * limitations under the License.
  */
 
+import { IS_DEBUG } from '../EnvConfig';
 import { AppFilterMode, WGDBConf, WGConf, WGConfInterface, IPAddress, IPAddressArea } from 'wg_tunnel';
 import { ShareDebugRecordInfo } from '../ability/WGShareExtAbility';
 import ShareConfigViewModel from '../view_model/ShareConfigViewModel';
 
 const TAG = 'ShareConfigView';
-/** 编译时决定，release 构建时此常量为 false，开发者选项不显示 */
-const IS_DEBUG = true;
 
 // ===== 可复用的分享配置内容组件 =====
 
