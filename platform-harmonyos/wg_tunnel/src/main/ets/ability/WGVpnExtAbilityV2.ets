@@ -71,7 +71,6 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   private hasDomainEndpoint: boolean = false;
   private isReconnecting: boolean = false;
   private netConnection?: connection.NetConnection;
-
   // V2: 配置请求轮询
   private configQueryTimer?: number;
   private configQueryRetries: number = 0;
@@ -391,10 +390,13 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     try {
       const config = await makeWGConf2VpnStartConfig(wgDbConf);
       this.currentConfig = config;
-      this.hasDomainEndpoint = this.checkHasDomainEndpoint(config);
+      this.hasDomainEndpoint = this.checkHasDomainEndpoint(wgDbConf);
       this.startVpnInternal(id, config);
       if (this.hasDomainEndpoint) {
+        LLog.info(TAG, "域名配置")
         this.registerNetConnection();
+      } else {
+        LLog.info(TAG, "非域名配置")
       }
     } catch (e) {
       LLog.error(TAG, `DNS解析或VPN启动失败: ${JSON.stringify(e)}`);
@@ -409,7 +411,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       .setStreamListener((msg) => {
         const direction = msg.direction == StreamDirection.RECEIVE ? "接收" : "发送";
         const mtype: string = WGTools.getMessageTypeDesc(msg.messageType);
-        LLog.info(TAG, `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length}`);
+        LLog.info(TAG,
+          `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length}`);
         WireGuard.event.publishVpnStreamLogs(msg);
       });
 
@@ -426,13 +429,11 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
   // ===== 网络监听与DNS重连（复用V1逻辑） =====
 
-  private checkHasDomainEndpoint(config: WGDeviceConfig): boolean {
-    for (const peer of config.peers) {
-      if (peer.endpoint) {
-        const ip = peer.endpoint.address.ip;
-        if (!this.isDirectIp(ip)) {
-          return true;
-        }
+  private checkHasDomainEndpoint(dbConf: WGDBConf): boolean {
+    for (const peer of dbConf.conf.peers) {
+      const value = peer.endpoint.ipStrOrDomain;
+      if (!this.isDirectIp(value)) {
+        return true;
       }
     }
     return false;
@@ -454,8 +455,9 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       this.netConnection.on('netLost', () => {
         LLog.info(TAG, "网络丢失");
       });
-      this.netConnection.on('netCapabilitiesChange', () => {
-        LLog.info(TAG, "网络能力变化");
+      this.netConnection.on('netCapabilitiesChange', (data: connection.NetCapabilityInfo) => {
+        const type = this.getNetTypeDescription(data);
+        LLog.info(TAG, `网络能力变化: ${type}`);
       });
       this.netConnection.on('netConnectionPropertiesChange', () => {
         LLog.info(TAG, "网络连接属性变化，触发DNS重新解析");
@@ -467,6 +469,20 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     } catch (e) {
       LLog.error(TAG, `注册网络监听失败: ${JSON.stringify(e)}`);
     }
+  }
+
+  private getNetTypeDescription(data: connection.NetCapabilityInfo): string {
+    const bearers = data.netCap.bearerTypes;
+    if (bearers.includes(connection.NetBearType.BEARER_CELLULAR)) {
+      return '移动数据';
+    }
+    if (bearers.includes(connection.NetBearType.BEARER_WIFI)) {
+      return 'WiFi';
+    }
+    if (bearers.includes(connection.NetBearType.BEARER_ETHERNET)) {
+      return '以太网';
+    }
+    return '未知网络';
   }
 
   private unregisterNetConnection(): void {
@@ -565,7 +581,9 @@ class VPNChangeHelperV2 {
   static stopVpn(): void {
     WireGuard.config.status.vpnStop();
     const params: VPNEventStatusParams = {
-      isOpen: false, tag: VpnEventTag.STOP_VPN, vpnThreadRunning: false,
+      isOpen: false,
+      tag: VpnEventTag.STOP_VPN,
+      vpnThreadRunning: false,
       connectedIps: VPNChangeHelperV2.cachedConnectedIps,
     };
     WireGuard.event.publishVpnChange(params);
@@ -577,7 +595,9 @@ class VPNChangeHelperV2 {
    */
   static serviceStopped(): void {
     const params: VPNEventStatusParams = {
-      isOpen: false, tag: VpnEventTag.VPN_SERVICE_STOPPED, vpnThreadRunning: true,
+      isOpen: false,
+      tag: VpnEventTag.VPN_SERVICE_STOPPED,
+      vpnThreadRunning: true,
       connectedIps: VPNChangeHelperV2.cachedConnectedIps,
     };
     WireGuard.event.publishVpnChange(params);
@@ -587,7 +607,9 @@ class VPNChangeHelperV2 {
     WireGuard.config.status.vpnStopThrow();
     WireGuard.event.publishVpnThrow(msg);
     WireGuard.event.publishVpnChange({
-      isOpen: false, tag: VpnEventTag.THROW, vpnThreadRunning: false,
+      isOpen: false,
+      tag: VpnEventTag.THROW,
+      vpnThreadRunning: false,
       connectedIps: VPNChangeHelperV2.cachedConnectedIps,
     });
   }

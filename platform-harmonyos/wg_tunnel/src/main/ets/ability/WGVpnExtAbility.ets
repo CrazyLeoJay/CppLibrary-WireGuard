@@ -91,7 +91,7 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
     try {
       const config = await makeWGConf2VpnStartConfig(wgDbConf);
       this.currentConfig = config;
-      this.hasDomainEndpoint = this.checkHasDomainEndpoint(config);
+      this.hasDomainEndpoint = this.checkHasDomainEndpoint(wgDbConf);
       this.startVpnInternal(id, config);
       if (this.hasDomainEndpoint) {
         this.registerNetConnection();
@@ -102,18 +102,11 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
     }
   }
 
-  /**
-   * 检查配置中是否存在域名类型的端点（非直接IP地址）
-   * @param config VPN设备配置
-   * @returns 是否包含域名端点
-   */
-  private checkHasDomainEndpoint(config: WGDeviceConfig): boolean {
-    for (const peer of config.peers) {
-      if (peer.endpoint) {
-        const ip = peer.endpoint.address.ip;
-        if (!this.isDirectIp(ip)) {
-          return true;
-        }
+  private checkHasDomainEndpoint(dbConf: WGDBConf): boolean {
+    for (const peer of dbConf.conf.peers) {
+      const value = peer.endpoint.ipStrOrDomain;
+      if (!this.isDirectIp(value)) {
+        return true;
       }
     }
     return false;
