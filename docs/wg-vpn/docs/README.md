@@ -25,7 +25,7 @@
 
 WG-VPN 已上架**华为应用市场**，可直接搜索或点击下面的按钮安装。
 
-[![华为应用市场](assets/appgallery-icon.png) 前往华为应用市场下载 WG-VPN](https://appgallery.huawei.com/app/detail?id=site.leojay.wireguard&channelId=SHARE&source=appshare)
+[![华为应用市场](assets/appgallery.png) 前往华为应用市场下载 WG-VPN](https://appgallery.huawei.com/app/detail?id=site.leojay.wireguard&channelId=SHARE&source=appshare)
 
 - **应用名称**：WG-VPN
 - **上架平台**：华为应用市场（HarmonyOS）
