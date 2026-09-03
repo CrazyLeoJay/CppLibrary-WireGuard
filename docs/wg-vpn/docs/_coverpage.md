@@ -6,5 +6,5 @@
 
 > 稳定、安全、跨平台的 WireGuard 组网应用
 
-[<img src="assets/appgallery.png" alt="华为应用市场" /> 华为应用市场](https://appgallery.huawei.com/app/detail?id=site.leojay.wireguard&channelId=SHARE&source=appshare)
+[<img src="assets/appgallery.webp" alt="华为应用市场" /> 华为应用市场](https://appgallery.huawei.com/app/detail?id=site.leojay.wireguard&channelId=SHARE&source=appshare)
 [开始使用](使用指南.md)
