@@ -202,18 +202,16 @@ export namespace WireGuard {
       }
     } else {
       WireGuard.config.runArg.clear();
-      if (await WGTools.isVpnExtensionRunning()) {
-        // 先通知VEA停止VPN服务（优雅关闭连接）
-        event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
-        // 再关闭VEA进程
-        await vpnExtension.stopVpnExtensionAbility({
-          deviceId: '',
-          bundleName: packageName,
-          abilityName: abilityName,
-        })
-      } else {
-        LLog.info(TAG, "VPN未开启，不执行关闭");
-      }
+      // 这里如果检测vpn进程是否进行中，当快速点击switch开关时，会存在打开的瞬间关闭，虽然打开已经返回了结果，
+      // 但vpn进程并没有启动成功。这里会获取失败
+      // 先通知VEA停止VPN服务（优雅关闭连接）
+      event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
+      // 再关闭VEA进程
+      await vpnExtension.stopVpnExtensionAbility({
+        deviceId: '',
+        bundleName: packageName,
+        abilityName: abilityName,
+      })
     }
   }
 

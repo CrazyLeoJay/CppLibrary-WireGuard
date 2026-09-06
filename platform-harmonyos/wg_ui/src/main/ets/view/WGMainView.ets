@@ -373,6 +373,7 @@ struct MainItemView {
           this.vm.closeOther(this.data.id)
           this.data.onClick();
         })
+        .enabled(this.data.toggleEnable)
         .onChange((isOn: boolean) => {
           this.data.openChange(this.getUIContext(), isOn);
         })

@@ -242,6 +242,7 @@ export class MainItemData {
   private vm: WGMainViewModel
   name: string;
   @Trace open: boolean = false;
+  @Trace toggleEnable: boolean = true;
   data: WgConfigTable
   private isClick = false
 
@@ -262,6 +263,7 @@ export class MainItemData {
 
   openChange(context: UIContext, isOn: boolean) {
     if (this.isClick) {
+      this.toggleEnable = false;
       if (isOn) {
         LLog.info(TAG, "点击开启VPN")
         this.vm.changeVpnConfig(context, this, true)
@@ -270,6 +272,7 @@ export class MainItemData {
         this.vm.changeVpnConfig(context, this, false)
       }
       this.isClick = false
+      this.toggleEnable = true;
     }
   }
 }

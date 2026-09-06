@@ -170,8 +170,10 @@ export default class WGConfigPreViewModel {
 
 
   isSwitchClick: boolean = false;
+  @Trace isSwitchEnable: boolean = true;
 
   onSwitchChange(context: UIContext, isOn: boolean) {
+    this.isSwitchEnable = false
     if (this.isSwitchClick) {
       if (isOn) {
         LLog.info(TAG, "点击开启VPN")
@@ -182,6 +184,7 @@ export default class WGConfigPreViewModel {
       }
     }
     this.isSwitchClick = false
+    this.isSwitchEnable = true
   }
 
   setSwitchClick() {

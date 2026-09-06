@@ -392,6 +392,7 @@ struct InterfaceCardView {
           top: '24vp',
           right: '40vp',
         })
+        .enabled(this.vm.isSwitchEnable)
         .onChange((isOn) => {
           this.vm.onSwitchChange(this.getUIContext(), isOn)
         })
