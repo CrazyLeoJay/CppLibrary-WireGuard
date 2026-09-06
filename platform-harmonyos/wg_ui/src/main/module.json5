@@ -27,25 +27,6 @@
                 "utd": "general.object",
                 "maxFileSupported": 1
               },
-//              {
-//                "scheme": "file",
-//                "utd": "general.url",
-//                "maxFileSupported": 1
-//              },
-//              {
-//                "scheme": "file",
-//                "utd": "'general.hyperlink",
-//                "maxFileSupported": 1
-//              },
-//              {
-//                "scheme": "file",
-//                "utd": "general.symlink",
-//                "maxFileSupported": 1
-//              },    {
-//                "scheme": "file",
-//                "utd": "general.html",
-//                "maxFileSupported": 1
-//              },
             ]
           }
         ]
