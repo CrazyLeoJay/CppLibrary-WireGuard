@@ -25,6 +25,12 @@
       {
         "name": "ohos.permission.GET_NETWORK_INFO",
         "reason": "$string:perm_reason_internet"
+      },
+      {
+        // VPN保活机制（keepalive/LongTaskModel、VpnKeepAliveManager）运行于本模块，
+        // 申请DATA_TRANSFER长时任务需KEEP_BACKGROUND_RUNNING（system_grant）
+        "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
+        "reason": "$string:keep_background_running_description"
       }
     ]
   }

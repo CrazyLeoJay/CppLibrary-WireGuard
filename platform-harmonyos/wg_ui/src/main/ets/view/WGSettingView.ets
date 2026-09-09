@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { IS_DEBUG } from '../EnvConfig';
 import { LLog, AppFilterMode } from 'wg_tunnel';
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ComponentContent, promptAction } from '@kit.ArkUI';
+import BuildProfile from '../../../../BuildProfile';
 
 const TAG = "设置界面"
 
@@ -86,7 +86,7 @@ struct WGSettingView {
       this.buildBaseSetting();
 
       // ===== 开发者模式（仅 debug 构建显示） =====
-      if (IS_DEBUG) {
+      if (BuildProfile.DEBUG) {
         this.buildDevModel();
       }
 

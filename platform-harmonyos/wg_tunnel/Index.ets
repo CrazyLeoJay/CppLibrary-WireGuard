@@ -13,9 +13,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+import BuildProfile from './BuildProfile';
+import { setLLogDebugMode } from './src/main/ets/tools/LLog';
+
+setLLogDebugMode(BuildProfile.DEBUG)
+
 export * from './src/main/ets/model/WGHelper';
 
-// export * from './src/main/ets/model/WGConnect';
+export * from './src/main/ets/model/WGConnect';
+
 export * from './src/main/ets/model/WGConfig';
 
 export * from './src/main/ets/model/WGEvent';
@@ -24,7 +30,7 @@ export * from './src/main/ets/model/WGTools';
 
 export { SortColumnName } from './src/main/ets/model/db/WGDao';
 
-export * from './src/main/ets/tools/LLog';
+export { LLog } from './src/main/ets/tools/LLog';
 
 export * from './src/main/ets/error/WGAppException';
 
@@ -57,3 +63,8 @@ export * from './src/main/ets/model/ShareRecordParser';
 export { VpnEventTag } from './src/main/ets/model/entity/VPNEventStatusParams';
 
 export { VpnConfigAction, VpnConfigRequestParams } from './src/main/ets/model/entity/VpnConfigAction';
+
+// VPN保活机制（长时任务 + 通知 + 后台隧道健康守护），供UIAbility复用
+export * from './src/main/ets/keepalive/VpnKeepAliveManager';
+
+export * from './src/main/ets/keepalive/LongTaskModel';

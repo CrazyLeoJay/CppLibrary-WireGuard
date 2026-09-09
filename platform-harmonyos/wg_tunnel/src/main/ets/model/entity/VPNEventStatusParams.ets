@@ -29,6 +29,8 @@ import { StatusConfigDTO } from '../WGConfig';
  * - CONFIG_QUERY：VEA请求配置（V2模式，VEA启动后轮询请求）
  * - CONFIG_REQUEST：主进程下发配置指令（V2模式，携带VpnConfigAction）
  * - VPN_SERVICE_STOPPED：VPN服务停止但VEA进程存活（stop action，不关闭VEA）
+ * - RECONNECT_REQUEST：主进程请求VEA重连（锁屏恢复后隧道失效时）
+ * - VPN_TUNNEL_STALE：VEA检测到VPN隧道失效（握手超时）
  */
 export enum VpnEventTag {
   /** VPN Extension进程启动（onCreate） */
@@ -51,6 +53,10 @@ export enum VpnEventTag {
   CONFIG_REQUEST = 'configRequest',
   /** VPN服务停止但VEA进程存活 */
   VPN_SERVICE_STOPPED = 'vpnServiceStopped',
+  /** 主进程请求VEA重连 */
+  RECONNECT_REQUEST = 'reconnectRequest',
+  /** VEA检测到VPN隧道失效 */
+  VPN_TUNNEL_STALE = 'vpnTunnelStale',
 }
 
 /**

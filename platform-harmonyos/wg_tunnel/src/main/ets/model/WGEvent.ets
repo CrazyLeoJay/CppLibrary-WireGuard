@@ -39,6 +39,7 @@ const VPN_STATUS_QUERY = `${packageName}.VPN_STATUS_QUERY` // VPN状态查询
 const VPN_STREAM_LOGS = `${packageName}.VPN_STREAM_LOGS` // VPN Stream 流日志
 const VPN_CONFIG_QUERY = `${packageName}.VPN_CONFIG_QUERY` // VEA请求配置（V2模式）
 const VPN_CONFIG_REQUEST = `${packageName}.VPN_CONFIG_REQUEST` // 主进程下发配置指令（V2模式）
+const VPN_RECONNECT_REQUEST = `${packageName}.VPN_RECONNECT_REQUEST` // 主进程请求VEA重连
 
 export interface SubEventCancel {
   cancel(): void
@@ -62,7 +63,7 @@ export class SubEvent implements SubEventCancel {
         error?.(err)
         return;
       }
-      LLog.info(TAG, `Succeeded in creating subscriber. tag: ${this.tag}`);
+      LLog.dev(TAG, `Succeeded in creating subscriber. tag: ${this.tag}`);
 
       try {
         invoke(data)
@@ -75,7 +76,7 @@ export class SubEvent implements SubEventCancel {
 
   cancel() {
     commonEventManager.unsubscribe(this.sub, () => {
-      LLog.info(TAG, `取消订阅: ${this.tag}`)
+      LLog.dev(TAG, `取消订阅: ${this.tag}`)
     })
   }
 }
@@ -92,7 +93,7 @@ export class WGSystemEventDef {
           const msg = JSON.stringify(err.message);
           LLog.error(TAG, `发布 (${tag}) 事件 failed, code is ${code}, message is ${msg}`)
         } else {
-          LLog.info(TAG, `发布 (${tag}) 事件 success。data=${data}`);
+          LLog.dev(TAG, `发布 (${tag}) 事件 success。data=${data}`);
         }
       }
       if (data) {
@@ -115,7 +116,7 @@ export class WGSystemEventDef {
   ): SubEventCancel {
     const sub = new SubEvent(tag);
     sub.subscribe(invoke, error)
-    LLog.info(TAG, `注册全局 ${tag} 事件监听`)
+    LLog.dev(TAG, `注册全局 ${tag} 事件监听`)
     return sub;
   }
 
@@ -285,6 +286,33 @@ export class WGSystemEventDef {
 
   publishVpnNoOpen(){
     WireGuard.event.publishVpnChange({ isOpen: false, tag: VpnEventTag.NO_START_VPN });
+  }
+
+  /**
+   * 【跨进程广播】发布VPN重连请求
+   *
+   * 主进程在检测到VPN隧道可能失效时（如锁屏恢复后握手过期），
+   * 通过此事件通知VPN Extension进程执行重连。
+   * VEA收到后调用 onReconnectRequest() 重新解析DNS并重建隧道。
+   */
+  publishVpnReconnectRequest(): void {
+    this.publish(VPN_RECONNECT_REQUEST)
+    LLog.info(TAG, '发布VPN重连请求')
+  }
+
+  /**
+   * 【跨进程订阅】订阅VPN重连请求
+   *
+   * VEA进程订阅此事件，收到主进程的重连请求后执行重连。
+   *
+   * @param invoke 重连请求回调
+   * @returns SubEventCancel 取消订阅的句柄
+   */
+  subscribeVpnReconnectRequest(invoke: () => void): SubEventCancel {
+    return this.subscribe(VPN_RECONNECT_REQUEST, () => {
+      LLog.info(TAG, '收到VPN重连请求')
+      invoke()
+    })
   }
 }
 

@@ -18,10 +18,28 @@ import { bundleManager, common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
-import { LLog, StreamLogMessage, MessageType } from 'wg_tunnel';
+import { LLog } from '../tools/LLog';
+import { StreamLogMessage, MessageType } from '../model/entity/napi_entity';
 import { NotificationUpdater } from './NotificationUpdater';
 
 const TAG: string = 'VpnKeepAlive';
+
+/**
+ * 长时任务在系统侧的真实状态（用于区分"内存候选ID存在"与"系统确实在保活"）
+ *
+ * 内存中的 continuousTaskId 只是启动时的缓存，系统可能因业务未执行、低速、取消等
+ * 主动回收（CANCELLED）或挂起（SUSPENDED）长时任务，导致VPN实际失去后台保活。
+ */
+export enum ContinuousTaskState {
+  /** 无候选ID，从未成功申请或已停止 */
+  NONE = 'none',
+  /** 系统认可且处于激活状态（真正保活中） */
+  RUNNING = 'running',
+  /** 系统挂起（进程冻结，回前台自动激活；挂起期间VPN不被保活） */
+  SUSPENDED = 'suspended',
+  /** 系统已取消/回收（不再保活，需重新申请） */
+  CANCELLED = 'cancelled',
+}
 
 /**
  * VPN通知内容数据 - 纯数据类，用于构建通知文本
@@ -133,7 +151,7 @@ function formatDuration(startTime: number): string {
  * Created on 2026/7/27.
  * @author leojay`fu
  */
-class LongTaskModel {
+export class LongTaskModel {
   private updater: NotificationUpdater;
   private vpnData: VpnNotificationData = new VpnNotificationData();
 
@@ -156,10 +174,12 @@ class LongTaskModel {
   private async createTaskRequest(_context: common.UIAbilityContext):
     Promise<backgroundTaskManager.ContinuousTaskRequest> {
     const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+    // 运行时从绑定Ability读取名称，避免硬编码宿主Ability，保证wg_tunnel可复用于任意UIAbility
+    const abilityName: string = _context.abilityInfo.name;
     const wantAgentInfo: wantAgent.WantAgentInfo = {
       wants: [{
         bundleName: bundleInfo.name,
-        abilityName: 'EntryAbility',
+        abilityName: abilityName,
       }],
       actionType: wantAgent.OperationType.START_ABILITY,
       requestCode: 0,
@@ -188,11 +208,81 @@ class LongTaskModel {
   }
 
   /**
-   * 判断长时任务是否正在运行
-   * @returns true=长时任务已启动且未停止
+   * 判断长时任务是否正在运行（同步候选）
+   *
+   * ⚠️ 仅依据内存缓存的continuousTaskId判空，不反映系统真实状态。
+   * 若系统已取消/挂起长时任务，此值仍存在。需结合 probeSystemState() 判断真实有效性。
+   * @returns true=内存存在候选ID（可能是失效的）
    */
   isRunning(): boolean {
     return getLongTaskState().continuousTaskId != undefined;
+  }
+
+  /**
+   * 获取当前缓存的连续任务ID
+   * @returns 连续任务ID，或undefined
+   */
+  getContinuousTaskId(): number | undefined {
+    return getLongTaskState().continuousTaskId;
+  }
+
+  /**
+   * 探测长时任务在系统侧的真实状态
+   *
+   * 通过 getAllContinuousTasks(context, includeSuspended=true) 查询系统实际维护的长时任务，
+   * 区分：未申请(NONE) / 激活(RUNNING) / 挂起(SUSPENDED) / 已取消(CANCELLED)。
+   * 用于判断"内存ID存在但系统已关闭或挂起"的场景，避免VPN名义保活实则失效。
+   *
+   * @param context UIAbilityContext（仅UIAbility可查询）
+   * @returns 真实运行状态
+   */
+  async probeSystemState(context: common.UIAbilityContext): Promise<ContinuousTaskState> {
+    const id = getLongTaskState().continuousTaskId;
+    if (id == undefined) {
+      return ContinuousTaskState.NONE;
+    }
+    try {
+      // includeSuspended=true：查询含挂起任务的全部长时任务，便于精确区分挂起/取消
+      const tasks: backgroundTaskManager.ContinuousTaskInfo[] =
+        await backgroundTaskManager.getAllContinuousTasks(context, true);
+      const mine: backgroundTaskManager.ContinuousTaskInfo | undefined =
+        tasks.find((info: backgroundTaskManager.ContinuousTaskInfo) => info.continuousTaskId === id);
+      if (mine == undefined) {
+        return ContinuousTaskState.CANCELLED;
+      }
+      if (mine.suspendState === true) {
+        return ContinuousTaskState.SUSPENDED;
+      }
+      return ContinuousTaskState.RUNNING;
+    } catch (e) {
+      const err = e as BusinessError;
+      LLog.warn(TAG, `探测长时任务状态失败: code=${err.code}, message=${err.message}`);
+      // 查询失败：保守判定失效，交由上层决定是否重新申请
+      return ContinuousTaskState.CANCELLED;
+    }
+  }
+
+  /**
+   * 长时任务是否被系统真实保活（激活）
+   *
+   * 仅当系统状态为RUNNING时才视为有效保活。
+   * @param context UIAbilityContext
+   * @returns 是否有效激活
+   */
+  async isSystemActive(context: common.UIAbilityContext): Promise<boolean> {
+    const state = await this.probeSystemState(context);
+    return state === ContinuousTaskState.RUNNING;
+  }
+
+  /**
+   * 重置长时任务状态（公开版）
+   *
+   * 当探测到系统已取消/挂起长时任务、但内存候选仍存在时，
+   * 调用此方法清除内存状态，使 startLongTask 可以重新申请。
+   */
+  resetTaskState(): void {
+    this.resetState();
+    LLog.info(TAG, '重置长时任务状态（供重新申请保活）');
   }
 
   /**
@@ -316,7 +406,6 @@ class LongTaskModel {
 
       const endpoint = this.vpnData.targetEndpoints[peerIndex];
       const label = endpoint ? `→${endpoint}` : '';
-      // lines.push(`Peer[${peerIndex}]: ${ip}${label} ↓${rx} ↑${tx} 握手:${handshakeStr}`);
       lines.push(`Peer[${peerIndex}]: ↓${rx} ↑${tx} 握手:${handshakeStr}`);
     }
 

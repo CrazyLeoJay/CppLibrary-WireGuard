@@ -5,6 +5,9 @@
       "copyCodeResource": {
         "enable": false
       }
+    },
+    "arkOptions": {
+      byteCodeHar: false
     }
   },
   "buildOptionSet": [

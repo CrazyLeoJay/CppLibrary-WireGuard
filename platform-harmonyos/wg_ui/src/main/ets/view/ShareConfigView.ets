@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-import { IS_DEBUG } from '../EnvConfig';
 import { AppFilterMode, WGDBConf, WGConf, WGConfInterface, IPAddress, IPAddressArea } from 'wg_tunnel';
+import BuildProfile from '../../../../BuildProfile';
 import { ShareDebugRecordInfo } from '../ability/WGShareExtAbility';
 import ShareConfigViewModel from '../view_model/ShareConfigViewModel';
 
@@ -38,7 +38,7 @@ struct ShareConfigContent {
         .padding({ top: '8vp', bottom: '8vp' })
 
       // 开发者模式：显示分享数据原文和文件类型标签
-      if (IS_DEBUG && this.vm.developerMode && this.vm.debugShareInfos.length > 0) {
+      if (BuildProfile.DEBUG && this.vm.developerMode && this.vm.debugShareInfos.length > 0) {
         this.buildDebugSection();
       }
 

@@ -85,16 +85,44 @@ export class VpnConnHelper {
   }
 
   /**
+   * 停止VPN服务，带超时保护（5秒）
+   *
+   * 确保vpnConnection.destroy()和client.close()在超时时间内完成，
+   * 防止onDestroy中stopServer()无限阻塞导致VPN路由/DNS残留。
+   *
    * @throws
    */
-  async stopServer() {
+  async stopServer(): Promise<void> {
+    const timeoutMs: number = 5000;
+    try {
+      await Promise.race([
+        this.doStopServer(),
+        new Promise<void>((_resolve, reject) => {
+          setTimeout(() => {
+            reject(new Error(`stopServer超时(${timeoutMs}ms)`));
+          }, timeoutMs);
+        }),
+      ]);
+    } catch (e) {
+      LLog.error(TAG, `stopServer异常或超时: ${JSON.stringify(e)}`);
+      // 即使超时也尝试强制关闭client
+      try {
+        await this.client.close();
+        LLog.info(TAG, "超时后强制关闭通道成功");
+      } catch (closeErr) {
+        LLog.error(TAG, `超时后强制关闭通道失败: ${JSON.stringify(closeErr)}`);
+      }
+    }
+  }
+
+  /**
+   * 执行VPN停止的实际操作：destroy vpn连接 + close WireGuard客户端
+   */
+  private async doStopServer(): Promise<void> {
     await this.vpnConnection.destroy()
     LLog.info(TAG, "关闭VPN")
-    // const client = WireGuard.device;
-    // 关闭并释放资源
     await this.client.close()
     LLog.info(TAG, "关闭通道")
-
   }
 }
 

@@ -29,6 +29,7 @@ import WGConfig, { computeConfMd5 } from './WGConfig';
 import WGEvent from './WGEvent';
 import WGTools from './WGTools';
 import { VpnConfigAction, VpnConfigRequestParams } from './entity/VpnConfigAction';
+import { VpnEventTag } from './entity/VPNEventStatusParams';
 import { VpnConnHelper } from './WGConnect';
 import WGAppException from '../error/WGAppException';
 
@@ -202,16 +203,31 @@ export namespace WireGuard {
       }
     } else {
       WireGuard.config.runArg.clear();
-      // 这里如果检测vpn进程是否进行中，当快速点击switch开关时，会存在打开的瞬间关闭，虽然打开已经返回了结果，
-      // 但vpn进程并没有启动成功。这里会获取失败
-      // 先通知VEA停止VPN服务（优雅关闭连接）
-      event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
-      // 再关闭VEA进程
+
+      // 检测VEA是否运行
+      const isRunning = await WGTools.isVpnExtensionRunning();
+
+      if (isRunning) {
+        // VEA运行中 → 分步关闭：先STOP等待确认，再关闭VEA进程
+        LLog.info(TAG, 'VEA运行中，分步关闭VPN');
+
+        // 1. 先发送STOP指令，等待VPN服务停止
+        event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
+
+        // 2. 等待VPN_SERVICE_STOPPED事件确认（最多3秒）
+        await waitForVpnServiceStopped(3000);
+        LLog.info(TAG, 'VPN服务已停止（或等待超时），关闭VEA进程');
+      } else {
+        // VEA未运行 → 直接关闭VEA进程（此时STOP无意义）
+        LLog.info(TAG, 'VEA未运行，直接调用stopVpnExtensionAbility');
+      }
+
+      // 3. 关闭VEA进程
       await vpnExtension.stopVpnExtensionAbility({
         deviceId: '',
         bundleName: packageName,
         abilityName: abilityName,
-      })
+      });
     }
   }
 
@@ -379,4 +395,40 @@ export namespace WireGuard {
     }
   }
 
+}
+
+/**
+ * 等待VPN_SERVICE_STOPPED事件确认VPN服务已停止
+ *
+ * 在runWGConfig关闭流程中，发送STOP指令后等待VEA确认VPN服务停止，
+ * 最多等待timeout毫秒，超时则返回false。
+ *
+ * @param timeout 最大等待时间（毫秒）
+ * @returns true=收到VPN_SERVICE_STOPPED确认, false=超时未收到
+ */
+function waitForVpnServiceStopped(timeout: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let resolved: boolean = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        LLog.warn(TAG, `等待VPN_SERVICE_STOPPED超时(${timeout}ms)`);
+        cancel.cancel();
+        resolve(false);
+      }
+    }, timeout);
+
+    const cancel = WGEvent.subscribeVpnChange((params) => {
+      const tag = params.tag as VpnEventTag;
+      if (tag === VpnEventTag.VPN_SERVICE_STOPPED) {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          cancel.cancel();
+          LLog.info(TAG, '收到VPN_SERVICE_STOPPED确认');
+          resolve(true);
+        }
+      }
+    });
+  });
 }

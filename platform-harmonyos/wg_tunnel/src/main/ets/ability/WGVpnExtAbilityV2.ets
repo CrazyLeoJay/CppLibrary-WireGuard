@@ -22,7 +22,7 @@ import { LLog } from '../tools/LLog';
 import { WireGuard } from '../model/WGHelper';
 import { WGDeviceConfig, WGDBConf } from '../model/entity/WGConfigEntity';
 import { VpnConnHelper, makeWGConf2VpnStartConfig } from '../model/WGConnect';
-import { StreamDirection } from '../../../../Index';
+import { StreamDirection, MessageType } from '../../../../Index';
 import { WGEventThrowParam } from '../error/WGEventThrow';
 import WGTools from '../model/WGTools';
 import VPNEventStatusParams, { VpnEventTag } from '../model/entity/VPNEventStatusParams';
@@ -77,6 +77,14 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   // V2: 事件订阅句柄
   private configRequestCancel?: SubEventCancel;
   private vpnStatusQueryCancel?: SubEventCancel;
+  private reconnectRequestCancel?: SubEventCancel;
+  // 握手超时检测
+  private lastHandshakeTime: Map<number, number> = new Map();
+  private handshakeCheckTimer?: number;
+  /** 握手过期阈值：3分钟（单位ms） */
+  private readonly HANDSHAKE_STALE_THRESHOLD: number = 180000;
+  /** 握手检查间隔：1分钟（单位ms） */
+  private readonly HANDSHAKE_CHECK_INTERVAL: number = 60000;
 
   override onCreate(want: Want): void {
     super.onCreate(want);
@@ -88,6 +96,11 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
       this.configRequestCancel = WireGuard.event.subscribeVpnConfigRequest((params) => {
         this.onConfigRequest(params);
+      });
+
+      // 订阅主进程的重连请求
+      this.reconnectRequestCancel = WireGuard.event.subscribeVpnReconnectRequest(() => {
+        this.onReconnectRequest();
       });
 
       // 2. 通知主应用进程：VEA进程已启动（主进程收到后订阅CONFIG_QUERY并回复配置）
@@ -164,9 +177,12 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     return true;
   }
 
-  override onDestroy(): void {
+  override async onDestroy(): Promise<void> {
     super.onDestroy();
     LLog.info(TAG, "WGVpnExtAbilityV2 onDestroy");
+
+    // 停止握手超时检查
+    this.stopHandshakeCheck();
 
     // 停止配置请求轮询
     this.stopConfigQueryPolling();
@@ -180,6 +196,10 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       this.vpnStatusQueryCancel.cancel();
       this.vpnStatusQueryCancel = undefined;
     }
+    if (this.reconnectRequestCancel != undefined) {
+      this.reconnectRequestCancel.cancel();
+      this.reconnectRequestCancel = undefined;
+    }
 
     // 注销网络监听
     this.unregisterNetConnection();
@@ -187,14 +207,19 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     // 通知主进程VEA关闭
     VPNChangeHelperV2.stopVpn();
 
-    // 停止VPN连接
-    this.vpnConnection?.stopServer()
-      .then(() => {
-        LLog.info(TAG, "停止VPN成功");
-      })
-      .catch((err: BusinessError) => {
-        LLog.error(TAG, err);
-      });
+    // 安全检查：如果vpnConnection未被销毁，则执行stopServer
+    // handleStopService可能已经执行过stopServer并设置vpnConnection=undefined
+    if (this.vpnConnection != undefined) {
+      try {
+        await this.vpnConnection.stopServer();
+        LLog.info(TAG, "onDestroy: 停止VPN成功");
+      } catch (err) {
+        LLog.error(TAG, `onDestroy: 停止VPN异常: ${JSON.stringify(err)}`);
+      }
+      this.vpnConnection = undefined;
+    } else {
+      LLog.info(TAG, "onDestroy: vpnConnection已销毁，跳过stopServer");
+    }
   }
 
   // ===== 配置请求轮询 =====
@@ -298,15 +323,26 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
   /**
    * STOP：停止VPN服务但保留VEA进程
+   *
+   * 确保stopServer()完成后再将vpnConnection设为undefined，
+   * 即使stopServer失败也继续清理，防止VPN路由/DNS残留。
    */
   private async handleStopService(): Promise<void> {
     LLog.info(TAG, '停止VPN服务（保留VEA进程）');
 
-    // 停止VPN连接
-    try {
-      await this.vpnConnection?.stopServer();
-    } catch (e) {
-      LLog.error(TAG, `停止VPN连接异常: ${JSON.stringify(e)}`);
+    // 停止握手超时检查
+    this.stopHandshakeCheck();
+
+    // 停止VPN连接：await确保destroy和close完成后再设为undefined
+    if (this.vpnConnection != undefined) {
+      try {
+        await this.vpnConnection.stopServer();
+        LLog.info(TAG, 'handleStopService: stopServer成功');
+      } catch (e) {
+        LLog.error(TAG, `handleStopService: stopServer异常，继续清理: ${JSON.stringify(e)}`);
+      }
+    } else {
+      LLog.info(TAG, 'handleStopService: vpnConnection已为空，跳过stopServer');
     }
     this.vpnConnection = undefined;
 
@@ -384,6 +420,98 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     this.resolveAndStartVpn(this.currentConfigId, this.currentDbConf);
   }
 
+  // ===== 握手超时检测与自动重连 =====
+
+  /**
+   * 启动握手超时检查定时器
+   *
+   * 每隔HANDSHAKE_CHECK_INTERVAL(1分钟)检查一次，
+   * 如果所有peer的握手时间都超过HANDSHAKE_STALE_THRESHOLD(3分钟)，
+   * 则判定隧道失效，自动触发重连。
+   */
+  private startHandshakeCheck(): void {
+    this.stopHandshakeCheck();
+    LLog.info(TAG, `启动握手超时检查: 间隔=${this.HANDSHAKE_CHECK_INTERVAL}ms, 阈值=${this.HANDSHAKE_STALE_THRESHOLD}ms`);
+    this.handshakeCheckTimer = setInterval(() => {
+      this.checkHandshakeStale();
+    }, this.HANDSHAKE_CHECK_INTERVAL);
+  }
+
+  /**
+   * 停止握手超时检查定时器
+   */
+  private stopHandshakeCheck(): void {
+    if (this.handshakeCheckTimer != undefined) {
+      clearInterval(this.handshakeCheckTimer);
+      this.handshakeCheckTimer = undefined;
+      LLog.info(TAG, '停止握手超时检查');
+    }
+  }
+
+  /**
+   * 检查握手是否过期
+   *
+   * 如果所有peer的最后一次握手时间都超过阈值（3分钟），
+   * 则判定隧道失效，通知主进程并自动重连。
+   * 防重入：如果正在重连中则跳过检查。
+   */
+  private checkHandshakeStale(): void {
+    if (this.isReconnecting) {
+      LLog.info(TAG, '正在重连中，跳过握手超时检查');
+      return;
+    }
+    if (this.vpnConnection == undefined) {
+      LLog.info(TAG, 'vpnConnection为空，跳过握手超时检查');
+      return;
+    }
+
+    const now = Date.now();
+    let allStale: boolean = true;
+
+    // 检查所有peer的握手时间
+    this.lastHandshakeTime.forEach((time: number, peerIndex: number) => {
+      const elapsed = now - time;
+      LLog.info(TAG, `握手检查: peerIndex=${peerIndex}, elapsed=${elapsed}ms, stale=${elapsed > this.HANDSHAKE_STALE_THRESHOLD}`);
+      if (elapsed <= this.HANDSHAKE_STALE_THRESHOLD) {
+        allStale = false;
+      }
+    });
+
+    // 如果没有任何握手记录，也判定为失效
+    if (this.lastHandshakeTime.size === 0) {
+      LLog.warn(TAG, '无握手记录，VPN可能未完成首次握手');
+      return;
+    }
+
+    if (allStale) {
+      LLog.warn(TAG, '所有peer握手超时，隧道失效，触发自动重连');
+      // 通知主进程隧道失效
+      VPNChangeHelperV2.tunnelStale();
+      // 自动重连
+      this.handleRestartConfig();
+    }
+  }
+
+  /**
+   * 响应主进程的重连请求
+   *
+   * 当主进程检测到VPN隧道可能失效（如锁屏恢复后），
+   * 通过VPN_RECONNECT_REQUEST事件通知VEA执行重连。
+   * VEA收到后调用handleRestartConfig()重新解析DNS并重建隧道。
+   */
+  private onReconnectRequest(): void {
+    LLog.info(TAG, '收到主进程重连请求');
+    if (this.vpnConnection == undefined) {
+      LLog.warn(TAG, 'vpnConnection为空，无法重连');
+      return;
+    }
+    if (this.isReconnecting) {
+      LLog.warn(TAG, '正在重连中，跳过重复重连请求');
+      return;
+    }
+    this.handleRestartConfig();
+  }
+
   // ===== VPN启动（复用V1核心逻辑） =====
 
   private async resolveAndStartVpn(id: number, wgDbConf: WGDBConf): Promise<void> {
@@ -413,12 +541,20 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
         const mtype: string = WGTools.getMessageTypeDesc(msg.messageType);
         LLog.info(TAG,
           `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length}`);
+        // 记录握手时间，用于握手超时检测
+        if (msg.messageType === MessageType.HANDSHAKE_INITIATION ||
+          msg.messageType === MessageType.HANDSHAKE_RESPONSE) {
+          this.lastHandshakeTime.set(msg.peerIndex, Date.now());
+          LLog.info(TAG, `握手时间更新: peerIndex=${msg.peerIndex}, time=${Date.now()}`);
+        }
         WireGuard.event.publishVpnStreamLogs(msg);
       });
 
     this.vpnConnection.startServer()
       .then(() => {
         VPNChangeHelperV2.startVpn(id, config);
+        // VPN启动成功后启动握手超时检查
+        this.startHandshakeCheck();
       })
       .catch((e: BusinessError) => {
         LLog.error(TAG, `VPN Error (${e.code}): ${e.message}`);
@@ -526,6 +662,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
       this.currentConfig = newConfig;
       this.startVpnInternal(this.currentConfigId, newConfig);
+      // 重连后重启握手超时检查
+      this.startHandshakeCheck();
     } catch (e) {
       LLog.error(TAG, `网络变化重连异常: ${JSON.stringify(e)}`);
     } finally {
@@ -612,6 +750,20 @@ class VPNChangeHelperV2 {
       vpnThreadRunning: false,
       connectedIps: VPNChangeHelperV2.cachedConnectedIps,
     });
+  }
+
+  /**
+   * VPN隧道失效（握手超时）
+   * 通知主进程隧道可能已断开，需要重连
+   */
+  static tunnelStale(): void {
+    const params: VPNEventStatusParams = {
+      isOpen: true,
+      tag: VpnEventTag.VPN_TUNNEL_STALE,
+      vpnThreadRunning: true,
+      connectedIps: VPNChangeHelperV2.cachedConnectedIps,
+    };
+    WireGuard.event.publishVpnChange(params);
   }
 
   static queryStatus(config?: WGDeviceConfig): void {

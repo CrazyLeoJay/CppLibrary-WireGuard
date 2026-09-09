@@ -94,12 +94,6 @@ class StatusImpl {
     LLog.info(TAG, `从VPN进程同步: running=${c.running}, configId=${c.runningConfigId}`)
   }
 
-  update(dto: StatusConfigDTO) {
-    const c = this.getConfig()
-    c.runningConfigId = dto.runningConfigId
-    c.running = dto.running
-  }
-
   isRunning(id: number): boolean {
     const config = this.getConfig();
     return config.running && id == config.runningConfigId;

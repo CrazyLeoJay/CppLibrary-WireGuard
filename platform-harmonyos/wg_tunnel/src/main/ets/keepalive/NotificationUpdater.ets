@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { LLog } from 'wg_tunnel';
+import { LLog } from '../tools/LLog';
 
 const TAG: string = 'NotifUpdater';
 
@@ -134,7 +134,7 @@ export class NotificationUpdater {
   private scheduleDeadline(): void {
     this.deadlineTimer = setTimeout(() => {
       this.deadlineTimer = undefined;
-      LLog.info(TAG, 'deadline到期：无新数据，重发旧通知保活');
+      LLog.debug(TAG, 'deadline到期：无新数据，重发旧通知保活');
       this.provider();
       this.scheduleDeadline();
     }, this.timeoutMs);

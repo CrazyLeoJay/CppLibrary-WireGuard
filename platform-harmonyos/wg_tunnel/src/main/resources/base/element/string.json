@@ -5,6 +5,10 @@
       "value": "用于WireGuard协议建立Socket连接"
     },
     {
+      "name": "keep_background_running_description",
+      "value": "需要让应用长时间运行在后台提供VPN服务"
+    },
+    {
       "name": "reason_running_info",
       "value": "使用VPN建立WireGuardVPN隧道提供服务"
     },

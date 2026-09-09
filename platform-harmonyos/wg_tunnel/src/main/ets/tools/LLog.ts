@@ -16,6 +16,10 @@
  */
 import hilog from '@ohos.hilog'
 
+const TAG = "llog tools"
+
+let DEBUG_MODE: boolean = false
+
 export type ErrorParams = string | { error: any, message?: string } | Error
 
 class LogImpl {
@@ -66,6 +70,18 @@ class LogImpl {
   error(tag: string, msg: ErrorParams, ...any: any[]) {
     hilog.error(this.domain, `${this.defaultPrefix}${tag}`, this.p2s(msg), ...any)
   }
+
+  dev(tag: string, msg: ErrorParams, ...any: any[]) {
+    if (DEBUG_MODE) {
+      hilog.debug(this.domain, `${this.defaultPrefix}${tag}`, this.p2s(msg), ...any)
+    }
+  }
 }
 
 export const LLog = new LogImpl()
+
+export function setLLogDebugMode(debug: boolean) {
+  DEBUG_MODE = debug
+  LLog.dev(TAG, `LLOG DEBUG状态：${debug}`)
+}
+
