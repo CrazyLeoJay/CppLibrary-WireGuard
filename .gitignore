@@ -8,3 +8,5 @@ build_wsl
 *.tmp.conf
 spec
 build_*
+build-*
+.zcode
