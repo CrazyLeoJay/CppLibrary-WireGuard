@@ -48,6 +48,22 @@ export class VpnConnHelper {
   }
 
   /**
+   * 运行时重建底层socket（保留会话与epoll），经fd变更回调触发重新protect。
+   * 用于网络切换后的轻量漫游：WireGuard会自动漫游到新网络源地址，无需整体重建VPN连接。
+   *
+   * @returns 新的socket fd
+   * @throws WGAppException 重建失败
+   */
+  async swapSocket(): Promise<number> {
+    const fd = await this.client.resetSocket()
+    if (fd < 0) {
+      throw new WGAppException(`Socket重建异常：${fd}`)
+    }
+    LLog.info(TAG, `swapSocket完成，新fd=${fd}`)
+    return fd
+  }
+
+  /**
    * @throws
    */
   async startServer() {

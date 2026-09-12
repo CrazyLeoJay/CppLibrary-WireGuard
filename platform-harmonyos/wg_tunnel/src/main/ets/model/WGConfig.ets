@@ -38,6 +38,13 @@ export class StatusConfig {
   @Trace isSwitchOpen: boolean = false;
   /** 用户意图开启的配置ID（isSwitchOpen=false时为undefined） */
   @Trace switchConfigId?: number = undefined;
+  /**
+   * 本进程内用户是否主动关闭过开关（进程存活期内不复位）
+   * 用于区分"主进程重启后的冷启动恢复"与"陈旧启动指令晚到"：
+   * 真冷启动的进程不可能有本地关闭记录；有过关闭记录后再看到"VPN运行但意图关"，
+   * 只能是用户关闭后在途的启动指令完成（如参数直传启动），必须拆除而非恢复意图。
+   */
+  @Trace hasLocalOff: boolean = false;
 
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true
@@ -112,9 +119,9 @@ class StatusImpl {
   /**
    * 用户点击开启：立即将本地状态置为开启（意图先行）
    *
-   * 点击开关/启动按钮时立即调用，使UI开关即刻显示为开，
-   * 无需等待VPN进程/连接真正建立。同时将 running 置 true，
-   * 后续Vpn进程广播只校正 running/runningConfigId，不影响 isSwitchOpen。
+   * 点击开关/启动按钮时立即调用，使UI开关即刻显示为开。
+   * 注意：running/runningConfigId 为"实际运行事实"，只由VPN进程广播校正
+   * （syncFromVpnProcess），此处不伪造，避免启动阶段 isOpen() 提前为真。
    *
    * @param configId 用户意图开启的配置ID
    */
@@ -122,13 +129,12 @@ class StatusImpl {
     const c = this.getConfig()
     c.isSwitchOpen = true
     c.switchConfigId = configId
-    c.running = true
-    c.runningConfigId = configId
     LLog.info(TAG, `用户意图开启(switchOnIntent): configId=${configId}`)
   }
 
   /**
    * 用户主动关闭 / 明确启动异常 / VPN进程关闭 → 关闭开关意图
+   * 同时置 hasLocalOff：本进程此后再看到"VPN运行但意图关"均视为陈旧启动
    */
   switchOffIntent() {
     const c = this.getConfig()
@@ -136,6 +142,7 @@ class StatusImpl {
     c.switchConfigId = undefined
     c.running = false
     c.runningConfigId = undefined
+    c.hasLocalOff = true
     LLog.info(TAG, `用户意图关闭(switchOffIntent)`)
   }
 

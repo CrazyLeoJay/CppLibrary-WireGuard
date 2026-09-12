@@ -189,11 +189,14 @@ export namespace WireGuard {
           .catch((e: BusinessError) => {
             switch (e.code) {
               case 15501001:
-                LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
+                LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" });
+                break;
               case 201:
-                LLog.warn(TAG, { error: e, message: "未授权！" })
+                LLog.warn(TAG, { error: e, message: "未授权！" });
+                break;
               default:
-                LLog.warn(TAG, e)
+                LLog.warn(TAG, e);
+                break;
             }
             throw new WGAppException({ e: e, message: "VPN启动异常" });
           })

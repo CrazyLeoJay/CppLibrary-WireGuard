@@ -467,9 +467,22 @@ export default class WGNewConfigViewModel {
       endpoint: endpoint,
       allowedIPs: allowedIps,
       preSharedKey: config.preSharedKey,
-      keepaliveInterval: Number.parseInt(config.keepaliveInterval),
+      // 归一化：空串/非数字/负数一律按0处理（不发心跳），修复 Number.parseInt("") 产生NaN的隐患
+      keepaliveInterval: normalizeKeepaliveInterval(config.keepaliveInterval),
     } as WGConfPeer;
   }
+}
+
+/**
+ * 保活间隔归一化：空串/非数字/负数 → 0（不发心跳）
+ * 用户显式填0或清空输入框均表示关闭心跳；>0 按原值保存
+ */
+function normalizeKeepaliveInterval(value: string): number {
+  const parsed = Number.parseInt(value)
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return 0
+  }
+  return parsed
 }
 
 class InputRegex {

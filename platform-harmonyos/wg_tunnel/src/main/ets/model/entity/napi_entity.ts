@@ -146,7 +146,13 @@ export enum MessageType {
   HANDSHAKE_INITIATION = 1,
   HANDSHAKE_RESPONSE = 2,
   HANDSHAKE_COOKIE = 3,
-  DATA = 4
+  DATA = 4,
+  /**
+   * 【非协议消息】Socket 链路异常事件（native上报，success=false）
+   * 由 C 层在连续发送失败/读线程自愈耗尽时发出，宿主按类型消费：
+   * VEA 立即重建隧道，主进程计为外发活动信号；不进入通知统计。
+   */
+  SOCKET_ERROR = 250
 }
 
 export class Timestamp extends Number {

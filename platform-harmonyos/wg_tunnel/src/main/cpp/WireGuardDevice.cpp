@@ -188,6 +188,7 @@ napi_value Init(napi_env env, napi_value exports) {
         {"initVpn", nullptr, InitVpn, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"start", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setStreamLogListener", nullptr, setStreamLogListener, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"resetSocket", nullptr, ResetSocket, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
 
@@ -478,6 +479,32 @@ napi_value setStreamLogListener(napi_env env, napi_callback_info info) {
         napi_throw_error(env, TAG.data(), error.data());
     }
     return nullptr;
+}
+
+napi_value ResetSocket(napi_env env, napi_callback_info info) {
+    napi_value jsThis;
+    napi_get_cb_info(env, info, nullptr, nullptr, &jsThis, nullptr);
+    LOG_DEBUG("NAPI ResetSocket");
+    DevicePeerHelper *deviceHelper = nullptr;
+    auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&deviceHelper));
+    if (state != napi_ok || deviceHelper == nullptr || !deviceHelper->device) {
+        napi_throw_error(env, TAG.data(), "对象获取失败或Device未构造");
+        return nullptr;
+    }
+    try {
+        // 仅重建底层socket fd并经fd变更回调通知宿主重新protect（保留会话，轻量漫游）
+        const int newFd = deviceHelper->device->swapSocket();
+        LOG_INFO("resetSocket 新fd=%{public}d", newFd);
+        napi_value result;
+        napi_create_int64(env, newFd, &result);
+        return result;
+    } catch (const std::exception &e) {
+        std::string error("resetSocket 异常: ");
+        error += e.what();
+        LOG_ERROR("%{public}s", error.data());
+        napi_throw_error(env, TAG.data(), error.data());
+        return nullptr;
+    }
 }
 
 napi_value Close(napi_env env, napi_callback_info info) {

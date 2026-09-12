@@ -81,6 +81,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   // 握手超时检测
   private lastHandshakeTime: Map<number, number> = new Map();
   private handshakeCheckTimer?: number;
+  /** 最后一次外发活动（SEND流日志）时间戳：失效判定的武装信号 */
+  private lastOutboundActivity: number = 0;
   /** 握手过期阈值：3分钟（单位ms） */
   private readonly HANDSHAKE_STALE_THRESHOLD: number = 180000;
   /** 握手检查间隔：1分钟（单位ms） */
@@ -483,6 +485,13 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       return;
     }
 
+    // 无近期外发活动时无法区分"空闲"与"失效"（如keepalive=0的空闲隧道没有任何消息），
+    // 此时跳过判定，避免对健康空闲隧道反复重连
+    if (this.lastOutboundActivity <= 0 || (now - this.lastOutboundActivity) > this.HANDSHAKE_STALE_THRESHOLD) {
+      LLog.info(TAG, '握手检查: 近期无外发活动（可能为空闲隧道），跳过失效判定');
+      return;
+    }
+
     if (allStale) {
       LLog.warn(TAG, '所有peer握手超时，隧道失效，触发自动重连');
       // 通知主进程隧道失效
@@ -520,12 +529,11 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       this.currentConfig = config;
       this.hasDomainEndpoint = this.checkHasDomainEndpoint(wgDbConf);
       this.startVpnInternal(id, config);
-      if (this.hasDomainEndpoint) {
-        LLog.info(TAG, "域名配置")
-        this.registerNetConnection();
-      } else {
-        LLog.info(TAG, "非域名配置")
-      }
+      // 统一注册网络变化监听：
+      // - 域名端点：网络变化后需重新解析DNS，整体重建隧道
+      // - IP端点：底层网络切换后旧socket路径可能失效，走轻量换fd漫游
+      LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
+      this.registerNetConnection();
     } catch (e) {
       LLog.error(TAG, `DNS解析或VPN启动失败: ${JSON.stringify(e)}`);
       VPNChangeHelperV2.startVpnThrow(`${e instanceof Error ? e.message : String(e)}`);
@@ -541,9 +549,25 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
         const mtype: string = WGTools.getMessageTypeDesc(msg.messageType);
         LLog.info(TAG,
           `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length}`);
+        if (msg.messageType === MessageType.SOCKET_ERROR) {
+          // C层上报的链路级故障（连续发送失败/读线程自愈耗尽）：立即重建隧道，
+          // 比等待握手超时判定快一个量级；仍转发给主进程作为外发活动信号
+          LLog.warn(TAG, `收到Socket链路异常事件：${msg.msg}，立即重建隧道`);
+          WireGuard.event.publishVpnStreamLogs(msg);
+          if (!this.isReconnecting) {
+            this.handleRestartConfig();
+          }
+          return;
+        }
+        if (msg.direction === StreamDirection.SEND) {
+          // 外发活动时间戳：失效判定仅在有发送尝试时武装（区分空闲与失效）
+          this.lastOutboundActivity = Date.now();
+        }
         // 记录握手时间，用于握手超时检测
-        if (msg.messageType === MessageType.HANDSHAKE_INITIATION ||
-          msg.messageType === MessageType.HANDSHAKE_RESPONSE) {
+        // 只记接收方向：外发握手尝试在对端不可达时仍会持续发生，不代表隧道可用
+        if ((msg.messageType === MessageType.HANDSHAKE_INITIATION ||
+          msg.messageType === MessageType.HANDSHAKE_RESPONSE) &&
+          msg.direction === StreamDirection.RECEIVE) {
           this.lastHandshakeTime.set(msg.peerIndex, Date.now());
           LLog.info(TAG, `握手时间更新: peerIndex=${msg.peerIndex}, time=${Date.now()}`);
         }
@@ -583,6 +607,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
   private registerNetConnection(): void {
     try {
+      // 防御性注销旧监听：重启/重连路径会再次注册，防止监听器累积
+      this.unregisterNetConnection();
       this.netConnection = connection.createNetConnection();
       this.netConnection.on('netAvailable', () => {
         LLog.info(TAG, "网络可用变化，触发DNS重新解析");
@@ -638,37 +664,66 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     if (this.isReconnecting || !this.currentDbConf || this.currentConfigId == undefined) {
       return;
     }
-    if (!this.hasDomainEndpoint) {
+
+    // 域名端点：网络变化后需重新解析DNS，走整体重建
+    if (this.hasDomainEndpoint) {
+      this.isReconnecting = true;
+      LLog.info(TAG, "网络环境变化，开始重新解析域名并重连VPN");
+
+      try {
+        const newConfig = await makeWGConf2VpnStartConfig(this.currentDbConf);
+
+        const endpointChanged = this.checkEndpointChanged(this.currentConfig!, newConfig);
+        if (!endpointChanged) {
+          LLog.info(TAG, "域名解析结果未变化，无需重连");
+          this.isReconnecting = false;
+          return;
+        }
+
+        LLog.info(TAG, "域名解析结果已变化，重新连接VPN");
+
+        await this.vpnConnection?.stopServer();
+        LLog.info(TAG, "旧VPN连接已停止");
+
+        this.currentConfig = newConfig;
+        this.startVpnInternal(this.currentConfigId, newConfig);
+        // 重连后重启握手超时检查
+        this.startHandshakeCheck();
+      } catch (e) {
+        LLog.error(TAG, `网络变化重连异常: ${JSON.stringify(e)}`);
+      } finally {
+        this.isReconnecting = false;
+      }
       return;
     }
 
+    // IP端点：底层网络切换后旧socket的转发路径可能失效，走轻量漫游——
+    // 仅重建底层socket fd（保留TUN/路由与会话），WireGuard在后续心跳/数据发送时
+    // 自动漫游到新网络源地址；换fd失败再整体重建
     this.isReconnecting = true;
-    LLog.info(TAG, "网络环境变化，开始重新解析域名并重连VPN");
-
     try {
-      const newConfig = await makeWGConf2VpnStartConfig(this.currentDbConf);
-
-      const endpointChanged = this.checkEndpointChanged(this.currentConfig!, newConfig);
-      if (!endpointChanged) {
-        LLog.info(TAG, "域名解析结果未变化，无需重连");
-        this.isReconnecting = false;
-        return;
-      }
-
-      LLog.info(TAG, "域名解析结果已变化，重新连接VPN");
-
-      await this.vpnConnection?.stopServer();
-      LLog.info(TAG, "旧VPN连接已停止");
-
-      this.currentConfig = newConfig;
-      this.startVpnInternal(this.currentConfigId, newConfig);
-      // 重连后重启握手超时检查
-      this.startHandshakeCheck();
+      await this.swapSocketForRoam();
     } catch (e) {
-      LLog.error(TAG, `网络变化重连异常: ${JSON.stringify(e)}`);
+      LLog.warn(TAG, `轻量漫游失败，转整体重建: ${JSON.stringify(e)}`);
+      await this.handleRestartConfig(this.currentConfigId);
     } finally {
       this.isReconnecting = false;
     }
+  }
+
+  /**
+   * 网络切换轻量漫游：重建底层socket fd并触发重新protect（保留TUN/路由/会话）
+   *
+   * @throws 换fd失败时抛出，由调用方转整体重建
+   */
+  private async swapSocketForRoam(): Promise<void> {
+    if (this.vpnConnection == undefined) {
+      throw new Error('vpnConnection为空，无法轻量漫游');
+    }
+    LLog.info(TAG, '网络切换：轻量重建socket漫游');
+    await this.vpnConnection.swapSocket();
+    // 等待fd变更回调完成protect，避免新fd在受保护前发送流量形成路由回环
+    await new Promise<void>((resolve) => setTimeout(resolve, 300));
   }
 
   private checkEndpointChanged(oldConfig: WGDeviceConfig, newConfig: WGDeviceConfig): boolean {

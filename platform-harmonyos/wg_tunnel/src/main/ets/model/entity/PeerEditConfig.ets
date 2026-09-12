@@ -30,7 +30,7 @@ export default class PeerEditConfig {
   @Trace preSharedKey?: string; // 预共享密钥。可选
   @Trace address?: string;
   @Trace allowedIpsInput: string = "0.0.0.0/0"; // 允许访问的IP规则 必须是IP段
-  @Trace keepaliveInterval: string = ""; // 保活时间间隔 s
+  @Trace keepaliveInterval: string = "25"; // 保活时间间隔 s，新建默认25；显式0/清空=不发心跳
 
   @Trace addressCheckMessage: string = "";
   @Trace addressVerify: boolean = true;

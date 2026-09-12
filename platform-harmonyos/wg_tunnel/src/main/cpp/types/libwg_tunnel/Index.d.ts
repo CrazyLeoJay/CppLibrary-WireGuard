@@ -91,6 +91,14 @@ export class WireGuardDevice {
   // @ts-ignore
   async start(tunFd: number): Promise<void>;
 
+  /**
+   * 运行时重建底层socket（保留会话与epoll），经fd变更回调通知宿主重新protect。
+   * 用于网络切换后的轻量漫游，无需整体重建VPN连接。
+   * @returns 新的socket fd
+   */
+  // @ts-ignore
+  async resetSocket(): Promise<number>;
+
   // @ts-ignore
   async close(): Promise<void>;
 }

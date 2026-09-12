@@ -290,15 +290,13 @@ export class MainItemData {
   openChange(context: UIContext, isOn: boolean) {
     if (this.isClick) {
       this.toggleEnable = false;
-      if (isOn) {
-        LLog.info(TAG, "点击开启VPN")
-        this.vm.changeVpnConfig(context, this, true)
-      } else {
-        LLog.info(TAG, "点击关闭VPN")
-        this.vm.changeVpnConfig(context, this, false)
-      }
+      // 等启停流程（含异常回滚）完成后再恢复开关可点，防止快速连点造成操作交错
+      const task = isOn ? this.vm.changeVpnConfig(context, this, true)
+        : this.vm.changeVpnConfig(context, this, false);
+      task.finally(() => {
+        this.toggleEnable = true;
+      });
       this.isClick = false
-      this.toggleEnable = true;
     }
   }
 }

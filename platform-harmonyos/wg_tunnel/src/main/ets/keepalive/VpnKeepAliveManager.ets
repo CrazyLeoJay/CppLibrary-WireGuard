@@ -13,15 +13,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { common } from '@kit.AbilityKit';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { connection } from '@kit.NetworkKit';
+import { connection, vpnExtension } from '@kit.NetworkKit';
 import { LLog } from '../tools/LLog';
 import { WireGuard } from '../model/WGHelper';
+import { VpnConfigAction } from '../model/entity/VpnConfigAction';
 import { VpnEventTag } from '../model/entity/VPNEventStatusParams';
-import { StreamLogMessage } from '../model/entity/napi_entity';
+import { MessageType, StreamDirection, StreamLogMessage } from '../model/entity/napi_entity';
 import { SubEventCancel } from '../model/WGEvent';
 import { longTaskModel, ContinuousTaskState } from './LongTaskModel';
 
@@ -81,10 +82,24 @@ export class VpnKeepAliveManager {
       this.startTunnelHealthCheck();
     };
 
-  // 最后收到流日志的时间戳（用于判断隧道是否失效）
+  // 最后收到流日志的时间戳（用于判断隧道是否有任何活动）
   private lastStreamLogTime: number = 0;
   /** 流日志过期阈值：3分钟（单位ms） */
   private readonly STREAM_LOG_STALE_THRESHOLD: number = 180000;
+  /** 最后一次成功入站（RECEIVE且success）的时间戳：隧道活性的唯一可信依据 */
+  private lastInboundTime: number = 0;
+  /** 最后一次外发活动（SEND流日志或SOCKET_ERROR事件）的时间戳：判死的武装信号 */
+  private lastOutboundTime: number = 0;
+  /** 外发活动有效窗口：2分钟（窗口内无外发则视为空闲隧道，不做失效判定） */
+  private readonly OUTBOUND_ACTIVE_WINDOW: number = 120000;
+  /** 重新申请保活的基础退避间隔 */
+  private readonly REAPPLY_MIN_INTERVAL: number = 30 * 1000;
+  /** 重新申请保活的退避上限 */
+  private readonly REAPPLY_MAX_INTERVAL: number = 10 * 60 * 1000;
+  /** 上次重新申请保活的时间戳 */
+  private lastReapplyTime: number = 0;
+  /** 重新申请保活连续失败次数（申请后长时任务仍未运行则+1，成功归零），用于指数退避 */
+  private reapplyFailures: number = 0;
   // ===== 后台隧道健康守护（长时任务驱动，不依赖onForeground） =====
   /** 健康检查定时器：随长时任务启动/停止 */
   private tunnelHealthTimer?: number = undefined;
@@ -126,6 +141,11 @@ export class VpnKeepAliveManager {
   onSwitchOn(): void {
     if (this.context == undefined) {
       LLog.warn(TAG, 'onSwitchOn失败：context未绑定');
+      return;
+    }
+    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
+      // 意图已被关闭（如快速开关交错、异步启动晚完成）：不启动保活，防止僵尸长时任务
+      LLog.info(TAG, 'onSwitchOn时开关意图已关闭，跳过启动保活');
       return;
     }
     LLog.info(TAG, '用户开启开关，直接启动长时任务');
@@ -283,9 +303,7 @@ export class VpnKeepAliveManager {
       return;
     }
     LLog.warn(TAG, `开关已开但长时任务系统状态=${state}（非有效），重新申请保活`);
-    // 清除可能失效的内存候选ID，允许 startLongTask 重新申请
-    longTaskModel.resetTaskState();
-    this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
+    this.reapplyKeepAlive();
   }
 
   /**
@@ -301,9 +319,7 @@ export class VpnKeepAliveManager {
       return;
     }
     LLog.warn(TAG, '长时任务异常（取消/挂起），重新申请保活');
-    // 清除内存候选ID，使 startLongTask 可重新申请
-    longTaskModel.resetTaskState();
-    this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
+    this.reapplyKeepAlive();
   }
 
   /**
@@ -325,8 +341,33 @@ export class VpnKeepAliveManager {
       return;
     }
     LLog.warn(TAG, `长时任务系统状态异常=${state}，重新申请保活`);
+    this.reapplyKeepAlive();
+  }
+
+  /**
+   * 重新申请保活（带指数退避）
+   *
+   * 系统取消/挂起长时任务后立即重新申请是VPN刚需，但若申请被系统持续拒绝
+   * （如策略不允许、参数异常），高频重试会与系统策略形成对抗空耗电。
+   * 连续失败时按 30s→60s→120s…指数退避（上限10分钟），成功后归零。
+   */
+  private reapplyKeepAlive(): void {
+    const now = Date.now();
+    const backoff = Math.min(this.REAPPLY_MIN_INTERVAL * Math.max(1, this.reapplyFailures),
+      this.REAPPLY_MAX_INTERVAL);
+    if (this.lastReapplyTime > 0 && (now - this.lastReapplyTime) < backoff) {
+      LLog.info(TAG, `重新申请保活被退避抑制(连续失败${this.reapplyFailures}次, 退避${backoff / 1000}s)`);
+      return;
+    }
+    this.lastReapplyTime = now;
     longTaskModel.resetTaskState();
-    this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
+    this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS).then(() => {
+      if (longTaskModel.isRunning()) {
+        this.reapplyFailures = 0;
+      } else {
+        this.reapplyFailures++;
+      }
+    });
   }
 
   // ===================== VPN事件订阅 =====================
@@ -380,6 +421,13 @@ export class VpnKeepAliveManager {
         `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}, ` +
         `switchIntent=${status.isSwitchOpen}/${status.switchConfigId}`);
 
+      if (tag === VpnEventTag.QUERY_NO_RUNNING) {
+        // 仅表示"查询时VEA未运行"的信息事件（发布时不带vpnThreadRunning），
+        // 不能落入下方"进程关闭"分支误回滚开关意图（如启动窗口期回前台触发查询）
+        LLog.info(TAG, 'QUERY_NO_RUNNING：VEA未运行，忽略，不影响开关意图');
+        return;
+      }
+
       if (params.vpnThreadRunning === true) {
         if (tag === VpnEventTag.VPN_SERVICE_STOPPED) {
           // V2 STOP action（用户关闭流程）→ 意图已关，停守护并更新通知
@@ -396,6 +444,13 @@ export class VpnKeepAliveManager {
         if (status.running === true) {
           // VPN实际运行中
           if (!status.isSwitchOpen && status.runningConfigId != undefined) {
+            if (status.hasLocalOff) {
+              // 本进程内用户明确关闭过开关 → 这不是冷启动恢复，
+              // 而是用户关闭后在途的启动指令完成（如快速开关后参数直传启动晚到），必须拆除
+              LLog.warn(TAG, `VPN运行但本进程有过用户关闭意图(tag=${tag})，判定陈旧启动，下发STOP并关闭VEA`);
+              this.teardownStaleStart();
+              return;
+            }
             // 冷启动恢复：主进程新起但VPN仍在运行（用户此前开启未关闭）→ 补全用户意图
             LLog.info(TAG, `VPN实际运行但意图未开(configId=${status.runningConfigId})，冷启动恢复意图`);
             WireGuard.config.status.switchOnIntent(status.runningConfigId);
@@ -437,6 +492,28 @@ export class VpnKeepAliveManager {
   }
 
   /**
+   * 拆除陈旧启动建立的VPN
+   *
+   * 场景：用户快速开→关后，在途的启动指令（如API22+参数直传启动）晚到并建立了隧道。
+   * 此时用户的关闭流程已执行过（意图已关、保活已停），但当时的stopVpnExtensionAbility
+   * 未能命中尚未启动的VEA，因此这里补发STOP并关闭VEA进程，保证收敛到用户意图。
+   */
+  private async teardownStaleStart(): Promise<void> {
+    try {
+      WireGuard.event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
+      const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+      await vpnExtension.stopVpnExtensionAbility({
+        deviceId: '',
+        bundleName: bundleInfo.name,
+        abilityName: 'WGVpnExtAbility',
+      });
+      LLog.info(TAG, '陈旧启动拆除完成');
+    } catch (e) {
+      LLog.error(TAG, `陈旧启动拆除异常: ${(e as Error).message}`);
+    }
+  }
+
+  /**
    * 注册VPN流日志监听
    *
    * 流日志包含每个Peer的实时流量统计和握手事件，
@@ -449,8 +526,22 @@ export class VpnKeepAliveManager {
     }
     this.vpnStreamLogCancel = WireGuard.event.subscribeVpnStreamLogs((log: StreamLogMessage) => {
       longTaskModel.updateStreamLog(log);
-      // 更新最后收到流日志的时间（隧道健康守护依赖此判断隧道是否失效）
-      this.lastStreamLogTime = Date.now();
+      // 更新最后收到流日志的时间（隧道健康守护依赖此判断是否有任何活动）
+      const now = Date.now();
+      this.lastStreamLogTime = now;
+      if (log.messageType === MessageType.SOCKET_ERROR) {
+        // 链路异常事件计入外发活动：证明发送侧仍在尝试，武装失效判定
+        this.lastOutboundTime = now;
+      } else {
+        if (log.direction === StreamDirection.SEND) {
+          // 外发活动（心跳/数据/握手尝试，无论成败）武装失效判定
+          this.lastOutboundTime = now;
+        }
+        if (log.direction === StreamDirection.RECEIVE && log.success) {
+          // 成功入站是隧道活性的唯一可信依据（外发握手尝试不代表对端可达）
+          this.lastInboundTime = now;
+        }
+      }
     });
     LLog.info(TAG, '已注册VPN流日志监听');
   }
@@ -616,8 +707,11 @@ export class VpnKeepAliveManager {
   /**
    * 隧道健康检查（周期性执行）
    *
-   * 判定依据：VPN运行期间，若长时间（>3分钟）未收到任何流日志/握手数据，
-   * 则认为隧道疑似失效（VEA被冻结或WireGuard隧道已断）。
+   * 【判死双条件】
+   * 1. 连续3分钟无成功入站（RECEIVE且success）——外发握手尝试不代表对端可达，
+   *    只有成功入站（握手响应/数据）才能证明隧道真实可用；
+   * 2. 近2分钟内有外发活动（SEND流日志/SOCKET_ERROR事件）——keepalive=0且空闲的隧道
+   *    没有外发信号，无法区分"空闲"与"失效"，此时不做判定，避免无意义重连空转。
    *
    * 恢复策略（两级）：
    * 1. 热重连：发送RECONNECT_REQUEST，VEA若存活则执行handleRestartConfig重建隧道
@@ -630,16 +724,21 @@ export class VpnKeepAliveManager {
       return;
     }
     if (this.lastStreamLogTime <= 0) {
-      return;
+      return; // 启动初期尚未收到任何流日志，不做判定
     }
     const now: number = Date.now();
-    const idleMs: number = now - this.lastStreamLogTime;
-    if (idleMs <= this.STREAM_LOG_STALE_THRESHOLD) {
-      return; // 隧道健康（近期有数据流动）
+    const inboundIdleMs: number = now - this.lastInboundTime;
+    if (inboundIdleMs <= this.STREAM_LOG_STALE_THRESHOLD) {
+      return; // 近期有成功入站，隧道健康
     }
-    LLog.warn(TAG, `隧道健康检查: ${Math.floor(idleMs / 1000)}s无流日志，判定隧道疑似失效`);
+    if ((now - this.lastOutboundTime) > this.OUTBOUND_ACTIVE_WINDOW) {
+      // 无入站且无外发：keepalive=0的空闲隧道，无法区分空闲与失效，跳过
+      LLog.info(TAG, `隧道健康检查: ${Math.floor(inboundIdleMs / 1000)}s无入站且近${this.OUTBOUND_ACTIVE_WINDOW / 1000}s无外发（空闲隧道），跳过判定`);
+      return;
+    }
+    LLog.warn(TAG, `隧道健康检查: ${Math.floor(inboundIdleMs / 1000)}s无成功入站且外发活跃，判定隧道疑似失效`);
 
-    if (idleMs > this.FORCE_RESTART_STALE_THRESHOLD &&
+    if (inboundIdleMs > this.FORCE_RESTART_STALE_THRESHOLD &&
       (now - this.lastForceRestartTime) > this.RECONNECT_REQUEST_MIN_INTERVAL) {
       // 热重连无效，VEA可能被冻结/卡死 → 强制重启VEA
       this.lastForceRestartTime = Date.now();
@@ -676,9 +775,21 @@ export class VpnKeepAliveManager {
     try {
       // 1. 关闭（内部会先STOP等待确认，再stopVpnExtensionAbility）
       await WireGuard.runWGConfig(configId, dbConf, false);
-      // 2. 等待VEA完全退出，避免启动竞态（start时若检测到VEA仍在运行会走SWITCH而非重启）
-      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-      // 3. 重新启动（VEA未运行 → startVpnExtensionAbility带参直传）
+      // 2. 轮询等待VEA完全退出（避免启动竞态：start时若检测到VEA仍在运行会走SWITCH而非重启）
+      const deadline = Date.now() + 6000;
+      while (Date.now() < deadline) {
+        if (!(await WireGuard.tools.isVpnExtensionRunning())) {
+          break;
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      }
+      // 3. 重启前复查用户意图：关闭流程可能在本重启期间执行（runArg已被清空），
+      //    此时若继续启动，会把用户已关闭的VPN重新拉起并重新缓存runArg
+      if (!WireGuard.config.status.getConfig().isSwitchOpen) {
+        LLog.warn(TAG, '强重启VEA-重启前检测到开关已关闭，中止启动');
+        return;
+      }
+      // 4. 重新启动（VEA未运行 → startVpnExtensionAbility带参直传）
       await WireGuard.runWGConfig(configId, dbConf, true);
       LLog.info(TAG, '强重启VEA-启动指令已发送');
     } catch (e) {

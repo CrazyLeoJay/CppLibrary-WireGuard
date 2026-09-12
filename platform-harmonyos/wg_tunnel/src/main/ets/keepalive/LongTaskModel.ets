@@ -494,6 +494,10 @@ export class LongTaskModel {
    * @param log VPN流日志消息（包含流量统计和握手时间）
    */
   updateStreamLog(log: StreamLogMessage): void {
+    // Socket链路异常事件不进入通知数据（无Peer统计意义），由保活状态机与VEA消费
+    if (log.messageType === MessageType.SOCKET_ERROR) {
+      return;
+    }
     this.vpnData.latestLogs.set(log.peerIndex, log);
     if (log.messageType === MessageType.HANDSHAKE_INITIATION ||
       log.messageType === MessageType.HANDSHAKE_RESPONSE) {

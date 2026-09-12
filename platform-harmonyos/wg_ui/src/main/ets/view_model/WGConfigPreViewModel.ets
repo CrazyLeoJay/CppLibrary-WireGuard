@@ -189,14 +189,20 @@ export default class WGConfigPreViewModel {
     if (this.isSwitchClick) {
       if (isOn) {
         LLog.info(TAG, "点击开启VPN")
-        this.changeVpnConfig(context, true)
+        // 等启停流程（含异常回滚）完成后再恢复开关可点，防止快速连点造成操作交错
+        this.changeVpnConfig(context, true).finally(() => {
+          this.isSwitchEnable = true
+        })
       } else {
         LLog.info(TAG, "点击关闭VPN")
-        this.changeVpnConfig(context, false)
+        this.changeVpnConfig(context, false).finally(() => {
+          this.isSwitchEnable = true
+        })
       }
+    } else {
+      this.isSwitchEnable = true
     }
     this.isSwitchClick = false
-    this.isSwitchEnable = true
   }
 
   setSwitchClick() {
