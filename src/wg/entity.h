@@ -246,10 +246,8 @@ namespace WireGuard {
             if (cidr >= 0) {
                 return address.toIpStr() + "/" + std::to_string(cidr);
             }
-            if (address.family == IPAddress::IPv4) {
-                return address.toIpStr() + "/32";
-            }
-            return address.toIpStr() + "/128";
+            // cidr为-1表示没有掩码，只输出IP，不补默认掩码
+            return address.toIpStr();
         }
     };
 
