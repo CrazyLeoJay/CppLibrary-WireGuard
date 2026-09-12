@@ -26,7 +26,8 @@ import {
   getDnsMode,
   dnsResolveByMode,
   formatDnsError,
-  SiteUrlType
+  SiteUrlType,
+  vpnKeepAliveManager
 } from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
@@ -58,9 +59,11 @@ export default class WGConfigPreViewModel {
 
   updateStatus() {
     const state = WireGuard.config.status.getConfig();
-    // 判断id是否相同，且存在
-    const isIdSame = this.params?.id != undefined && state.runningConfigId == this.params?.id;
-    this.isVpnOpen = isIdSame && state.isOpen()
+    // 开关显示跟随"用户意图"：开关开启且意图配置ID匹配本预览配置即视为开，
+    // 不受VPN启动/运行中间广播(running)影响；只有异常/用户关闭(intent回false)才关
+    const switchId = state.isSwitchOpen ? state.switchConfigId : undefined;
+    const id = this.params?.id;
+    this.isVpnOpen = switchId != undefined && id != undefined && switchId == id;
     LLog.info(TAG, `isVpnOpen=${this.isVpnOpen} status: ${JSON.stringify(state)}`)
   }
 
@@ -128,36 +131,45 @@ export default class WGConfigPreViewModel {
 
   /**
    * 改变Vpn配置，启动或停止
+   *
+   * 意图驱动流程：点击立即置开关意图与UI显示 → 启动/关闭VPN进程
+   * → 开启成功发起即启动长时任务、关闭即停止长时任务；异常则回滚意图并停长时任务。
    */
   async changeVpnConfig(context: UIContext, isOn: boolean) {
     // 当点击启动按钮时，需要设置异常标记为false
     this.isVPNNoGetParamThrow = false;
-    try {
-      const id = this.params!.id;
-      const config = this.data!;
-
-      await WireGuard.runWGConfig(id, config, isOn)
-      // 这里主要是本地启动VPN，不在vpn 专属进程 便于测试。
-      //
-      // if (!this.helper) {
-      //   this.helper = WireGuard.makeVpnConnection(context);
-      // }
-      //
-      // if (WireGuard.getRunningServer().runningConfigId) {
-      //   LLog.info(TAG, `销毁VPN服务 ${id}`);
-      //   await this.helper.stopServer().finally(() => {
-      //     WireGuard.setRunningServer()
-      //   })
-      // }
-      // if (isOn) {
-      //   LLog.info(TAG, `启动VPN服务 ${id}`);
-      //   await this.helper!.startServer(vpnConf)
-      //     .finally(() => {
-      //       WireGuard.setRunningServer(id)
-      //     })
-      // }
-    } catch (e) {
+    const id = this.params?.id;
+    const config = this.data;
+    if (id == undefined || config == undefined) {
+      return;
+    }
+    const status = WireGuard.config.status.getConfig();
+    // 防重复：该配置已是用户意图开启状态
+    if (isOn && status.isSwitchOpen && status.switchConfigId == id) {
+      return;
+    }
+    // 1. 立即置开关意图与UI显示（意图先行）
+    if (isOn) {
+      WireGuard.config.status.switchOnIntent(id);
+      this.isVpnOpen = true;
+    } else {
+      WireGuard.config.status.switchOffIntent();
       this.isVpnOpen = false;
+    }
+    try {
+      // 2. 启动/关闭VPN进程
+      await WireGuard.runWGConfig(id, config, isOn)
+      // 3. 开启：成功发起启动即启动长时任务；关闭：停止长时任务
+      if (isOn) {
+        vpnKeepAliveManager.onSwitchOn();
+      } else {
+        vpnKeepAliveManager.onSwitchOff();
+      }
+    } catch (e) {
+      // 启动/关闭异常 → 回滚意图：开关为关、停止长时任务
+      WireGuard.config.status.switchOffIntent();
+      this.isVpnOpen = false;
+      vpnKeepAliveManager.onSwitchOff();
       WireGuard.event.publishVpnNoOpen()
       // 开启失败展示Toast，关闭操作不展示（用户主动关闭不应提示错误）
       if (isOn) {

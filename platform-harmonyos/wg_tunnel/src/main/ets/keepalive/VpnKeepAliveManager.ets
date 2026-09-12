@@ -98,6 +98,8 @@ export class VpnKeepAliveManager {
   private lastReconnectRequestTime: number = 0;
   /** 上次强重启VEA的时间戳 */
   private lastForceRestartTime: number = 0;
+  /** 强重启VEA进行中标志：期间VEA会短暂广播STOP_VPN，需保护开关意图与保活不被误停 */
+  private isForceRestarting: boolean = false;
 
   /**
    * 是否已绑定UIAbilityContext
@@ -111,6 +113,48 @@ export class VpnKeepAliveManager {
    */
   isKeepAliveRunning(): boolean {
     return longTaskModel.isRunning();
+  }
+
+  /**
+   * 【用户点击开启开关】直接启动保活（长时任务 + 通知 + 后台隧道健康守护）
+   *
+   * 由UI在点击开启时调用（需先经 WireGuard.config.status.switchOnIntent 置用户意图）。
+   * 长时任务启动不再由VPN服务状态事件(START_VPN等)控制，而是跟随用户开关：
+   * - 用户开启 → 立即启动保活，无需等待VPN进程/连接建立
+   * - 用户关闭/异常 → onSwitchOff 停止保活
+   */
+  onSwitchOn(): void {
+    if (this.context == undefined) {
+      LLog.warn(TAG, 'onSwitchOn失败：context未绑定');
+      return;
+    }
+    LLog.info(TAG, '用户开启开关，直接启动长时任务');
+    this.startVpnKeepAlive(VpnEventTag.START_VPN);
+  }
+
+  /**
+   * 【用户点击关闭开关】停止保活（长时任务 + 通知 + 后台隧道健康守护）
+   *
+   * 由UI在点击关闭时调用（需先经 WireGuard.config.status.switchOffIntent）。
+   */
+  onSwitchOff(): void {
+    LLog.info(TAG, '用户关闭开关，停止长时任务');
+    this.stopLongTaskIfNeeded();
+  }
+
+  /**
+   * 意图开启时确保长时任务与守护在运行（幂等兜底）
+   *
+   * 供VPN事件回调使用：意图开启场景下，若保活因故未运行（如冷启动恢复、
+   * 或 onSwitchOn 因系统暂未受理而失败）则补启；已运行则仅更新通知。
+   *
+   * @param connectedIps 事件携带的连接IP（可选，用于更新通知）
+   */
+  private ensureKeepAliveWhenIntendedOn(connectedIps?: Record<number, string>): void {
+    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
+      return;
+    }
+    this.startVpnKeepAlive(VpnEventTag.START_VPN, connectedIps);
   }
 
   /**
@@ -229,7 +273,7 @@ export class VpnKeepAliveManager {
     if (ctx == undefined) {
       return;
     }
-    if (!WireGuard.config.status.getConfig().isOpen()) {
+    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
     const state = await longTaskModel.probeSystemState(ctx);
@@ -238,14 +282,14 @@ export class VpnKeepAliveManager {
       this.startTunnelHealthCheck();
       return;
     }
-    LLog.warn(TAG, `VPN运行中但长时任务系统状态=${state}（非有效），重新申请保活`);
+    LLog.warn(TAG, `开关已开但长时任务系统状态=${state}（非有效），重新申请保活`);
     // 清除可能失效的内存候选ID，允许 startLongTask 重新申请
     longTaskModel.resetTaskState();
     this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
   }
 
   /**
-   * 系统取消/挂起长时任务时，若VPN仍开启则重新申请保活
+   * 系统取消/挂起长时任务时，若开关仍开启则重新申请保活
    *
    * 由 continuousTaskCancel / continuousTaskSuspend 事件回调触发。
    */
@@ -253,7 +297,7 @@ export class VpnKeepAliveManager {
     if (this.context == undefined) {
       return;
     }
-    if (!WireGuard.config.status.getConfig().isOpen()) {
+    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
     LLog.warn(TAG, '长时任务异常（取消/挂起），重新申请保活');
@@ -273,7 +317,7 @@ export class VpnKeepAliveManager {
     if (ctx == undefined) {
       return;
     }
-    if (!WireGuard.config.status.getConfig().isOpen()) {
+    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
     const state = await longTaskModel.probeSystemState(ctx);
@@ -310,14 +354,18 @@ export class VpnKeepAliveManager {
   /**
    * 注册VPN状态变化监听
    *
-   * 监听VPN线程运行状态，据此管理通知和后台长时任务：
+   * 【意图驱动的新状态机】长时任务启停不再由VPN服务状态控制（由onSwitchOn/onSwitchOff跟随用户开关），
+   * 事件仅用于：校正真实运行状态(running)、冷启动意图恢复、异常回滚意图、守护兜底与网络清理确认。
+   *
    * - vpnThreadRunning=true：
-   *   - VPN_SERVICE_STOPPED → VPN服务停止但VEA存活，停健康守护并更新通知
-   *   - VPN_TUNNEL_STALE → VEA检测到隧道失效，转发热重连请求
-   *   - 其他(ON_CREATE/START_VPN/QUERY_STATUS) → 启动保活
-   * - vpnThreadRunning=false：
-   *   - 停止长时任务（stopBackgroundRunning会自动取消关联通知）
-   *   - STOP_VPN → 确认VPN网络清理完成（路由/DNS不残留）
+   *   - VPN_SERVICE_STOPPED → V2 STOP(用户关闭)后VEA存活：停守护并更新通知
+   *   - VPN_TUNNEL_STALE → 隧道失效热重连
+   *   - running=true(实际运行) → 若意图未开(冷启动恢复)则补意图；并确保保活兜底
+   *   - running=false(如ON_CREATE中间态) → 仅确保意图开启时保活仍在(幂等)，不动意图
+   * - vpnThreadRunning=false（进程关闭）：
+   *   - 意图开启 → 若为强制重启中间态则保留意图与保活；否则判定异常/进程关闭 → 回滚意图并停保活
+   *   - 意图已关(用户主动关闭) → 停保活(幂等)
+   *   - STOP_VPN → 确认VPN网络清理完成（路由/DNS不残留，重启中间态除外）
    */
   private subscribeVpnChange(): void {
     if (this.vpnChangeCancel != undefined) {
@@ -325,24 +373,60 @@ export class VpnKeepAliveManager {
     }
     this.vpnChangeCancel = WireGuard.event.subscribeVpnChange((params) => {
       // 注意：subscribeVpnChange内部已自动调用syncFromVpnProcess把params.status同步到本地AppStorageV2，
-      // 此处无需重复同步，仅处理保活状态机逻辑。
+      // 意图字段(isSwitchOpen/switchConfigId)不会被覆盖，仅running/runningConfigId被校正。
       const tag = params.tag as VpnEventTag;
+      const status = WireGuard.config.status.getConfig();
       LLog.info(TAG,
-        `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}`);
+        `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}, ` +
+        `switchIntent=${status.isSwitchOpen}/${status.switchConfigId}`);
 
       if (params.vpnThreadRunning === true) {
         if (tag === VpnEventTag.VPN_SERVICE_STOPPED) {
+          // V2 STOP action（用户关闭流程）→ 意图已关，停守护并更新通知
           this.onVpnServiceStopped();
-        } else if (tag === VpnEventTag.VPN_TUNNEL_STALE) {
+          return;
+        }
+        if (tag === VpnEventTag.VPN_TUNNEL_STALE) {
           LLog.warn(TAG, 'VPN隧道失效（握手超时），通知VEA重连');
-          this.startVpnKeepAlive(tag, params.connectedIps);
+          this.ensureKeepAliveWhenIntendedOn(params.connectedIps);
           WireGuard.event.publishVpnReconnectRequest();
+          return;
+        }
+        // START_VPN / QUERY_STATUS / ON_CREATE
+        if (status.running === true) {
+          // VPN实际运行中
+          if (!status.isSwitchOpen && status.runningConfigId != undefined) {
+            // 冷启动恢复：主进程新起但VPN仍在运行（用户此前开启未关闭）→ 补全用户意图
+            LLog.info(TAG, `VPN实际运行但意图未开(configId=${status.runningConfigId})，冷启动恢复意图`);
+            WireGuard.config.status.switchOnIntent(status.runningConfigId);
+          } else if (status.isSwitchOpen && status.switchConfigId != status.runningConfigId &&
+            status.runningConfigId != undefined) {
+            // 运行中的配置与意图不一致（如热切换后广播）→ 意图对齐实际运行配置
+            WireGuard.config.status.switchOnIntent(status.runningConfigId);
+          }
+          // 意图开启时确保保活兜底（防 onSwitchOn 丢失/冷启动）
+          this.ensureKeepAliveWhenIntendedOn(params.connectedIps);
         } else {
-          this.startVpnKeepAlive(tag, params.connectedIps);
+          // running=false（ON_CREATE/查询到服务未运行等中间态）：
+          // 不修改用户意图（启动中/恢复中等场景开关保持），意图开启时确保保活仍在
+          this.ensureKeepAliveWhenIntendedOn(params.connectedIps);
         }
       } else {
-        // VPN线程未运行 → 停止长时任务（stopBackgroundRunning会自动取消关联通知）
-        this.stopLongTaskIfNeeded();
+        // ===== VPN进程关闭(vpnThreadRunning=false) =====
+        if (status.isSwitchOpen) {
+          if (this.isForceRestarting) {
+            // 强重启恢复的中间态：保留意图与保活，等待随后的START_VPN重建
+            LLog.warn(TAG, `强重启中间态(VEA关闭,tag=${tag})，保留意图与保活`);
+            return;
+          }
+          // 意图开启但进程关闭且非主动恢复 → 判定为异常/进程被杀
+          LLog.warn(TAG, `VPN进程关闭但开关仍开(tag=${tag})，判定异常，回滚开关意图并停止保活`);
+          WireGuard.config.status.switchOffIntent();
+          this.stopLongTaskIfNeeded();
+        } else {
+          // 意图已关（用户主动关闭流程）→ 停保活（幂等）
+          this.stopLongTaskIfNeeded();
+        }
         // VPN关闭后确认网络清理完成（检查VPN bearerType是否已移除）
         if (tag === VpnEventTag.STOP_VPN) {
           this.confirmVpnNetworkCleanup();
@@ -410,6 +494,9 @@ export class VpnKeepAliveManager {
       LLog.warn(TAG, '启动保活失败：context未绑定');
       return;
     }
+
+    // 重新激活保活：复位V2 STOP残留的"服务已停止"通知标记
+    longTaskModel.setServiceStopped(false);
 
     // 缓存连接IP和配置信息
     if (connectedIps) {
@@ -583,20 +670,21 @@ export class VpnKeepAliveManager {
       return;
     }
     LLog.warn(TAG, `强重启VEA: configId=${configId}`);
+    // 置恢复标志：期间VEA会广播STOP_VPN(vpnThreadRunning=false)，
+    // 状态机据此保留开关意图与保活，避免把"主动恢复"误判为"异常进程关闭"而回滚开关。
+    this.isForceRestarting = true;
     try {
       // 1. 关闭（内部会先STOP等待确认，再stopVpnExtensionAbility）
       await WireGuard.runWGConfig(configId, dbConf, false);
-    } catch (e) {
-      LLog.error(TAG, `强重启VEA-关闭失败: ${(e as Error).message}`);
-    }
-    // 2. 等待VEA完全退出，避免启动竞态（start时若检测到VEA仍在运行会走SWITCH而非重启）
-    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-    try {
+      // 2. 等待VEA完全退出，避免启动竞态（start时若检测到VEA仍在运行会走SWITCH而非重启）
+      await new Promise<void>((resolve) => setTimeout(resolve, 2000));
       // 3. 重新启动（VEA未运行 → startVpnExtensionAbility带参直传）
       await WireGuard.runWGConfig(configId, dbConf, true);
       LLog.info(TAG, '强重启VEA-启动指令已发送');
     } catch (e) {
-      LLog.error(TAG, `强重启VEA-启动失败: ${(e as Error).message}`);
+      LLog.error(TAG, `强重启VEA异常: ${(e as Error).message}`);
+    } finally {
+      this.isForceRestarting = false;
     }
   }
 

@@ -180,6 +180,12 @@ export struct WGMainView {
               message: `code=${e.code}`
             , error: e
             })
+            try {
+              this.getUIContext().getPromptAction().showToast({
+                message: e.message
+              })
+            } catch (error) {
+            }
           })
       }
     },

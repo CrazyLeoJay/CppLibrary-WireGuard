@@ -20,7 +20,7 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
-import { SortColumnName, StatusConfigDTO, WGConf, WGDBConf } from 'wg_tunnel';
+import { SortColumnName, StatusConfigDTO, WGConf, WGDBConf, vpnKeepAliveManager } from 'wg_tunnel';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
@@ -157,21 +157,21 @@ export default class WGMainViewModel {
   }
 
   /**
-   * 设置活跃的配置，即已经开启的配置
-   * @param dto VPN状态DTO（纯数据，从跨进程广播反序列化而来）
+   * 根据VPN状态广播刷新每行开关显示
+   *
+   * 行开关跟随"用户意图"(isSwitchOpen+switchConfigId)：
+   * - 点击开启后意图立即置true → 行开关立即为开，不受VPN启动过程中的中间广播(running=false)影响
+   * - 只有明确启动异常/VPN进程关闭/用户主动关闭(intent回false) → 行开关才为关
+   * @param dto VPN状态DTO（sync已完成，此处以本地意图为准刷新行显示）
    */
   setActiveConfigId(dto: StatusConfigDTO) {
-    const running = dto.runningConfigId != undefined && dto.running
-    this.lastOpenConfigId = dto.runningConfigId ?? -1
-    if (running) {
-      for (let item of this.wgList) {
-        item.open = (item.id == this.lastOpenConfigId);
-      }
-    } else {
-      for (let item of this.wgList) {
-        item.open = false;
-      }
+    const state = WireGuard.config.status.getConfig();
+    const openId = state.isSwitchOpen ? state.switchConfigId : undefined;
+    for (let item of this.wgList) {
+      item.open = (openId != undefined && item.id == openId);
     }
+    LLog.info(TAG,
+      `刷新行开关: switchIntent=${state.isSwitchOpen}/${state.switchConfigId}, dto.running=${dto.running}/${dto.runningConfigId}`);
   }
 
   closeOther(id: number) {
@@ -187,25 +187,45 @@ export default class WGMainViewModel {
 
   /**
    * 改变Vpn配置，启动或停止
+   *
+   * 意图驱动流程：
+   * - 开启：立即 switchOnIntent(本地状态置开) → UI行开关即刻为开 → 启动VPN进程
+   *          → 只要成功发起启动即启动长时任务(vpnKeepAliveManager.onSwitchOn)
+   * - 关闭：立即 switchOffIntent → UI行开关即刻为关 → 停止长时任务 → 关闭VPN进程
+   * 失败(启动异常/授权拒绝) → 回滚意图与UI，并停止长时任务。
    */
   async changeVpnConfig(context: UIContext, item: MainItemData, isOn: boolean) {
-    // 如果是
-    if (isOn && this.lastOpenConfigId == item.id) {
-      // 如果是开启状态，且id一致，就不做处理
+    const status = WireGuard.config.status.getConfig();
+    // 防重复：该配置已是用户意图开启状态
+    if (isOn && status.isSwitchOpen && status.switchConfigId == item.id) {
       return;
     }
     if (isOn) {
-      this.lastOpenConfigId = item.id
+      // 1. 立即将本地状态置为开启（意图先行，UI即刻显示开）
+      this.lastOpenConfigId = item.id;
+      WireGuard.config.status.switchOnIntent(item.id);
+      item.open = true;
     } else {
-      // 关闭时，设置为-1
-      this.lastOpenConfigId = -1
+      this.lastOpenConfigId = -1;
+      WireGuard.config.status.switchOffIntent();
+      item.open = false;
     }
     try {
       const config = JSON.parse(item.data.config!) as WGDBConf
-      // const config = WireGuard.helper.config.getConfigForId(this.id)!
+      // 2. 启动/关闭VPN进程
       await WireGuard.runWGConfig(item.id, config, isOn)
+      // 3. 开启：成功发起启动后直接启动长时任务（不再等待VPN服务状态事件）
+      //    关闭：直接停止长时任务
+      if (isOn) {
+        vpnKeepAliveManager.onSwitchOn();
+      } else {
+        vpnKeepAliveManager.onSwitchOff();
+      }
     } catch (e) {
+      // 启动/关闭异常 → 回滚意图：开关为关、停止长时任务
+      WireGuard.config.status.switchOffIntent();
       item.open = false;
+      vpnKeepAliveManager.onSwitchOff();
       WireGuard.event.publishVpnNoOpen()
       // 开启失败展示Toast，关闭失败不展示（用户主动关闭不应提示错误）
       if (isOn) {
@@ -250,7 +270,13 @@ export class MainItemData {
     this.vm = vm;
     this.data = data;
     this.name = data.name!;
-    this.open = WireGuard.config.status.isRunning(this.id)
+    // 行开关初始跟随用户意图：开关开且意图配置ID匹配
+    const state = WireGuard.config.status.getConfig();
+    this.open = state.isSwitchOpen && state.switchConfigId == this.id;
+    // 同步VM层记录的最后打开ID
+    if (this.open) {
+      vm.lastOpenConfigId = this.id;
+    }
   }
 
   get id(): number {

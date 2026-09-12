@@ -33,9 +33,22 @@ const TAG = "WGConfig"
 export class StatusConfig {
   @Trace runningConfigId?: number = undefined;
   @Trace running: boolean = false;
+  // ===== 用户开关意图（仅主进程本地维护，不参与跨进程DTO同步） =====
+  /** 用户是否开启了开关。true=用户意图开启；只有明确启动异常/VPN进程关闭/用户主动关闭才会置false */
+  @Trace isSwitchOpen: boolean = false;
+  /** 用户意图开启的配置ID（isSwitchOpen=false时为undefined） */
+  @Trace switchConfigId?: number = undefined;
 
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true
+  }
+
+  /**
+   * 当前用户意图开启的配置ID
+   * @returns 意图开启的配置ID，未开启时为undefined
+   */
+  getSwitchOpenId(): number | undefined {
+    return this.isSwitchOpen ? this.switchConfigId : undefined;
   }
 
   /** 转为纯数据DTO，用于跨进程序列化（@Trace属性JSON.stringify会加__ob_前缀） */
@@ -91,7 +104,39 @@ class StatusImpl {
     const c = this.getConfig()
     c.runningConfigId = dto.runningConfigId
     c.running = dto.running
+    // 注意：isSwitchOpen/switchConfigId 是主进程本地的用户意图，
+    // 不随VPN进程广播同步，确保VPN启动过程中的中间广播不影响开关状态。
     LLog.info(TAG, `从VPN进程同步: running=${c.running}, configId=${c.runningConfigId}`)
+  }
+
+  /**
+   * 用户点击开启：立即将本地状态置为开启（意图先行）
+   *
+   * 点击开关/启动按钮时立即调用，使UI开关即刻显示为开，
+   * 无需等待VPN进程/连接真正建立。同时将 running 置 true，
+   * 后续Vpn进程广播只校正 running/runningConfigId，不影响 isSwitchOpen。
+   *
+   * @param configId 用户意图开启的配置ID
+   */
+  switchOnIntent(configId: number) {
+    const c = this.getConfig()
+    c.isSwitchOpen = true
+    c.switchConfigId = configId
+    c.running = true
+    c.runningConfigId = configId
+    LLog.info(TAG, `用户意图开启(switchOnIntent): configId=${configId}`)
+  }
+
+  /**
+   * 用户主动关闭 / 明确启动异常 / VPN进程关闭 → 关闭开关意图
+   */
+  switchOffIntent() {
+    const c = this.getConfig()
+    c.isSwitchOpen = false
+    c.switchConfigId = undefined
+    c.running = false
+    c.runningConfigId = undefined
+    LLog.info(TAG, `用户意图关闭(switchOffIntent)`)
   }
 
   isRunning(id: number): boolean {
@@ -182,6 +227,9 @@ const WGConfig = new WGConfigImpl();
 
 export default WGConfig;
 
+/**
+ * @throws
+ */
 export function computeConfMd5(conf: WGDBConf): string {
   const json = JSON.stringify(conf);
   const md = cryptoFramework.createMd('MD5');
