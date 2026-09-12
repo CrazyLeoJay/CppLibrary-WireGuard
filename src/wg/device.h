@@ -127,6 +127,18 @@ namespace WireGuard {
         void close();
 
         /**
+         * 运行时重建底层UDP socket并经onSocketFDChange通知宿主重新protect
+         *
+         * 仅替换socket fd（保留epoll/唤醒管道/会话与Peer状态），宿主重新protect后
+         * WireGuard可自动漫游到新网络源地址，无需整体重建VPN连接。
+         * 供宿主在网络切换时调用；socket fd swap与读线程自愈共用重入保护。
+         *
+         * @return 新的socket fd
+         * @throws WGException 重建失败
+         */
+        int swapSocket();
+
+        /**
          * 发送数据包到所有已建立连接的Peer
          * @param data 数据指针
          * @param len 数据长度
