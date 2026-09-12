@@ -76,6 +76,11 @@ namespace WireGuard {
         std::thread _loopSocketTask{};
         mutable std::atomic<bool> isSocketRunning{false}; // 用于判断和控制 socket 线程是否执行
         std::function<void(int &)> onSocketFDChange{}; // 当socket发生变化时调用
+        mutable std::mutex _readLoopMutex{}; // 读线程重建/守护与 close 的互斥，避免 join 竞态
+        /** 连续发送失败计数（达到阈值时经 streamLog 通道上报 SOCKET_ERROR 事件） */
+        mutable std::atomic<int> _consecutiveSendFailures{0};
+        /** 连续发送失败上报阈值 */
+        static constexpr int SEND_FAILURE_REPORT_THRESHOLD = 3;
         // =============== 虚拟VPN网卡读取 ===============
         mutable std::atomic<uint32_t> tunFd{0};
         std::thread _loopTunFdTask{};
@@ -135,6 +140,31 @@ namespace WireGuard {
          * 心跳任务，用于维护udp链接
          */
         void loopSocketHeartbeatTask();
+
+        /**
+         * 守护 socket 读线程：发现读线程死亡（自愈耗尽/异常退出）时重新拉起
+         * 由心跳线程每轮调用
+         */
+        void ensureSocketReadLoop();
+
+        /**
+         * 读循环故障恢复：有限次重建 socket fd 并通知宿主重新 protect
+         *
+         * @param retries 连续重试计数（调用方持有，读成功后归零）
+         * @return true=重建成功，可继续读循环；false=重试耗尽（内部已上报链路死亡事件）
+         */
+        bool recoverSocketReadLoop(int &retries);
+
+        /**
+         * 向宿主上报 Socket 链路级事件（MessageType::SOCKET_ERROR，success=false）
+         * 不依赖具体 Peer，用于读线程死亡、连续发送失败等链路故障
+         */
+        void reportSocketEvent(const std::string &message) const;
+
+        /**
+         * 记录一次发送失败：累计计数，达到阈值时上报 SOCKET_ERROR 事件并清零
+         */
+        void noteSendFailure(const std::exception &e) const;
 
         /**
          * 循环接收数据

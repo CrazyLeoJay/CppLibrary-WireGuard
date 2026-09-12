@@ -106,8 +106,12 @@ namespace WireGuard {
         LOG_INFO("Tun read task stoped");
 
         // 等待Socket读取线程结束
-        if (_loopSocketTask.joinable()) {
-            _loopSocketTask.join();
+        // 加锁防止与心跳线程的读线程守护（ensureSocketReadLoop）并发 join/重建
+        {
+            std::lock_guard<std::mutex> lockReadLoop(_readLoopMutex);
+            if (_loopSocketTask.joinable()) {
+                _loopSocketTask.join();
+            }
         }
         LOG_INFO("socket read task stoped");
 
@@ -165,6 +169,9 @@ namespace WireGuard {
         LOG_INFO("开启心跳+清理任务");
         std::vector<std::shared_ptr<Peer> > peers{};
         while (isRunning.load(std::memory_order_acquire)) {
+            // 守护 socket 读线程：读线程因致命异常退出且自愈耗尽时，在此重新拉起
+            ensureSocketReadLoop();
+
             // 睡眠等待任务由 Tools::PipeWait 实现，
             // 当需要结束时，会由通道唤醒，所以这里正常25s睡眠即可
             std::chrono::milliseconds nextSleepDuration = std::chrono::seconds(25);
@@ -251,11 +258,14 @@ namespace WireGuard {
         Endpoint endpoint;
         isSocketRunning = true;
         int i = 0;
+        int resetRetries = 0;
         while (isRunning.load(std::memory_order_acquire) && isSocketRunning.load(std::memory_order_acquire) &&
                socket.isRunning()) {
             try {
                 LOG_INFO("socket read for count=%{public}d begin", ++i);
                 const ssize_t received = socket.read(buffer.data(), buffer.size(), endpoint);
+                // 立即捕获errno，避免后续日志调用覆盖错误码
+                const int readErrno = errno;
                 LOG_INFO("socket read for count=%{public}d red end, received=%{public}zd", i, received);
                 if (received < 0) {
                     if (!isRunning.load(std::memory_order_acquire) ||
@@ -265,15 +275,17 @@ namespace WireGuard {
                     if (received == -2) {
                         break;
                     }
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    if (readErrno == EAGAIN || readErrno == EWOULDBLOCK) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
                     }
-                    auto fd = socket.resetSocketFd();
-                    LOG_SOCKET("更换Socket fd=%{public}d", fd);
-                    socketNewFd(fd);
+                    LOG_SOCKET("Socket读错误 errno=%{public}d，尝试重建", readErrno);
+                    if (!recoverSocketReadLoop(resetRetries)) {
+                        break;
+                    }
                     continue;
                 }
+                resetRetries = 0;
                 Logs::print_space([&]() {
                     LOG_SOCKET(
                         "数据流:Socket接收目标 %{public}s len: %{public}zd", endpoint.address.toIpStr().c_str(),
@@ -289,14 +301,69 @@ namespace WireGuard {
                     break;
                 }
                 LOG_ERROR("socket 异常中断： %{public}s", e.what());
-                break;
+                if (!isRunning.load(std::memory_order_acquire) ||
+                    !isSocketRunning.load(std::memory_order_acquire)) {
+                    break;
+                }
+                // 致命异常不再直接退出线程：有限次重建fd自愈，耗尽才上报死亡事件并退出
+                if (!recoverSocketReadLoop(resetRetries)) {
+                    break;
+                }
             } catch (const std::exception &e) {
                 LOG_ERROR("socket 异常中断： %{public}s", e.what());
-                break;
+                if (!isRunning.load(std::memory_order_acquire) ||
+                    !isSocketRunning.load(std::memory_order_acquire)) {
+                    break;
+                }
+                if (!recoverSocketReadLoop(resetRetries)) {
+                    break;
+                }
             }
         }
         isSocketRunning = false;
         LOG_INFO("Socket读取任务(%{public}d) 读取停止", socket.fd());
+    }
+
+    bool Device::recoverSocketReadLoop(int &retries) {
+        constexpr int MAX_RESET_RETRIES = 3;
+        while (retries < MAX_RESET_RETRIES) {
+            retries++;
+            try {
+                const int fd = socket.resetSocketFd();
+                LOG_SOCKET("Socket重建成功 fd=%{public}d (第%{public}d次重试)", fd, retries);
+                socketNewFd(fd);
+                return true;
+            } catch (const std::exception &e) {
+                LOG_ERROR("Socket重建失败(第%{public}d次)：%{public}s", retries, e.what());
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        }
+        // 自愈耗尽：上报链路死亡事件，交由宿主（ArkTS）决定重连策略
+        reportSocketEvent("Socket读线程自愈重试耗尽，链路已死亡");
+        return false;
+    }
+
+    void Device::ensureSocketReadLoop() {
+        if (!isRunning.load(std::memory_order_acquire) || isSocketRunning.load(std::memory_order_acquire)) {
+            return;
+        }
+        std::lock_guard<std::mutex> lock(_readLoopMutex);
+        // 双重检查：拿到锁后状态可能已被 close() 或上一轮守护改变
+        if (!isRunning.load(std::memory_order_acquire) || isSocketRunning.load(std::memory_order_acquire)) {
+            return;
+        }
+        LOG_WARN("检测到Socket读线程已退出，尝试重新拉起");
+        // 先占住运行标记防止重复进入，拉起失败时回滚
+        isSocketRunning.store(true, std::memory_order_release);
+        try {
+            if (_loopSocketTask.joinable()) {
+                _loopSocketTask.join();
+            }
+            _loopSocketTask = std::thread(&Device::loopReceiveForSocket, this);
+        } catch (const std::system_error &e) {
+            LOG_ERROR("Socket读线程重新拉起失败：%{public}s", e.what());
+            isSocketRunning.store(false, std::memory_order_release);
+        }
     }
 
     void Device::processSocketPacket(const char *data, size_t len, const Endpoint &endpoint) {
@@ -799,11 +866,13 @@ namespace WireGuard {
             // 加密数据，并且通过 socket 发送
             socket.write(message.data(), message.size(), endpoint);
             peer->addTxBytes(message.size());
+            _consecutiveSendFailures.store(0, std::memory_order_release);
             // 发送数据流日志
             printStreamLog(peer, MessageType::DATA, StreamLog::SEND, message.size());
         } catch (const std::exception &e) {
-            // 由于发送失败是服务自己原因，这里不去触发重新握手
-            LOG_WARN("socket 发送失败：%{public}s", e.what());
+            // 发送失败通常意味着底层链路问题（网络切换/接口失效/对端不可达），
+            // 累计连续失败并在达到阈值时上报 SOCKET_ERROR，由宿主决定重连策略
+            noteSendFailure(e);
         }
     }
 
@@ -824,7 +893,7 @@ namespace WireGuard {
             }
         } catch (const std::exception &e) {
             // 这里就不重复握手了，如果异常表示之前握手逻辑还是有问题
-            LOG_ERROR("发送缓存数据异常，msg：%{public}s", e.what());
+            noteSendFailure(e);
         }
     }
 
@@ -921,6 +990,29 @@ namespace WireGuard {
             });
         } catch (const std::exception &e) {
             LOG_WARN("[%s] 日志输出异常： %s", LOG_TAG, e.what());
+        }
+    }
+
+    void Device::reportSocketEvent(const std::string &message) const {
+        if (!streamLog) {
+            return;
+        }
+        try {
+            streamLog({
+                std::chrono::system_clock::now(), PublicKey{}, 0, MessageType::SOCKET_ERROR, StreamLog::SEND,
+                {0, 0, 0}, false, message
+            });
+        } catch (const std::exception &e) {
+            LOG_WARN("[%s] Socket事件上报异常： %s", LOG_TAG, e.what());
+        }
+    }
+
+    void Device::noteSendFailure(const std::exception &e) const {
+        const int failures = ++_consecutiveSendFailures;
+        LOG_WARN("socket 发送失败(连续%{public}d次)：%{public}s", failures, e.what());
+        if (failures >= SEND_FAILURE_REPORT_THRESHOLD) {
+            _consecutiveSendFailures.store(0, std::memory_order_release);
+            reportSocketEvent(std::string("Socket连续发送失败: ") + e.what());
         }
     }
 }; // namespace WireGuard

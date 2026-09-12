@@ -8,7 +8,5 @@ build_wsl
 *.tmp.conf
 spec
 build_*
-.cache
-.deveco
-.hvigor
-spec
+build-*
+.zcode
