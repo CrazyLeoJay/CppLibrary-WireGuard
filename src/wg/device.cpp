@@ -134,6 +134,13 @@ namespace WireGuard {
         LOG_INFO("关闭设备通信并清除数据");
     }
 
+    int Device::swapSocket() {
+        const int fd = socket.swapSocketFd();
+        LOG_SOCKET("swapSocket 新fd=%{public}d", fd);
+        socketNewFd(fd);
+        return fd;
+    }
+
     void Device::sendPacket(const uint8_t *data, const size_t len) const {
         std::lock_guard<std::mutex> lock(_peerMutex);
         for (const auto &pair: _peers) {
