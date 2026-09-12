@@ -135,7 +135,17 @@ namespace WireGuard {
          *   - 支持 Keepalive：通过发送空的加密数据包来保持连接活跃
          * 说明：这是 WireGuard 隧道中实际传输数据的消息格式，所有上层协议数据都封装在此消息中
          */
-        DATA = 4
+        DATA = 4,
+
+        /**
+         * 【非协议消息】Socket 链路异常事件（仅用于向宿主上报，不参与协议编解码）
+         *
+         * 底层 socket 连续发送失败、读线程重建耗尽等链路级故障时，
+         * 通过 streamLog 通道上报此类型（success=false，携带 errno 描述），
+         * 宿主收到后可立即触发重连，无需等待流日志超时判定。
+         * 取值远离协议类型（1-4），即使对端发来畸形包也不会误匹配。
+         */
+        SOCKET_ERROR = 250
     };
 
     enum PacketIpType : uint32_t {
