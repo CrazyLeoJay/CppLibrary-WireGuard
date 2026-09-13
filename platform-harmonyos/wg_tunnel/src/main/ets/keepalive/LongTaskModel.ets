@@ -154,6 +154,8 @@ function formatDuration(startTime: number): string {
 export class LongTaskModel {
   private updater: NotificationUpdater;
   private vpnData: VpnNotificationData = new VpnNotificationData();
+  /** 长时任务关联的wantAgent：通知点击跳转App，创建长时任务时构建一次复用 */
+  private taskWantAgent?: WantAgent;
 
   constructor() {
     this.updater = new NotificationUpdater(() => {
@@ -186,6 +188,8 @@ export class LongTaskModel {
       wantAgentFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
     };
     const wantAgentObj: WantAgent = await wantAgent.getWantAgent(wantAgentInfo);
+    // 缓存给自定义通知使用：发布通知时带上wantAgent，点击即可跳转App
+    this.taskWantAgent = wantAgentObj;
 
     const request = new backgroundTaskManager.ContinuousTaskRequest();
     request.backgroundTaskModes = [backgroundTaskManager.BackgroundTaskMode.MODE_DATA_TRANSFER];
@@ -438,6 +442,8 @@ export class LongTaskModel {
         id: state.notificationId,
         isOngoing:true,
         isUnremovable:false,
+        // 点击通知跳转App（与长时任务wantAgent一致，指向宿主UIAbility）
+        wantAgent: this.taskWantAgent,
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_MULTILINE,
           multiLine: {
