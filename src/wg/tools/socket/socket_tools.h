@@ -122,9 +122,9 @@ namespace WireGuard {
          */
         int createUdpSocketFd() const;
 
-        void bindPortForIpv4(int fd, uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
+        static void bindPortForIpv4(int fd, uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
 
-        void bindPortForIpv6(int fd, uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
+        static void bindPortForIpv6(int fd, uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
 
         /**
          * 初始化 epoll 多路复用
