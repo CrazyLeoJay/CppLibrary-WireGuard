@@ -74,19 +74,49 @@ namespace WireGuard {
             }
         }
 
+        /**
+         * 日志格式正则（将鸿蒙 %{public}d 风格占位转换为 printf %d 风格）
+         *
+         * 每次调用构造 std::regex 既昂贵又有抛 regex_error 的风险
+         * （线程内未捕获异常会 std::terminate 导致进程崩溃），静态缓存一次构造；
+         * 构造失败降级为永不匹配的正则，保证日志系统本身不可抛。
+         */
+        inline const std::regex &logFmtRegex() {
+            static const std::regex fmtRegex = [] {
+                try {
+                    return std::regex(R"(%\{[^}]*\})");
+                } catch (...) {
+                    return std::regex(R"($^)");
+                }
+            }();
+            return fmtRegex;
+        }
+
         template<typename... Args>
         inline void
         default_log_handler(const LogLevel level, const char *file, int line, const char *fmt, Args &&... args) {
-            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
-            auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
-            auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
-            printLog(level, outMessage);
+            try {
+                auto regexFmt = std::regex_replace(fmt, logFmtRegex(), "%");
+                auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+                auto outMessage = fmt::format("{:s}({:d})\t{:s}", file, line, message.c_str());
+                printLog(level, outMessage);
+            } catch (...) {
+                // 日志系统绝不允许抛异常（线程内未捕获异常→std::terminate→进程崩溃），降级原样输出
+                try {
+                    printLog(level, std::string(fmt));
+                } catch (...) {
+                }
+            }
         }
 
         template<typename... Args>
         inline std::string log_to_string(const char *fmt, Args &&... args) {
-            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
-            return fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+            try {
+                auto regexFmt = std::regex_replace(fmt, logFmtRegex(), "%");
+                return fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+            } catch (...) {
+                return std::string(fmt);
+            }
         }
 
         using LogHandler = std::function<void(LogLevel level, const char *file, int line, const std::string &message)>;
@@ -97,9 +127,13 @@ namespace WireGuard {
 
         template<typename... Args>
         inline void log_println(LogLevel level, const char *file, int line, const char *fmt, Args &&... args) {
-            auto regexFmt = (std::regex_replace(fmt, std::regex(R"(%\{[^}]*\})"), "%"));
-            auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
-            getLogHandler()(level, file, line, message);
+            try {
+                auto regexFmt = std::regex_replace(fmt, logFmtRegex(), "%");
+                auto message = fmt::sprintf(regexFmt, std::forward<Args>(args)...);
+                getLogHandler()(level, file, line, message);
+            } catch (...) {
+                // 日志系统绝不允许抛异常，静默丢弃本次日志
+            }
         }
 
         inline void print_space(const std::function<void()> &func) {
