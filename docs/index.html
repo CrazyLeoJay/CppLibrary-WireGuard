@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>WireGuard for C++14 · 跨平台 VPN 实现</title>
+  <meta name="description" content="基于 WireGuard 白皮书使用 C++14 跨平台重新实现的 VPN 项目。面向 HarmonyOS 的新兴平台，提供 WG-VPN 应用。" />
+  <link rel="icon" href="wg-vpn/docs/assets/favicon.png" type="image/png" />
+  <link rel="apple-touch-icon" href="wg-vpn/docs/assets/wg-icon.webp" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet" />
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet" />
+  <style>
+    :root {
+      --brand-1: #1d4ed8;
+      --brand-2: #2563eb;
+      --brand-3: #3b82f6;
+      --accent: #38bdf8;
+      --ink: #eaf2ff;
+      --muted: #b9c8e8;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      min-height: 100%;
+    }
+
+    body {
+      font-family: "Inter", "Noto Sans SC", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      color: var(--ink);
+      overflow-x: hidden;
+      background-color: #06152e;
+      background-image:
+        radial-gradient(circle at 15% 20%, rgba(59, 130, 246, 0.45), transparent 45%),
+        radial-gradient(circle at 85% 15%, rgba(56, 189, 248, 0.30), transparent 42%),
+        radial-gradient(circle at 80% 85%, rgba(29, 78, 216, 0.45), transparent 50%),
+        linear-gradient(135deg, #0b1f45 0%, #12265c 45%, #0a1a3c 100%);
+      background-attachment: fixed;
+    }
+
+    /* 漂浮光斑 */
+    .orb {
+      position: fixed;
+      border-radius: 50%;
+      filter: blur(50px);
+      opacity: 0.5;
+      z-index: 0;
+      pointer-events: none;
+      animation: float 14s ease-in-out infinite;
+    }
+    .orb.o1 { width: 340px; height: 340px; left: -80px; top: 15%; background: rgba(59,130,246,.55); }
+    .orb.o2 { width: 280px; height: 280px; right: -60px; top: 55%; background: rgba(56,189,248,.45); animation-delay: -5s; }
+    .orb.o3 { width: 220px; height: 220px; left: 45%; bottom: -80px; background: rgba(29,78,216,.6); animation-delay: -9s; }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0) translateX(0); }
+      50% { transform: translateY(-30px) translateX(15px); }
+    }
+
+    /* 网格纹理 */
+    .grid-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      background-image:
+        linear-gradient(rgba(255,255,255,.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,.035) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 78%);
+      -webkit-mask-image: radial-gradient(circle at 50% 45%, #000 0%, transparent 78%);
+    }
+
+    .page {
+      position: relative;
+      z-index: 2;
+      min-height: 100vh;
+    }
+
+    .brand-dot { color: var(--accent); }
+
+    .lead-title {
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      line-height: 1.1;
+    }
+
+    .tagline {
+      font-size: 1.05rem;
+      color: var(--muted);
+      max-width: 34rem;
+    }
+
+    .desc {
+      color: var(--muted);
+      font-size: 0.98rem;
+      line-height: 1.85;
+      max-width: 36rem;
+    }
+
+    .badge-pill {
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      border: 1px solid rgba(147, 197, 253, 0.35);
+      backdrop-filter: blur(4px);
+      color: #dbeafe;
+    }
+
+    /* 右侧按钮列 */
+    .btn-col {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      width: 100%;
+      max-width: 360px;
+    }
+
+    .btn-wg {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      padding: 1.05rem 1.3rem;
+      border-radius: 1rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      color: #fff;
+      text-decoration: none;
+      background: linear-gradient(135deg, var(--brand-2), var(--brand-1));
+      border: 1px solid rgba(147, 197, 253, 0.4);
+      box-shadow: 0 14px 34px rgba(37, 99, 235, 0.35);
+      transition: transform .18s ease, box-shadow .18s ease, filter .18s ease;
+    }
+    .btn-wg:hover { transform: translateY(-3px); box-shadow: 0 20px 44px rgba(37, 99, 235, 0.5); filter: brightness(1.06); color:#fff; }
+    .btn-wg .ico {
+      flex: 0 0 auto;
+      width: 42px; height: 42px;
+      display: grid; place-items: center;
+      border-radius: 0.75rem;
+      background: rgba(255,255,255,.14);
+      font-size: 1.25rem;
+    }
+    .btn-wg .wg-ico { width: 30px; height: 30px; border-radius: 8px; display: block; }
+    .btn-wg .sub { display:block; font-size: .8rem; font-weight: 500; opacity: .82; }
+
+    .btn-store {
+      display: flex;
+      align-items: center;
+      gap: 0.9rem;
+      padding: 0.95rem 1.3rem;
+      border-radius: 1rem;
+      font-size: 0.98rem;
+      font-weight: 500;
+      color: #dbeafe;
+      text-decoration: none;
+      border: 1px solid rgba(147, 197, 253, 0.35);
+      background: rgba(255,255,255,.05);
+      backdrop-filter: blur(6px);
+      transition: transform .18s ease, background .18s ease, color .18s ease;
+    }
+    .btn-store:hover { transform: translateY(-2px); background: rgba(255,255,255,.10); color: #fff; }
+    .btn-store .ico { font-size: 1.2rem; opacity: .9; }
+    .btn-store .store-ico { width: 30px; height: 30px; display: block; }
+
+    .btn-note { font-size: .82rem; color: var(--muted); }
+
+    footer.site-foot {
+      position: fixed;
+      left: 0; right: 0; bottom: 0;
+      z-index: 2;
+      text-align: center;
+      font-size: .82rem;
+      color: rgba(185, 200, 232, .75);
+      padding: 0.9rem 1rem;
+    }
+
+    @media (max-width: 991.98px) {
+      .desc { font-size: .95rem; }
+    }
+    @media (max-width: 575.98px) {
+      .btn-col { max-width: 100%; }
+      footer.site-foot { position: static; padding-top: 1.4rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="orb o1"></div>
+  <div class="orb o2"></div>
+  <div class="orb o3"></div>
+  <div class="grid-overlay"></div>
+
+  <div class="page">
+    <div class="container d-flex align-items-center min-vh-100 py-5">
+      <div class="row g-5 w-100 align-items-center justify-content-center">
+        <!-- 左侧：项目信息 -->
+        <div class="col-lg-7 col-xl-6 text-center text-lg-start">
+          <div class="mb-1 small fw-semibold" style="letter-spacing:.18em; color:#93c5fd;">
+            CROSS-PLATFORM · PERFORMANT · SECURE
+          </div>
+          <h1 class="lead-title display-4 mb-3">
+            WireGuard for <span class="brand-dot">C++14</span>
+          </h1>
+          <p class="tagline mb-4">
+            基于 WireGuard 白皮书，使用 <strong>C++14</strong> 跨平台重新实现的 VPN 项目
+            <span class="brand-dot">。</span>
+          </p>
+          <p class="desc mb-4">
+            官方 WireGuard 的 C 实现依赖大量 Linux 内核方法，Go 实现又缺乏对 HarmonyOS 的直接支持。
+            因此我们依照白皮书，用可跨平台的 C++ 从零重新构建了整条协议栈，
+            让新兴的鸿蒙平台也能稳定、安全地接入 WireGuard 组网。
+          </p>
+
+          <div class="d-flex flex-wrap gap-2 mb-4 justify-content-center justify-content-lg-start">
+            <span class="badge-pill badge rounded-pill px-3 py-2">C++14</span>
+            <span class="badge-pill badge rounded-pill px-3 py-2">跨平台</span>
+            <span class="badge-pill badge rounded-pill px-3 py-2">开源 Apache-2.0</span>
+            <span class="badge-pill badge rounded-pill px-3 py-2">HarmonyOS 原生</span>
+            <span class="badge-pill badge rounded-pill px-3 py-2">Noise 协议</span>
+          </div>
+
+          <a class="btn-store text-decoration-none d-inline-flex mb-1" style="max-width:360px;"
+             href="https://appgallery.huawei.com/app/detail?id=site.leojay.wireguard&channelId=SHARE&source=appshare"
+             target="_blank" rel="noopener">
+            <span class="ico"><img src="wg-vpn/docs/assets/appgallery-icon.png" alt="华为应用市场" class="store-ico" /></span>
+            <span>华为应用市场 · 下载 <strong>WG-VPN</strong><span class="btn-note d-block">HarmonyOS App</span></span>
+          </a>
+          <div class="btn-note">以合规、学习为目的，禁止用于任何非法用途。</div>
+        </div>
+
+        <!-- 右侧：竖排按钮 -->
+        <div class="col-lg-5 col-xl-5 d-flex justify-content-center justify-content-lg-end">
+          <div class="btn-col">
+            <a class="btn-wg" href="wg-vpn/docs/">
+              <span class="ico"><img class="wg-ico" src="wg-vpn/docs/assets/wg-icon.webp" alt="WG-VPN 图标" /></span>
+              <span>WG-VPN for HarmonyOS
+                <span class="sub">进入使用文档与操作指南 →</span>
+              </span>
+            </a>
+            <!-- 预留更多产品入口按钮（纵向一一排列） -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="site-foot">
+    © WireGuard for C++14 · 开源项目 Apache-2.0 · 仅供学习与合规使用
+  </footer>
+</body>
+</html>
