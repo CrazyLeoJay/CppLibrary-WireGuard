@@ -360,6 +360,10 @@ namespace WireGuard {
         int activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
         // 如果 select 返回负值，说明发生错误（如被信号中断等）
         if (activeFd < 0) {
+            if (errno == EINTR) {
+                // 被信号打断不属于错误，重试等待
+                return read_select(buf, len, endpoint);
+            }
             return -2;
         }
 
@@ -377,20 +381,26 @@ namespace WireGuard {
     }
 
     ssize_t UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
-        const int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
-        if (nfds == -1) {
-            return -2;
-        }
-        for (int i = 0; i < nfds; ++i) {
-            const int fd = events[i].data.fd;
-            if (fd == _fd.load()) {
-                return pip_read_socket(buf, len, endpoint);
-            } else if (fd == wakeup_pipe_[0]) {
-                pip_read_wake();
+        while (true) {
+            const int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
+            if (nfds == -1) {
+                if (errno == EINTR) {
+                    // 被信号打断不属于错误，重试等待（此前误返回-2导致读线程被当成正常关闭退出）
+                    continue;
+                }
                 return -2;
             }
+            for (int i = 0; i < nfds; ++i) {
+                const int fd = events[i].data.fd;
+                if (fd == _fd.load()) {
+                    return pip_read_socket(buf, len, endpoint);
+                } else if (fd == wakeup_pipe_[0]) {
+                    pip_read_wake();
+                    return -2;
+                }
+            }
+            return -2;
         }
-        return -2;
     }
 
     void UDPSocket::pip_read_wake() const {
