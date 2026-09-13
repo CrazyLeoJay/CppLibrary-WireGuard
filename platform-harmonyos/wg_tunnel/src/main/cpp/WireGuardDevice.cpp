@@ -348,6 +348,9 @@ napi_value InitVpn(napi_env env, napi_callback_info info) {
                 LOG_DEBUG("接口接收到SocketFD更换 fd=%{public}d finish", fd);
             } catch (const std::exception &e) {
                 LOG_ERROR("回调异常：%s", e.what());
+            } catch (...) {
+                // 非std异常不允许逃逸到C线程（会std::terminate→进程崩溃）
+                LOG_ERROR("回调未知异常（已吞掉）");
             }
         }};
         LOG_INFO("wireGuard initSocket");
@@ -470,6 +473,9 @@ napi_value setStreamLogListener(napi_env env, napi_callback_info info) {
                 deviceHelper->callbackOnStreamLogListener(msg);
             } catch (const std::exception &e) {
                 LOG_ERROR("回调异常：%s", e.what());
+            } catch (...) {
+                // 非std异常不允许逃逸到C线程（会std::terminate→进程崩溃）
+                LOG_ERROR("回调未知异常（已吞掉）");
             }
         });
     } catch (const std::exception &e) {

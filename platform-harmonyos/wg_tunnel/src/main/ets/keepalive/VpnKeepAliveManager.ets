@@ -194,18 +194,46 @@ export class VpnKeepAliveManager {
     LLog.warn(TAG,
       `启动确认看门狗：开关开启但未确认VPN运行(intent=${status.switchConfigId}, running=${status.running}/${status.runningConfigId})，查询VEA状态`);
     WireGuard.event.publishVpnStatusQuery();
-    this.switchAckTimer = setTimeout(() => {
+    this.switchAckTimer = setTimeout(async () => {
       this.switchAckTimer = undefined;
-      const st = WireGuard.config.status.getConfig();
-      if (!st.isSwitchOpen || this.isForceRestarting) {
-        return;
-      }
-      if (st.running && st.runningConfigId == st.switchConfigId) {
-        return;
-      }
-      LLog.warn(TAG, '启动确认看门狗：二次检查仍未确认运行，强制重启VEA恢复');
-      this.forceRestartVpnService();
+      await this.checkSwitchAckFinal();
     }, this.SWITCH_ACK_RECHECK_TIMEOUT);
+  }
+
+  /**
+   * 看门狗二次检查（最终裁决）
+   *
+   * 直接探测VEA进程是否存活，区分两类故障：
+   * - 进程已死亡（如native崩溃SIGABRT，来不及广播THROW）：回滚开关为关、停止保活，
+   *   并经THROW事件弹出失败原因提示——用户要求"启动失败导致进程关闭时，关闭当前配置并提示原因"
+   * - 进程存活但迟迟无确认（指令丢失/卡死/冻结）：强制重启VEA兜底恢复
+   */
+  private async checkSwitchAckFinal(): Promise<void> {
+    const st = WireGuard.config.status.getConfig();
+    if (!st.isSwitchOpen || this.isForceRestarting) {
+      return;
+    }
+    if (st.running && st.runningConfigId == st.switchConfigId) {
+      return;
+    }
+    let veaRunning = false;
+    try {
+      veaRunning = await WireGuard.tools.isVpnExtensionRunning();
+    } catch (e) {
+      LLog.warn(TAG, `看门狗探测VEA进程状态异常: ${(e as Error).message}`);
+    }
+    if (!veaRunning) {
+      LLog.error(TAG, '启动确认看门狗：VEA进程已死亡（疑似崩溃），回滚开关并提示失败原因');
+      // 1. 弹出失败原因（EntryAbility订阅THROW事件展示Toast）
+      WireGuard.event.publishVpnThrow('VPN启动失败：VPN进程异常退出');
+      // 2. 回滚开关为关并停止保活（内部会解除看门狗）
+      WireGuard.config.status.switchOffIntent();
+      this.stopLongTaskIfNeeded();
+      WireGuard.event.publishVpnNoOpen();
+      return;
+    }
+    LLog.warn(TAG, '启动确认看门狗：VEA存活但无运行确认，强制重启VEA恢复');
+    this.forceRestartVpnService();
   }
 
   /**

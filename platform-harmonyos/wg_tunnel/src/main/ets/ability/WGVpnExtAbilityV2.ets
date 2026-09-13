@@ -16,7 +16,7 @@
 
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { connection } from '@kit.NetworkKit';
-import { bundleManager, Want } from '@kit.AbilityKit';
+import { bundleManager, errorManager, Want } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { LLog } from '../tools/LLog';
 import { WireGuard } from '../model/WGHelper';
@@ -78,6 +78,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   private configRequestCancel?: SubEventCancel;
   private vpnStatusQueryCancel?: SubEventCancel;
   private reconnectRequestCancel?: SubEventCancel;
+  // 未捕获异常监听句柄：进程死亡前尽力上报（满足"所有失败必须有报错"）
+  private errorObserver?: errorManager.GlobalObserver;
   // 握手超时检测
   private lastHandshakeTime: Map<number, number> = new Map();
   private handshakeCheckTimer?: number;
@@ -91,6 +93,19 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   override onCreate(want: Want): void {
     super.onCreate(want);
     try {
+      // 0. 注册未捕获异常监听：进程因ArkTS未捕获异常死亡前尽力广播失败原因，
+      //    主进程收到后回滚开关并Toast提示（native崩溃无法广播，由主进程看门狗兜底检测）
+      this.errorObserver = (err: errorManager.GlobalError) => {
+        LLog.error(TAG, `VEA未捕获异常: ${err.message ?? '未知'}`);
+        try {
+          VPNChangeHelperV2.startVpnThrow(`VPN进程内部异常: ${err.message ?? '未知'}`);
+        } catch (e) {
+          // 上报失败只能留日志（进程即将死亡）
+          LLog.error(TAG, `未捕获异常上报失败: ${JSON.stringify(e)}`);
+        }
+      };
+      errorManager.on('globalErrorOccurred', this.errorObserver);
+
       // 1. 先订阅事件，确保收到主进程回复
       this.vpnStatusQueryCancel = WireGuard.event.subscribeVpnStatusQuery(() => {
         VPNChangeHelperV2.queryStatus(this.currentConfig);
@@ -201,6 +216,15 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     if (this.reconnectRequestCancel != undefined) {
       this.reconnectRequestCancel.cancel();
       this.reconnectRequestCancel = undefined;
+    }
+
+    // 注销未捕获异常监听
+    if (this.errorObserver != undefined) {
+      try {
+        errorManager.off('globalErrorOccurred', this.errorObserver);
+      } catch (e) {
+      }
+      this.errorObserver = undefined;
     }
 
     // 注销网络监听
