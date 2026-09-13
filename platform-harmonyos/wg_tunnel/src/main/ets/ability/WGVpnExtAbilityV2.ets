@@ -369,15 +369,7 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   private async handleSwitchConfig(configId: number, wgDbConf: WGDBConf): Promise<void> {
     LLog.info(TAG, `切换VPN配置: configId=${configId}`);
 
-    // 0. 记录旧连接信息：新配置启动失败时自动回退旧配置，保证切换不把VPN搞挂
-    const oldConfigId = this.currentConfigId;
-    const oldDbConf = this.currentDbConf;
-    const oldDeviceConfig = this.currentConfig;
-    const hadOldConnection = this.vpnConnection != undefined;
-
-    // 1. 先解析并准备新配置（DNS解析等）。准备失败时旧连接原样保留（切换失败不能把
-    //    正在使用的VPN搞挂），并广播当前实际运行状态，主进程"意图与运行不一致"分支
-    //    会把开关意图对齐回旧配置
+    // 1. 先解析并准备新配置（DNS解析等），此期间旧连接保持可用（减少中断窗口）
     let newConfig: WGDeviceConfig | undefined;
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
@@ -391,12 +383,23 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       }
     }
     if (newConfig == undefined) {
-      LLog.error(TAG, `切换配置准备失败，保留当前连接继续运行: configId=${this.currentConfigId}`);
-      VPNChangeHelperV2.queryStatus(this.currentConfig);
+      // 切换失败：用户意图是新配置，不回退旧配置——停掉当前连接并上报错误
+      LLog.error(TAG, '切换配置准备失败，停止当前连接并上报错误');
+      try {
+        await this.vpnConnection?.stopServer();
+      } catch (e) {
+        LLog.error(TAG, `停止旧VPN连接异常: ${JSON.stringify(e)}`);
+      }
+      this.vpnConnection = undefined;
+      this.unregisterNetConnection();
+      this.currentConfig = undefined;
+      this.hasDomainEndpoint = false;
+      this.isReconnecting = false;
+      VPNChangeHelperV2.startVpnThrow('切换配置失败：新配置准备(含DNS解析)失败');
       return;
     }
 
-    // 2. 新配置已就绪，此时才停止旧连接（切换中断窗口最小化）
+    // 2. 新配置已就绪，此时才停止旧连接
     try {
       await this.vpnConnection?.stopServer();
     } catch (e) {
@@ -405,48 +408,19 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     this.vpnConnection = undefined;
     this.unregisterNetConnection();
 
-    // 3. 更新配置并启动新连接。启动失败先尝试回退旧配置（失败不上报，最终状态统一处理）
+    // 3. 更新配置并启动新连接。启动失败直接上报THROW（主进程回滚开关并Toast提示）；
+    //    VEA进程保持存活（允许关闭但保留可加速用户下次启动重试）
     this.currentConfigId = configId;
     this.currentDbConf = wgDbConf;
     this.currentConfig = undefined;
     this.isReconnecting = false;
-    const started = await this.startVpnInternal(configId, newConfig, false, false);
+    const started = await this.startVpnInternal(configId, newConfig, false);
     if (started) {
       LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
       this.registerNetConnection();
-      return;
-    }
-    LLog.warn(TAG, '切换后新配置启动失败，尝试回退旧配置');
-
-    // 4. 回退旧配置：恢复VEA内部状态后重建旧连接（成功后广播旧配置运行中，
-    //    主进程"意图与运行不一致"分支会把开关意图对齐回旧配置）
-    if (hadOldConnection && oldConfigId != undefined && oldDbConf != undefined) {
-      this.currentConfigId = oldConfigId;
-      this.currentDbConf = oldDbConf;
-      let restoreConfig: WGDeviceConfig | undefined;
-      try {
-        restoreConfig = await makeWGConf2VpnStartConfig(oldDbConf);
-      } catch (e) {
-        LLog.warn(TAG, `回退旧配置解析失败: ${JSON.stringify(e)}`);
-      }
-      if (restoreConfig != undefined) {
-        const restored = await this.startVpnInternal(oldConfigId, restoreConfig, false, false);
-        if (restored) {
-          this.currentConfig = restoreConfig;
-          LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
-          this.registerNetConnection();
-          LLog.warn(TAG, `已回退并恢复旧配置运行: configId=${oldConfigId}`);
-          return;
-        }
-      }
     } else {
-      // 切换前本无活动连接，恢复VEA内部状态即可
-      this.currentConfigId = oldConfigId;
-      this.currentDbConf = oldDbConf;
-      this.currentConfig = oldDeviceConfig;
+      LLog.warn(TAG, '切换后新配置启动失败，已上报错误，VEA保持存活等待用户重试');
     }
-    // 5. 新旧都失败 → 上报失败（THROW），主进程回滚开关意图
-    VPNChangeHelperV2.startVpnThrow('切换配置失败，且旧配置恢复失败');
   }
 
   /**
@@ -504,7 +478,9 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     }
     this.currentConfig = newConfig;
     this.hasDomainEndpoint = this.checkHasDomainEndpoint(dbConf);
-    const started = await this.startVpnInternal(restartConfigId, newConfig, false);
+    // reportFailure=false：后台自动恢复的单次启动失败不广播THROW（不拉掉用户开关），
+    // 主进程健康守护/看门狗会按周期继续重试；仅准备重试耗尽（持久性故障）时显式上报
+    const started = await this.startVpnInternal(restartConfigId, newConfig, false, false);
     if (started) {
       // 重连后重启握手超时检查已在startVpnInternal内完成；重新注册网络监听
       LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")

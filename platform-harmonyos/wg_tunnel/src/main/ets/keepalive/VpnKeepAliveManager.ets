@@ -514,11 +514,9 @@ export class VpnKeepAliveManager {
             // 冷启动恢复：主进程新起但VPN仍在运行（用户此前开启未关闭）→ 补全用户意图
             LLog.info(TAG, `VPN实际运行但意图未开(configId=${status.runningConfigId})，冷启动恢复意图`);
             WireGuard.config.status.switchOnIntent(status.runningConfigId);
-          } else if (status.isSwitchOpen && status.switchConfigId != status.runningConfigId &&
-            status.runningConfigId != undefined) {
-            // 运行中的配置与意图不一致（如热切换后广播）→ 意图对齐实际运行配置
-            WireGuard.config.status.switchOnIntent(status.runningConfigId);
           }
+          // 注意：running配置与意图配置不一致时不改写用户意图（用户意图权威，
+          // 由启动确认看门狗驱动VEA向意图收敛），广播只反映事实
           // 意图开启时确保保活兜底（防 onSwitchOn 丢失/冷启动）
           this.ensureKeepAliveWhenIntendedOn(params.connectedIps);
         } else {
