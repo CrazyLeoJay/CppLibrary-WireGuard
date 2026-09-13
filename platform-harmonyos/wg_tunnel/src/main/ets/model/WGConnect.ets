@@ -35,6 +35,8 @@ export class VpnConnHelper {
   vpnConnection: vpnExtension.VpnConnection
   private client: WireGuardDevice;
   private config: WGDeviceConfig;
+  /** 最近一次fd的protect任务：swapSocket等待其完成后才返回，密封"新fd未保护先发包"窗口 */
+  private latestProtectTask?: Promise<void>;
 
   constructor(vpnConnection: vpnExtension.VpnConnection, config: WGDeviceConfig) {
     this.vpnConnection = vpnConnection;
@@ -48,16 +50,25 @@ export class VpnConnHelper {
   }
 
   /**
-   * 运行时重建底层socket（保留会话与epoll），经fd变更回调触发重新protect。
+   * 运行时重建底层socket（保留会话与epoll），并等待新fd的protect完成。
    * 用于网络切换后的轻量漫游：WireGuard会自动漫游到新网络源地址，无需整体重建VPN连接。
    *
+   * C层swapSocket返回前会同步触发fd变更回调（NAPI主线程直调），此处等待回调中
+   * 发起的protect(newFd)完成后才返回，密封"新fd未保护先发包"的路由回环窗口。
+   * 剩余暴露仅为C层心跳/TUN线程在protect IPC延迟内的毫秒级发送，且只发生在
+   * 网络刚切换的瞬断期，按可接受的在途丢包处理。
+   *
    * @returns 新的socket fd
-   * @throws WGAppException 重建失败
+   * @throws WGAppException 重建失败；protect失败时随Promise拒绝抛出（调用方可转整体重建兜底）
    */
   async swapSocket(): Promise<number> {
     const fd = await this.client.resetSocket()
     if (fd < 0) {
       throw new WGAppException(`Socket重建异常：${fd}`)
+    }
+    if (this.latestProtectTask != undefined) {
+      await this.latestProtectTask
+      this.latestProtectTask = undefined
     }
     LLog.info(TAG, `swapSocket完成，新fd=${fd}`)
     return fd
@@ -75,9 +86,12 @@ export class VpnConnHelper {
     LLog.info(TAG, "client initVpn")
     const socketFd = await this.client.initVpn(async (fd: number) => {
       LLog.info(TAG, `Socket FD更新: ${fd}`)
-      this.vpnConnection.protect(fd).catch((e: BusinessError) => {
-        LLog.error(TAG, e)
-      });
+      // 记录protect任务供swapSocket等待；单独附catch避免未处理的Promise拒绝
+      const task = this.vpnConnection.protect(fd)
+      this.latestProtectTask = task
+      task.catch((e: BusinessError) => {
+        LLog.error(TAG, `protect(fd=${fd})失败: ${JSON.stringify(e)}`)
+      })
     });
     if (socketFd < 0) {
       throw new WGAppException(`Socket 通道建立异常：${socketFd}`);

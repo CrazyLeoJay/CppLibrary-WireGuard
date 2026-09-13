@@ -712,18 +712,18 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   }
 
   /**
-   * 网络切换轻量漫游：重建底层socket fd并触发重新protect（保留TUN/路由/会话）
+   * 网络切换轻量漫游：重建底层socket fd并等待重新protect完成（保留TUN/路由/会话）
    *
-   * @throws 换fd失败时抛出，由调用方转整体重建
+   * @throws 换fd或protect失败时抛出，由调用方转整体重建
    */
   private async swapSocketForRoam(): Promise<void> {
     if (this.vpnConnection == undefined) {
       throw new Error('vpnConnection为空，无法轻量漫游');
     }
     LLog.info(TAG, '网络切换：轻量重建socket漫游');
+    // VpnConnHelper.swapSocket内部会等待新fd的protect完成后才返回，
+    // 不存在"新fd未保护先发包"的路由回环窗口
     await this.vpnConnection.swapSocket();
-    // 等待fd变更回调完成protect，避免新fd在受保护前发送流量形成路由回环
-    await new Promise<void>((resolve) => setTimeout(resolve, 300));
   }
 
   private checkEndpointChanged(oldConfig: WGDeviceConfig, newConfig: WGDeviceConfig): boolean {
