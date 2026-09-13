@@ -45,6 +45,8 @@ export class StatusConfig {
    * 只能是用户关闭后在途的启动指令完成（如参数直传启动），必须拆除而非恢复意图。
    */
   @Trace hasLocalOff: boolean = false;
+  /** 最近一次用户意图开启的时间戳：供保活状态机在切换/启动宽限期内豁免中间态广播 */
+  lastSwitchOnTime: number = 0;
 
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true
@@ -129,6 +131,7 @@ class StatusImpl {
     const c = this.getConfig()
     c.isSwitchOpen = true
     c.switchConfigId = configId
+    c.lastSwitchOnTime = Date.now()
     LLog.info(TAG, `用户意图开启(switchOnIntent): configId=${configId}`)
   }
 

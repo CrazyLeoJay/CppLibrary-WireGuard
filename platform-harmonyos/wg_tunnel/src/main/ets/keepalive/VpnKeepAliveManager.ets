@@ -100,6 +100,14 @@ export class VpnKeepAliveManager {
   private lastReapplyTime: number = 0;
   /** 重新申请保活连续失败次数（申请后长时任务仍未运行则+1，成功归零），用于指数退避 */
   private reapplyFailures: number = 0;
+  /** 开关宽限窗：刚开启后的时间内，VEA中间态关闭广播不视为进程死亡（切换/启动进行中） */
+  private readonly SWITCH_GRACE_INTERVAL: number = 8000;
+  /** 启动确认看门狗定时器 */
+  private switchAckTimer?: number;
+  /** 开关开启后等待VPN实际运行确认的超时 */
+  private readonly SWITCH_ACK_TIMEOUT: number = 15 * 1000;
+  /** 查询后仍未确认的二次等待 */
+  private readonly SWITCH_ACK_RECHECK_TIMEOUT: number = 7 * 1000;
   // ===== 后台隧道健康守护（长时任务驱动，不依赖onForeground） =====
   /** 健康检查定时器：随长时任务启动/停止 */
   private tunnelHealthTimer?: number = undefined;
@@ -150,6 +158,54 @@ export class VpnKeepAliveManager {
     }
     LLog.info(TAG, '用户开启开关，直接启动长时任务');
     this.startVpnKeepAlive(VpnEventTag.START_VPN);
+    // 启动确认看门狗：若指令丢失/VEA卡死导致迟迟无START_VPN确认，则升级恢复
+    this.armSwitchAckWatchdog();
+  }
+
+  /**
+   * 启动确认看门狗：开关开启后若超过阈值仍未确认"实际运行的配置==意图配置"，
+   * 先广播状态查询（VEA若卡而未死会回复），再未确认则强制重启VEA兜底恢复。
+   * 覆盖场景：SWITCH指令丢失（VEA冻结收不到广播）、启动流程静默卡死。
+   */
+  private armSwitchAckWatchdog(): void {
+    this.disarmSwitchAckWatchdog();
+    this.switchAckTimer = setTimeout(() => {
+      this.switchAckTimer = undefined;
+      this.checkSwitchAck();
+    }, this.SWITCH_ACK_TIMEOUT);
+  }
+
+  private disarmSwitchAckWatchdog(): void {
+    if (this.switchAckTimer != undefined) {
+      clearTimeout(this.switchAckTimer);
+      this.switchAckTimer = undefined;
+      LLog.info(TAG, '启动确认看门狗已解除');
+    }
+  }
+
+  private checkSwitchAck(): void {
+    const status = WireGuard.config.status.getConfig();
+    if (!status.isSwitchOpen || this.isForceRestarting) {
+      return;
+    }
+    if (status.running && status.runningConfigId == status.switchConfigId) {
+      return; // 已确认实际运行
+    }
+    LLog.warn(TAG,
+      `启动确认看门狗：开关开启但未确认VPN运行(intent=${status.switchConfigId}, running=${status.running}/${status.runningConfigId})，查询VEA状态`);
+    WireGuard.event.publishVpnStatusQuery();
+    this.switchAckTimer = setTimeout(() => {
+      this.switchAckTimer = undefined;
+      const st = WireGuard.config.status.getConfig();
+      if (!st.isSwitchOpen || this.isForceRestarting) {
+        return;
+      }
+      if (st.running && st.runningConfigId == st.switchConfigId) {
+        return;
+      }
+      LLog.warn(TAG, '启动确认看门狗：二次检查仍未确认运行，强制重启VEA恢复');
+      this.forceRestartVpnService();
+    }, this.SWITCH_ACK_RECHECK_TIMEOUT);
   }
 
   /**
@@ -442,6 +498,10 @@ export class VpnKeepAliveManager {
         }
         // START_VPN / QUERY_STATUS / ON_CREATE
         if (status.running === true) {
+          // 启动确认：实际运行的配置与意图配置一致 → 解除启动确认看门狗
+          if (status.runningConfigId == status.switchConfigId) {
+            this.disarmSwitchAckWatchdog();
+          }
           // VPN实际运行中
           if (!status.isSwitchOpen && status.runningConfigId != undefined) {
             if (status.hasLocalOff) {
@@ -472,6 +532,13 @@ export class VpnKeepAliveManager {
           if (this.isForceRestarting) {
             // 强重启恢复的中间态：保留意图与保活，等待随后的START_VPN重建
             LLog.warn(TAG, `强重启中间态(VEA关闭,tag=${tag})，保留意图与保活`);
+            return;
+          }
+          // 开关刚开启的宽限期内（切换/启动进行中），VEA的中间态关闭广播
+          // （如旧配置STOP_VPN晚到）不视为进程死亡；显式的THROW启动失败仍照常回滚
+          if (tag !== VpnEventTag.THROW &&
+            (Date.now() - status.lastSwitchOnTime) < this.SWITCH_GRACE_INTERVAL) {
+            LLog.info(TAG, `开关宽限期内收到${tag}关闭广播，视为切换中间态，保留意图与保活`);
             return;
           }
           // 意图开启但进程关闭且非主动恢复 → 判定为异常/进程被杀
@@ -657,6 +724,8 @@ export class VpnKeepAliveManager {
   }
 
   private stopLongTaskIfNeeded(): void {
+    // 保活停止意味着启动确认已无意义（用户关闭/异常回滚），解除看门狗防止误触发
+    this.disarmSwitchAckWatchdog();
     const ctx = this.context;
     if (ctx == undefined) {
       return;
@@ -773,8 +842,13 @@ export class VpnKeepAliveManager {
     // 状态机据此保留开关意图与保活，避免把"主动恢复"误判为"异常进程关闭"而回滚开关。
     this.isForceRestarting = true;
     try {
-      // 1. 关闭（内部会先STOP等待确认，再stopVpnExtensionAbility）
-      await WireGuard.runWGConfig(configId, dbConf, false);
+      // 1. 关闭（内部会先STOP等待确认，再stopVpnExtensionAbility）。
+      //    关闭失败（如VEA已死亡、stop无目标）不阻断后续重启，故独立捕获
+      try {
+        await WireGuard.runWGConfig(configId, dbConf, false);
+      } catch (stopErr) {
+        LLog.warn(TAG, `强重启VEA-关闭失败(继续重启流程): ${(stopErr as Error).message}`);
+      }
       // 2. 轮询等待VEA完全退出（避免启动竞态：start时若检测到VEA仍在运行会走SWITCH而非重启）
       const deadline = Date.now() + 6000;
       while (Date.now() < deadline) {

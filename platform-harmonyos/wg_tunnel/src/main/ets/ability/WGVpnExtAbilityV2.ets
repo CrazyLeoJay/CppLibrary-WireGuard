@@ -369,25 +369,84 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   private async handleSwitchConfig(configId: number, wgDbConf: WGDBConf): Promise<void> {
     LLog.info(TAG, `切换VPN配置: configId=${configId}`);
 
-    // 1. 停止旧连接
+    // 0. 记录旧连接信息：新配置启动失败时自动回退旧配置，保证切换不把VPN搞挂
+    const oldConfigId = this.currentConfigId;
+    const oldDbConf = this.currentDbConf;
+    const oldDeviceConfig = this.currentConfig;
+    const hadOldConnection = this.vpnConnection != undefined;
+
+    // 1. 先解析并准备新配置（DNS解析等）。准备失败时旧连接原样保留（切换失败不能把
+    //    正在使用的VPN搞挂），并广播当前实际运行状态，主进程"意图与运行不一致"分支
+    //    会把开关意图对齐回旧配置
+    let newConfig: WGDeviceConfig | undefined;
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        newConfig = await makeWGConf2VpnStartConfig(wgDbConf);
+        break;
+      } catch (e) {
+        LLog.warn(TAG, `切换配置准备第${attempt}次失败: ${JSON.stringify(e)}`);
+        if (attempt < 2) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 1500));
+        }
+      }
+    }
+    if (newConfig == undefined) {
+      LLog.error(TAG, `切换配置准备失败，保留当前连接继续运行: configId=${this.currentConfigId}`);
+      VPNChangeHelperV2.queryStatus(this.currentConfig);
+      return;
+    }
+
+    // 2. 新配置已就绪，此时才停止旧连接（切换中断窗口最小化）
     try {
       await this.vpnConnection?.stopServer();
     } catch (e) {
       LLog.error(TAG, `停止旧VPN连接异常: ${JSON.stringify(e)}`);
     }
     this.vpnConnection = undefined;
-
-    // 2. 注销网络监听
     this.unregisterNetConnection();
 
-    // 3. 更新配置
+    // 3. 更新配置并启动新连接。启动失败先尝试回退旧配置（失败不上报，最终状态统一处理）
     this.currentConfigId = configId;
     this.currentDbConf = wgDbConf;
     this.currentConfig = undefined;
     this.isReconnecting = false;
+    const started = await this.startVpnInternal(configId, newConfig, false, false);
+    if (started) {
+      LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
+      this.registerNetConnection();
+      return;
+    }
+    LLog.warn(TAG, '切换后新配置启动失败，尝试回退旧配置');
 
-    // 4. 启动新配置
-    this.resolveAndStartVpn(configId, wgDbConf);
+    // 4. 回退旧配置：恢复VEA内部状态后重建旧连接（成功后广播旧配置运行中，
+    //    主进程"意图与运行不一致"分支会把开关意图对齐回旧配置）
+    if (hadOldConnection && oldConfigId != undefined && oldDbConf != undefined) {
+      this.currentConfigId = oldConfigId;
+      this.currentDbConf = oldDbConf;
+      let restoreConfig: WGDeviceConfig | undefined;
+      try {
+        restoreConfig = await makeWGConf2VpnStartConfig(oldDbConf);
+      } catch (e) {
+        LLog.warn(TAG, `回退旧配置解析失败: ${JSON.stringify(e)}`);
+      }
+      if (restoreConfig != undefined) {
+        const restored = await this.startVpnInternal(oldConfigId, restoreConfig, false, false);
+        if (restored) {
+          this.currentConfig = restoreConfig;
+          LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
+          this.registerNetConnection();
+          LLog.warn(TAG, `已回退并恢复旧配置运行: configId=${oldConfigId}`);
+          return;
+        }
+      }
+    } else {
+      // 切换前本无活动连接，恢复VEA内部状态即可
+      this.currentConfigId = oldConfigId;
+      this.currentDbConf = oldDbConf;
+      this.currentConfig = oldDeviceConfig;
+    }
+    // 5. 新旧都失败 → 上报失败（THROW），主进程回滚开关意图
+    VPNChangeHelperV2.startVpnThrow('切换配置失败，且旧配置恢复失败');
   }
 
   /**
@@ -418,8 +477,41 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     this.currentConfig = undefined;
     this.isReconnecting = false;
 
-    // 用缓存的配置重新启动
-    this.resolveAndStartVpn(this.currentConfigId, this.currentDbConf);
+    // 用缓存的配置重新启动。DNS解析可能因网络切换瞬断失败，先重试准备（此时
+    // 尚未广播失败，避免主进程回滚），准备耗尽才一次性上报；启动失败不终止VEA
+    const restartConfigId = this.currentConfigId;
+    const dbConf = this.currentDbConf;
+    if (restartConfigId == undefined || dbConf == undefined) {
+      LLog.warn(TAG, '无缓存配置，无法重启');
+      return;
+    }
+    let newConfig: WGDeviceConfig | undefined;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        newConfig = await makeWGConf2VpnStartConfig(dbConf);
+        break;
+      } catch (e) {
+        LLog.warn(TAG, `重启配置准备第${attempt}次失败: ${JSON.stringify(e)}`);
+        if (attempt < 3) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+        }
+      }
+    }
+    if (newConfig == undefined) {
+      LLog.error(TAG, '重启配置准备重试耗尽');
+      VPNChangeHelperV2.startVpnThrow('重启失败：配置准备(含DNS解析)重试耗尽');
+      return;
+    }
+    this.currentConfig = newConfig;
+    this.hasDomainEndpoint = this.checkHasDomainEndpoint(dbConf);
+    const started = await this.startVpnInternal(restartConfigId, newConfig, false);
+    if (started) {
+      // 重连后重启握手超时检查已在startVpnInternal内完成；重新注册网络监听
+      LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
+      this.registerNetConnection();
+    } else {
+      LLog.warn(TAG, '重启配置启动失败，VEA保持存活等待恢复');
+    }
   }
 
   // ===== 握手超时检测与自动重连 =====
@@ -523,25 +615,39 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
   // ===== VPN启动（复用V1核心逻辑） =====
 
-  private async resolveAndStartVpn(id: number, wgDbConf: WGDBConf): Promise<void> {
+  private async resolveAndStartVpn(id: number, wgDbConf: WGDBConf, terminateOnFailure: boolean = true): Promise<boolean> {
     try {
       const config = await makeWGConf2VpnStartConfig(wgDbConf);
       this.currentConfig = config;
       this.hasDomainEndpoint = this.checkHasDomainEndpoint(wgDbConf);
-      this.startVpnInternal(id, config);
-      // 统一注册网络变化监听：
-      // - 域名端点：网络变化后需重新解析DNS，整体重建隧道
-      // - IP端点：底层网络切换后旧socket路径可能失效，走轻量换fd漫游
-      LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
-      this.registerNetConnection();
+      const started = await this.startVpnInternal(id, config, terminateOnFailure);
+      if (started) {
+        // 统一注册网络变化监听：
+        // - 域名端点：网络变化后需重新解析DNS，整体重建隧道
+        // - IP端点：底层网络切换后旧socket路径可能失效，走轻量换fd漫游
+        LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
+        this.registerNetConnection();
+      }
+      return started;
     } catch (e) {
       LLog.error(TAG, `DNS解析或VPN启动失败: ${JSON.stringify(e)}`);
       VPNChangeHelperV2.startVpnThrow(`${e instanceof Error ? e.message : String(e)}`);
-      this.selfTerminate();
+      if (terminateOnFailure) {
+        this.selfTerminate();
+      }
+      return false;
     }
   }
 
-  private startVpnInternal(id: number, config: WGDeviceConfig): void {
+  /**
+   * 启动VPN连接
+   *
+   * @param terminateOnFailure 启动失败是否终止VEA进程（切换/重启路径传false保活VEA）
+   * @param reportFailure 失败是否广播THROW（切换路径传false：需先尝试回退旧配置，
+   *                      最终状态由调用方统一上报，避免主进程提前回滚开关意图）
+   */
+  private async startVpnInternal(id: number, config: WGDeviceConfig, terminateOnFailure: boolean = true,
+    reportFailure: boolean = true): Promise<boolean> {
     LLog.debug(TAG, `开启配置:${JSON.stringify(config)}`);
     this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context), config)
       .setStreamListener((msg) => {
@@ -574,17 +680,30 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
         WireGuard.event.publishVpnStreamLogs(msg);
       });
 
-    this.vpnConnection.startServer()
-      .then(() => {
-        VPNChangeHelperV2.startVpn(id, config);
-        // VPN启动成功后启动握手超时检查
-        this.startHandshakeCheck();
-      })
-      .catch((e: BusinessError) => {
-        LLog.error(TAG, `VPN Error (${e.code}): ${e.message}`);
-        VPNChangeHelperV2.startVpnThrow(e.message);
+    try {
+      await this.vpnConnection.startServer()
+      VPNChangeHelperV2.startVpn(id, config);
+      // VPN启动成功后启动握手超时检查
+      this.startHandshakeCheck();
+      return true;
+    } catch (e) {
+      const err = e as BusinessError;
+      LLog.error(TAG, `VPN Error (${err.code}): ${err.message}`);
+      // 尽力清理启动失败的半成品连接（TUN/socket），避免残留
+      try {
+        await this.vpnConnection?.stopServer();
+      } catch (stopErr) {
+        LLog.warn(TAG, `清理启动失败连接异常: ${JSON.stringify(stopErr)}`);
+      }
+      this.vpnConnection = undefined;
+      if (reportFailure) {
+        VPNChangeHelperV2.startVpnThrow(err.message);
+      }
+      if (terminateOnFailure) {
         this.selfTerminate();
-      });
+      }
+      return false;
+    }
   }
 
   // ===== 网络监听与DNS重连（复用V1逻辑） =====

@@ -187,10 +187,18 @@ export namespace WireGuard {
           },
         })
           .catch((e: BusinessError) => {
+            if (e.code == 15501001) {
+              // VEA已在运行（如上一次仅停了VPN服务、进程仍存活）：改走SWITCH热切换，
+              // 不作为启动失败回滚
+              LLog.warn(TAG, { error: e, message: "VEA已在运行，改走SWITCH热切换" });
+              event.publishVpnConfigRequest({
+                action: VpnConfigAction.SWITCH,
+                configId: id,
+                wgDbConf: config,
+              });
+              return;
+            }
             switch (e.code) {
-              case 15501001:
-                LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" });
-                break;
               case 201:
                 LLog.warn(TAG, { error: e, message: "未授权！" });
                 break;
