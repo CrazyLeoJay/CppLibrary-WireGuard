@@ -10,3 +10,4 @@ spec
 build_*
 build-*
 .zcode
+.cache
