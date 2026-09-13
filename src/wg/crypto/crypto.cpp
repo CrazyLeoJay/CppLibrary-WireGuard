@@ -310,9 +310,17 @@ namespace WireGuard {
 
         void
         hmac_blake2s(uint8_t *out, const uint8_t *message, size_t message_len, const uint8_t *key, size_t key_len) {
-            assert(out != nullptr);
-            assert(message != nullptr || message_len == 0);
-            assert(key != nullptr);
+            // 断言改为异常：assert 在未定义NDEBUG时失败会abort→SIGABRT进程崩溃，
+            // 抛WGException可被上层握手链路catch并经流日志上报
+            if (out == nullptr) {
+                throw WGException("hmac_blake2s: 输出指针为空");
+            }
+            if (message == nullptr && message_len != 0) {
+                throw WGException("hmac_blake2s: 消息指针为空且长度非零");
+            }
+            if (key == nullptr) {
+                throw WGException("hmac_blake2s: 密钥指针为空");
+            }
 
             std::vector<uint8_t> x_key(BLAKE2S_BLOCK_SIZE);
             std::vector<uint8_t> i_hash(BLAKE2S_HASH_SIZE);

@@ -71,7 +71,13 @@ namespace WireGuard {
                 LOG_DEBUG("PipeWait create ");
             }
 
-            ~PipeWait() { close(); }
+            ~PipeWait() {
+                // 析构绝不允许异常逃逸（逃逸即std::terminate→进程崩溃）
+                try {
+                    close();
+                } catch (...) {
+                }
+            }
 
         private:
             int wake_up_pip[2]{-1, -1};

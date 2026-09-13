@@ -34,7 +34,11 @@ namespace WireGuard {
     }
 
     UDPSocket::~UDPSocket() {
-        close();
+        // 析构绝不允许异常逃逸（逃逸即std::terminate→进程崩溃）
+        try {
+            close();
+        } catch (...) {
+        }
     }
 
     int UDPSocket::initSocketStart(const std::shared_ptr<uint32_t> &port,
