@@ -11,3 +11,4 @@ build_*
 build-*
 .zcode
 .cache
+.deveco
