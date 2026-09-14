@@ -80,15 +80,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   private reconnectRequestCancel?: SubEventCancel;
   // 未捕获异常监听句柄：进程死亡前尽力上报（满足"所有失败必须有报错"）
   private errorObserver?: errorManager.GlobalObserver;
-  // 握手超时检测
-  private lastHandshakeTime: Map<number, number> = new Map();
-  private handshakeCheckTimer?: number;
-  /** 最后一次外发活动（SEND流日志）时间戳：失效判定的武装信号 */
-  private lastOutboundActivity: number = 0;
-  /** 握手过期阈值：3分钟（单位ms） */
-  private readonly HANDSHAKE_STALE_THRESHOLD: number = 180000;
-  /** 握手检查间隔：1分钟（单位ms） */
-  private readonly HANDSHAKE_CHECK_INTERVAL: number = 60000;
+  // 【架构说明】握手维护已统一到C层心跳线程（握手重试/失联判死上报SOCKET_ERROR），
+  // 本层不再做握手超时检查，仅消费SOCKET_ERROR事件执行隧道重建
 
   override onCreate(want: Want): void {
     super.onCreate(want);
@@ -197,9 +190,6 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   override async onDestroy(): Promise<void> {
     super.onDestroy();
     LLog.info(TAG, "WGVpnExtAbilityV2 onDestroy");
-
-    // 停止握手超时检查
-    this.stopHandshakeCheck();
 
     // 停止配置请求轮询
     this.stopConfigQueryPolling();
@@ -356,9 +346,6 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   private async handleStopService(): Promise<void> {
     LLog.info(TAG, '停止VPN服务（保留VEA进程）');
 
-    // 停止握手超时检查
-    this.stopHandshakeCheck();
-
     // 停止VPN连接：await确保destroy和close完成后再设为undefined
     if (this.vpnConnection != undefined) {
       try {
@@ -506,7 +493,7 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     // 主进程健康守护/看门狗会按周期继续重试；仅准备重试耗尽（持久性故障）时显式上报
     const started = await this.startVpnInternal(restartConfigId, newConfig, false, false);
     if (started) {
-      // 重连后重启握手超时检查已在startVpnInternal内完成；重新注册网络监听
+      // 重连后握手维护由C层心跳线程接管；重新注册网络监听
       LLog.info(TAG, this.hasDomainEndpoint ? "域名配置" : "非域名配置")
       this.registerNetConnection();
     } else {
@@ -514,84 +501,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     }
   }
 
-  // ===== 握手超时检测与自动重连 =====
-
-  /**
-   * 启动握手超时检查定时器
-   *
-   * 每隔HANDSHAKE_CHECK_INTERVAL(1分钟)检查一次，
-   * 如果所有peer的握手时间都超过HANDSHAKE_STALE_THRESHOLD(3分钟)，
-   * 则判定隧道失效，自动触发重连。
-   */
-  private startHandshakeCheck(): void {
-    this.stopHandshakeCheck();
-    LLog.info(TAG, `启动握手超时检查: 间隔=${this.HANDSHAKE_CHECK_INTERVAL}ms, 阈值=${this.HANDSHAKE_STALE_THRESHOLD}ms`);
-    this.handshakeCheckTimer = setInterval(() => {
-      this.checkHandshakeStale();
-    }, this.HANDSHAKE_CHECK_INTERVAL);
-  }
-
-  /**
-   * 停止握手超时检查定时器
-   */
-  private stopHandshakeCheck(): void {
-    if (this.handshakeCheckTimer != undefined) {
-      clearInterval(this.handshakeCheckTimer);
-      this.handshakeCheckTimer = undefined;
-      LLog.info(TAG, '停止握手超时检查');
-    }
-  }
-
-  /**
-   * 检查握手是否过期
-   *
-   * 如果所有peer的最后一次握手时间都超过阈值（3分钟），
-   * 则判定隧道失效，通知主进程并自动重连。
-   * 防重入：如果正在重连中则跳过检查。
-   */
-  private checkHandshakeStale(): void {
-    if (this.isReconnecting) {
-      LLog.info(TAG, '正在重连中，跳过握手超时检查');
-      return;
-    }
-    if (this.vpnConnection == undefined) {
-      LLog.info(TAG, 'vpnConnection为空，跳过握手超时检查');
-      return;
-    }
-
-    const now = Date.now();
-    let allStale: boolean = true;
-
-    // 检查所有peer的握手时间
-    this.lastHandshakeTime.forEach((time: number, peerIndex: number) => {
-      const elapsed = now - time;
-      LLog.info(TAG, `握手检查: peerIndex=${peerIndex}, elapsed=${elapsed}ms, stale=${elapsed > this.HANDSHAKE_STALE_THRESHOLD}`);
-      if (elapsed <= this.HANDSHAKE_STALE_THRESHOLD) {
-        allStale = false;
-      }
-    });
-
-    // 如果没有任何握手记录，也判定为失效
-    if (this.lastHandshakeTime.size === 0) {
-      LLog.warn(TAG, '无握手记录，VPN可能未完成首次握手');
-      return;
-    }
-
-    // 无近期外发活动时无法区分"空闲"与"失效"（如keepalive=0的空闲隧道没有任何消息），
-    // 此时跳过判定，避免对健康空闲隧道反复重连
-    if (this.lastOutboundActivity <= 0 || (now - this.lastOutboundActivity) > this.HANDSHAKE_STALE_THRESHOLD) {
-      LLog.info(TAG, '握手检查: 近期无外发活动（可能为空闲隧道），跳过失效判定');
-      return;
-    }
-
-    if (allStale) {
-      LLog.warn(TAG, '所有peer握手超时，隧道失效，触发自动重连');
-      // 通知主进程隧道失效
-      VPNChangeHelperV2.tunnelStale();
-      // 自动重连
-      this.handleRestartConfig();
-    }
-  }
+  // 【已移除握手超时检查】握手维护统一到C层心跳线程：握手重试(REKEY_TIMEOUT)、
+  // 失联判死上报(SOCKET_ERROR事件)均由C层完成，本层消费SOCKET_ERROR执行隧道重建
 
   /**
    * 响应主进程的重连请求
@@ -665,26 +576,13 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
           }
           return;
         }
-        if (msg.direction === StreamDirection.SEND) {
-          // 外发活动时间戳：失效判定仅在有发送尝试时武装（区分空闲与失效）
-          this.lastOutboundActivity = Date.now();
-        }
-        // 记录握手时间，用于握手超时检测
-        // 只记接收方向：外发握手尝试在对端不可达时仍会持续发生，不代表隧道可用
-        if ((msg.messageType === MessageType.HANDSHAKE_INITIATION ||
-          msg.messageType === MessageType.HANDSHAKE_RESPONSE) &&
-          msg.direction === StreamDirection.RECEIVE) {
-          this.lastHandshakeTime.set(msg.peerIndex, Date.now());
-          LLog.info(TAG, `握手时间更新: peerIndex=${msg.peerIndex}, time=${Date.now()}`);
-        }
+        // 【握手维护在C层】本层不再记录握手/外发时间戳做超时判定
         WireGuard.event.publishVpnStreamLogs(msg);
       });
 
     try {
       await this.vpnConnection.startServer()
       VPNChangeHelperV2.startVpn(id, config);
-      // VPN启动成功后启动握手超时检查
-      this.startHandshakeCheck();
       return true;
     } catch (e) {
       const err = e as BusinessError;
@@ -806,8 +704,6 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
         this.currentConfig = newConfig;
         this.startVpnInternal(this.currentConfigId, newConfig);
-        // 重连后重启握手超时检查
-        this.startHandshakeCheck();
       } catch (e) {
         LLog.error(TAG, `网络变化重连异常: ${JSON.stringify(e)}`);
       } finally {
