@@ -204,12 +204,16 @@ namespace WireGuard {
                         }
                     }
 
-                    for (const auto &peer: peers) {
-                        if (!peer) {
-                            continue;
-                        }
+            for (const auto &peer: peers) {
+                if (!peer) {
+                    continue;
+                }
 
-                        if (!peer->isCanSendData()) {
+                // 握手失联判死上报（握手维护统一到C层）：外发活跃但2分钟无任何入站。
+                // 放在循环最前：握手从未成功的场景（isCanSendData()==false分支）也要覆盖
+                checkPeerStale(peer);
+
+                if (!peer->isCanSendData()) {
                             // 如果还没准备好，但触发了心跳，那就发送握手，而不是心跳包
                             LOG_DEBUG(
                                 "发现有Peer还未准备好，则发起握手 当前 iAmInitiator=%{public}s",
@@ -253,10 +257,10 @@ namespace WireGuard {
                                     nextSleepDuration = std::chrono::seconds(1);
                                 }
                             }
-                        } else {
-                            nextSleepDuration = std::min(nextSleepDuration, waitTime);
-                        }
-                    }
+                } else {
+                    nextSleepDuration = std::min(nextSleepDuration, waitTime);
+                }
+            }
 
                     // 执行清理任务
                     indexMapClear();
@@ -1099,5 +1103,28 @@ namespace WireGuard {
             _consecutiveSendFailures.store(0, std::memory_order_release);
             reportSocketEvent(std::string("Socket连续发送失败: ") + e.what());
         }
+    }
+
+    void Device::checkPeerStale(const std::shared_ptr<Peer> &peer) {
+        const auto now = Clock::now();
+        if (peer->isActive()) {
+            // 有入站，链路健康：清除上报节流标记
+            _staleReportTimes.erase(peer->getIndex());
+            return;
+        }
+        // 外发武装：最近50s（约两个心跳周期）内有握手/数据/心跳发出才判定；
+        // keepalive=0且空闲的隧道没有外发信号，跳过（无法区分空闲与失效）
+        if (now - peer->lastOutboundActivity() > std::chrono::seconds(50)) {
+            return;
+        }
+        // 上报节流：同一Peer 120s内只上报一次
+        const auto it = _staleReportTimes.find(peer->getIndex());
+        if (it != _staleReportTimes.end() && now - it->second < std::chrono::seconds(120)) {
+            return;
+        }
+        _staleReportTimes[peer->getIndex()] = now;
+        LOG_WARN("Peer %zu 外发活跃但超过120s无入站，判定隧道失效并上报", peer->getIndex());
+        printStreamLogThrow(peer, MessageType::SOCKET_ERROR, StreamLog::SEND, 0,
+                             "握手失联超过120s且外发活跃，判定隧道失效，请重建隧道");
     }
 }; // namespace WireGuard

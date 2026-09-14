@@ -89,6 +89,8 @@ namespace WireGuard {
         mutable std::atomic<int> _consecutiveSendFailures{0};
         /** 连续发送失败上报阈值 */
         static constexpr int SEND_FAILURE_REPORT_THRESHOLD = 3;
+        /** 各Peer最后一次握手失联判死上报时间（仅心跳线程访问，无锁） */
+        std::unordered_map<size_t, TimePoint> _staleReportTimes{};
         // =============== 虚拟VPN网卡读取 ===============
         mutable std::atomic<uint32_t> tunFd{0};
         std::thread _loopTunFdTask{};
@@ -185,6 +187,16 @@ namespace WireGuard {
          * 记录一次发送失败：累计计数，达到阈值时上报 SOCKET_ERROR 事件并清零
          */
         void noteSendFailure(const std::exception &e) const;
+
+        /**
+         * 握手失联判死（握手维护统一到C层的最终裁决，替代宿主层握手超时检查）：
+         * Peer 2分钟无任何入站（isActive()==false）且外发活跃（近期有握手/数据/心跳发出）
+         * → 判定隧道失效，经 SOCKET_ERROR 事件上报宿主重建隧道。
+         * 外发不活跃（keepalive=0的空闲隧道）不武装，避免误判。同一Peer上报节流120s。
+         *
+         * 由心跳线程每轮对每个Peer调用
+         */
+        void checkPeerStale(const std::shared_ptr<Peer> &peer);
 
         /**
          * 循环接收数据
