@@ -186,7 +186,9 @@ namespace WireGuard {
 
         UDPSocket sock{DNS::IPV4};
         // sock.bind(61113);
-        sock.initSocketStart(std::make_shared<uint32_t>(51820));
+        // 不绑定固定端口（51820常被本机WireGuard占用导致EADDRINUSE）：
+        // 本测试只验证握手包构造与发送，源端口无关紧要，传空port由系统分配临时端口
+        sock.initSocketStart(nullptr, nullptr);
         const Endpoint ep = Tools::IP::makeEndpointIpv4("10.0.0.2", 51820);
         sock.write(&msg, sizeof(msg), ep);
         sock.close();
