@@ -314,6 +314,40 @@ static napi_value NAPI_Global_dnsToIpWithType(napi_env env, napi_callback_info i
     }
 }
 
+// 向指定DNS服务器直接查询域名（绕过系统解析器，规避路由器NAT硬回流返回内网IP）
+// type: 4=IPv4(A记录), 6=IPv6(AAAA记录)；server: DNS服务器IPv4地址
+static napi_value NAPI_Global_dnsToIpFromServer(napi_env env, napi_callback_info info) {
+    try {
+        napi_status ns;
+        size_t argc = 3;
+        napi_value args[3];
+        ns = napi_get_cb_info(env, info, &argc, args, nullptr, nullptr);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("napi调用异常");
+        }
+
+        auto nvContent = NapiTools::napiGetString(env, args[0], "dnsToIpFromServer参数domain");
+        int32_t typeVal;
+        ns = napi_get_value_int32(env, args[1], &typeVal);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("获取type参数失败");
+        }
+        auto nvServer = NapiTools::napiGetString(env, args[2], "dnsToIpFromServer参数server");
+        auto ipType = static_cast<WireGuard::DNS::IPType>(typeVal);
+        LOG_INFO("dnsToIpFromServer: domain=%{public}s, type=%{public}d, server=%{public}s",
+                 nvContent.c_str(), typeVal, nvServer.c_str());
+        auto ip = WireGuard::DNS::readDomainToIpFromDnsServer(nvContent, ipType, nvServer);
+        auto ipStr = ip.toIpStr();
+        LOG_INFO("dnsToIpFromServer: resolved=%{public}s", ipStr.c_str());
+        return NapiTools::makeNapiString(env, ipStr);
+    } catch (const std::exception &e) {
+        LOG_ERROR("dnsToIpFromServer failed: %{public}s", e.what());
+        std::string errMsg = "dnsToIpFromServer: " + std::string(e.what());
+        napi_throw_error(env, nullptr, errMsg.c_str());
+        return nullptr;
+    }
+}
+
 static napi_value NAPI_Global_wgToOfficialStr(napi_env env, napi_callback_info info) {
     try {
         napi_status ns;
@@ -346,6 +380,7 @@ static napi_value Init(napi_env env, napi_value exports) {
         {   "isValidBase64Key", nullptr, NAPI_Global_isValidBase64Key, nullptr, nullptr, nullptr, napi_default, nullptr},
         {            "dnsToIp", nullptr,          NAPI_Global_dnsToIp, nullptr, nullptr, nullptr, napi_default, nullptr},
         {    "dnsToIpWithType", nullptr,  NAPI_Global_dnsToIpWithType, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"dnsToIpFromServer", nullptr, NAPI_Global_dnsToIpFromServer, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"wgConfToOfficialStr", nullptr,  NAPI_Global_wgToOfficialStr, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
     napi_define_properties(env, exports, sizeof(desc) / sizeof(desc[0]), desc);
