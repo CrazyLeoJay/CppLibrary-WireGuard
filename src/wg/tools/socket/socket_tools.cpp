@@ -337,51 +337,53 @@ namespace WireGuard {
             return -2;
         }
 
-        // 使用 IO 多路复用，防止
-        fd_set read_fds;
-        // 清空 fd_set 集合（必须初始化）
-        FD_ZERO(&read_fds);
+        while (true) {
+            // 使用 IO 多路复用，防止
+            fd_set read_fds;
+            // 清空 fd_set 集合（必须初始化；select会修改集合，EINTR重试时须重新填充）
+            FD_ZERO(&read_fds);
 
-        // 获取最大的fd
-        int max_fd = fd;
-        // 将 UDP socket 文件描述符加入监听集合
-        FD_SET(fd, &read_fds);
+            // 获取最大的fd
+            int max_fd = fd;
+            // 将 UDP socket 文件描述符加入监听集合
+            FD_SET(fd, &read_fds);
 
-        if (wakeup_fd != -1) {
-            if (max_fd < wakeup_fd) {
-                max_fd = wakeup_fd;
+            if (wakeup_fd != -1) {
+                if (max_fd < wakeup_fd) {
+                    max_fd = wakeup_fd;
+                }
+                // 将自管道的读端（wakeup_pipe_[0]）也加入监听集合，
+                // 这样当有停止信号写入管道时，select 会立即返回
+                FD_SET(wakeup_fd, &read_fds);
             }
-            // 将自管道的读端（wakeup_pipe_[0]）也加入监听集合，
-            // 这样当有停止信号写入管道时，select 会立即返回
-            FD_SET(wakeup_fd, &read_fds);
-        }
 
-        // 调用 select 阻塞等待，直到以下任 一 情况发生：
-        //   - UDP socket 有数据可读
-        //   - 自管道有数据可读（即收到停止信号）
-        //   - 发生错误
-        // 第四个参数 timeout 为 nullptr，表示无限期阻塞
-        int activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
-        // 如果 select 返回负值，说明发生错误（如被信号中断等）
-        if (activeFd < 0) {
-            if (errno == EINTR) {
-                // 被信号打断不属于错误，重试等待
-                return read_select(buf, len, endpoint);
+            // 调用 select 阻塞等待，直到以下任 一 情况发生：
+            //   - UDP socket 有数据可读
+            //   - 自管道有数据可读（即收到停止信号）
+            //   - 发生错误
+            // 第四个参数 timeout 为 nullptr，表示无限期阻塞
+            int activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
+            // 如果 select 返回负值，说明发生错误（如被信号中断等）
+            if (activeFd < 0) {
+                if (errno == EINTR) {
+                    // 被信号打断不属于错误，重试等待（此前误返回-2导致读线程被当成正常关闭退出）
+                    continue;
+                }
+                return -2;
+            }
+
+            // 检查是否是自管道可读（即收到了停止信号）
+            if (wakeup_fd != -1 && FD_ISSET(wakeup_fd, &read_fds)) {
+                pip_read_wake();
+                return -2;
+            }
+
+            // 如果不是停止信号，那么应该是 socket 数据
+            if (_fd.load() != -1 && FD_ISSET(fd, &read_fds)) {
+                return pip_read_socket(buf, len, endpoint);
             }
             return -2;
         }
-
-        // 检查是否是自管道可读（即收到了停止信号）
-        if (wakeup_fd != -1 && FD_ISSET(wakeup_fd, &read_fds)) {
-            pip_read_wake();
-            return -2;
-        }
-
-        // 如果不是停止信号，那么应该是 socket 数据
-        if (_fd.load() != -1 && FD_ISSET(fd, &read_fds)) {
-            return pip_read_socket(buf, len, endpoint);
-        }
-        return -2;
     }
 
     ssize_t UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
