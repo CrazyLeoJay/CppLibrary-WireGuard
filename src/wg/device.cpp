@@ -213,9 +213,12 @@ namespace WireGuard {
                     // 守护 socket 读线程：读线程因致命异常退出且自愈耗尽时，在此重新拉起
                     ensureSocketReadLoop();
 
-                    // 睡眠等待任务由 Tools::PipeWait 实现，
-                    // 当需要结束时，会由通道唤醒，所以这里正常25s睡眠即可
-                    std::chrono::milliseconds nextSleepDuration = std::chrono::seconds(25);
+                    // 睡眠等待任务由 Tools::PipeWait 实现，需要结束时由通道唤醒。
+                    // 默认睡眠从25s收敛为5s：守护检查(ensureSocketReadLoop)随每轮迭代执行，
+                    // 心跳/握手的实际发送时机由各peer的waitTime在每轮迭代中精确计算，
+                    // 提高唤醒频率不影响发送时机，仅将读线程死亡的最坏发现时间从25s收敛到5s
+                    // （读线程退出时还会主动notify唤醒本线程，5s只是兜底上限）
+                    std::chrono::milliseconds nextSleepDuration = std::chrono::seconds(5);
                     {
                         std::lock_guard<std::mutex> lock(_peerMutex);
                         peers.clear();
@@ -398,6 +401,9 @@ namespace WireGuard {
         // 无条件复位运行标记：保证心跳守护能探测到线程退出并重新拉起
         isSocketRunning = false;
         LOG_INFO("Socket读取任务(%{public}d) 读取停止", socket.fd());
+        // 唤醒心跳线程立即执行读线程守护检查（事件驱动重新拉起，
+        // 否则最长要等一个睡眠周期5s才发现线程死亡）
+        pipWaitForHeartbeatTask.notify();
     }
 
     bool Device::recoverSocketReadLoop(int &retries) {
