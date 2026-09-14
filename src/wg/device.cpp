@@ -49,16 +49,8 @@ namespace WireGuard {
     }
 
     Device::~Device() {
-        // 析构绝不允许异常逃逸（逃逸即std::terminate→进程崩溃）
-        try {
-            LOG_INFO("析构 Device 关闭");
-            close();
-        } catch (...) {
-            try {
-                LOG_ERROR("设备关闭Close方法异常（已吞掉防止析构逃逸）");
-            } catch (...) {
-            }
-        }
+        LOG_INFO("析构 Device 关闭");
+        close();
     }
 
     uint32_t Device::initSocketStart(const std::function<void(int &)> &onSocketFDChange) {
@@ -82,27 +74,13 @@ namespace WireGuard {
         // 先置位防启动竞态：心跳守护（ensureSocketReadLoop）在读线程函数进入前
         // 探测到false会误判"读线程死亡"而join掉健康线程
         isSocketRunning.store(true, std::memory_order_release);
-        try {
-            // 启动心跳线程
-            _loopSocketHeartbeatTask = std::thread(&Device::loopSocketHeartbeatTask, this);
-            // 轮询读取远端 Socket 数据包
-            _loopSocketTask = std::thread(&Device::loopReceiveForSocket, this);
-            // 轮询读取本地 VPN 虚拟网卡数据包
-            _loopTunFdTask = std::thread(&Device::loopReceiveForTun, this);
-        } catch (const std::system_error &e) {
-            // 线程资源耗尽等：回滚运行标记、回收已启动线程，抛WGException由NAPI层
-            // 转为startVpnThrow向用户报错（保证启动失败必有报错）
-            isRunning.store(false, std::memory_order_release);
-            isLoopTunRunning.store(false, std::memory_order_release);
-            isSocketRunning.store(false, std::memory_order_release);
-            try {
-                if (_loopSocketHeartbeatTask.joinable()) _loopSocketHeartbeatTask.join();
-                if (_loopSocketTask.joinable()) _loopSocketTask.join();
-                if (_loopTunFdTask.joinable()) _loopTunFdTask.join();
-            } catch (...) {
-            }
-            throw WGException("启动VPN工作线程失败(系统线程资源异常): %s", e.what());
-        }
+        // 启动心跳线程
+        _loopSocketHeartbeatTask = std::thread(&Device::loopSocketHeartbeatTask, this);
+        // 轮询读取远端 Socket 数据包
+        _loopSocketTask = std::thread(&Device::loopReceiveForSocket, this);
+        // 轮询读取本地 VPN 虚拟网卡数据包
+        _loopTunFdTask = std::thread(&Device::loopReceiveForTun, this);
+        // 线程创建异常不在此捕获：向上抛出，由NAPI胶水层捕获转ArkTS走正常异常流程
         LOG_INFO("device start end");
     }
 
@@ -115,52 +93,46 @@ namespace WireGuard {
     }
 
     void Device::close() {
-        // 整体兜底：close可能被析构/任意线程调用，绝不允许异常逃逸
-        try {
-            LOG_INFO("device close 通知停止所有任务");
-            isRunning.store(false, std::memory_order_release);
-            isSocketRunning.store(false, std::memory_order_release);
-            pipWaitForHeartbeatTask.notify(); // 通知心跳任务停止阻塞
-            socket.close(); // 关闭 socket
+        LOG_INFO("device close 通知停止所有任务");
+        isRunning.store(false, std::memory_order_release);
+        isSocketRunning.store(false, std::memory_order_release);
+        pipWaitForHeartbeatTask.notify(); // 通知心跳任务停止阻塞
+        socket.close(); // 关闭 socket
 
-            // 等待网卡读取线程结束
-            if (_loopTunFdTask.joinable()) {
-                _loopTunFdTask.join();
-            }
-            LOG_INFO("Tun read task stoped");
-
-            // 等待Socket读取线程结束
-            // 加锁防止与心跳线程的读线程守护（ensureSocketReadLoop）并发 join/重建
-            {
-                std::lock_guard<std::mutex> lockReadLoop(_readLoopMutex);
-                if (_loopSocketTask.joinable()) {
-                    _loopSocketTask.join();
-                }
-            }
-            LOG_INFO("socket read task stoped");
-
-            // 等待轮询任务结束
-            if (_loopSocketHeartbeatTask.joinable()) {
-                _loopSocketHeartbeatTask.join();
-            }
-            LOG_INFO("hearthbeat read task stoped");
-            // 清理网卡配置
-            this->tunFd.store(0, std::memory_order_release);
-            LOG_INFO("配置和运行标记清除");
-            std::lock_guard<std::mutex> lockIndex(_indexMutex);
-            _keypairIndexPeers.clear();
-            _receiverIndexPeers.clear();
-            LOG_INFO("device 索引清除");
-            // 清理所有 Peer
-            std::lock_guard<std::mutex> guard(_peerMutex);
-            _peers.clear();
-            LOG_INFO("device 清除Peers");
-            LOG_INFO("关闭设备通信并清除数据");
-        } catch (const std::exception &e) {
-            LOG_ERROR("device close 异常：%{public}s", e.what());
-        } catch (...) {
-            LOG_ERROR("device close 未知异常");
+        // 等待网卡读取线程结束
+        if (_loopTunFdTask.joinable()) {
+            _loopTunFdTask.join();
         }
+        LOG_INFO("Tun read task stoped");
+
+        // 等待Socket读取线程结束
+        // 加锁防止与心跳线程的读线程守护（ensureSocketReadLoop）并发 join/重建
+        {
+            std::lock_guard<std::mutex> lockReadLoop(_readLoopMutex);
+            if (_loopSocketTask.joinable()) {
+                _loopSocketTask.join();
+            }
+        }
+        LOG_INFO("socket read task stoped");
+
+        // 等待轮询任务结束
+        if (_loopSocketHeartbeatTask.joinable()) {
+            _loopSocketHeartbeatTask.join();
+        }
+        LOG_INFO("hearthbeat read task stoped");
+        // 清理网卡配置
+        this->tunFd.store(0, std::memory_order_release);
+        LOG_INFO("配置和运行标记清除");
+        std::lock_guard<std::mutex> lockIndex(_indexMutex);
+        _keypairIndexPeers.clear();
+        _receiverIndexPeers.clear();
+        LOG_INFO("device 索引清除");
+        // 清理所有 Peer
+        std::lock_guard<std::mutex> guard(_peerMutex);
+        _peers.clear();
+        LOG_INFO("device 清除Peers");
+        LOG_INFO("关闭设备通信并清除数据");
+        // 异常不在此捕获：向上抛出，由NAPI胶水层捕获转ArkTS走正常异常流程
     }
 
     int Device::swapSocket() {

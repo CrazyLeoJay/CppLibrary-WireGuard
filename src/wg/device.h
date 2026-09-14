@@ -70,12 +70,14 @@ namespace WireGuard {
         // 用于判断当前设备是否运行，所有任务都要受到这个参数控制
         mutable std::atomic<bool> isRunning{false};
         // ============ Socket 心跳任务 ===============
-        // 【线程异常报错策略】三个工作线程均不允许异常逃逸（逃逸=std::terminate=进程崩溃）：
-        // 1. 线程内可恢复异常：迭代级catch后记日志继续运行，不算故障；
-        // 2. 线程致命退出（读线程自愈耗尽/未知异常等）：经reportSocketEvent上报SOCKET_ERROR
-        //    回调通知宿主，随后由心跳线程守护(ensureSocketReadLoop)自动重新拉起，不算崩溃；
-        // 3. 连接中断级失败（启动/切换/DNS解析失败等）：抛异常或经startVpnThrow链路上抛，
-        //    由ArkTS捕获并向用户报错。
+        // 【异常边界架构】
+        // 1. 顶层外部调用方法（initSocketStart/start/close/swapSocket/sendPacket等）：
+        //    不在内部吞异常，向上抛出，由NAPI胶水层统一捕获转ArkTS走正常异常流程；
+        // 2. 工作线程（无胶水边界，异常逃逸=std::terminate=进程崩溃）：
+        //    - 迭代内可恢复异常：迭代级catch记日志继续运行，不算故障；
+        //    - 线程致命退出（读线程自愈耗尽/未知异常等）：经reportSocketEvent上报
+        //      SOCKET_ERROR回调通知宿主，随后由心跳线程守护(ensureSocketReadLoop)
+        //      自动重新拉起，不算崩溃。
         std::thread _loopSocketHeartbeatTask{};
         Tools::PipeWait pipWaitForHeartbeatTask{}; // 轮询等待使用阻塞
         // ============ Socket 数据读写任务 ===============
