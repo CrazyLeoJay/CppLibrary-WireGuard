@@ -200,10 +200,10 @@ export struct WGMainView {
   ];
   vpnEvent = WireGuard.event.subscribeVpnChange((params) => {
     LLog.info(TAG, `配置读取: ${JSON.stringify(params)}`)
-    const status = params.status
-    if (status) {
-      // 设置开关
-      this.vm.setActiveConfigId(status);
+    // 【仅显示同步，不控制开关】行开关唯一状态源是本地意图(StatusConfig)。
+    // 仅在VPN进程要关闭（异常/进程关闭，本地意图已被状态机置关）时同步一次显示
+    if (params.vpnThreadRunning === false) {
+      this.vm.refreshRowStates();
     }
   })
 

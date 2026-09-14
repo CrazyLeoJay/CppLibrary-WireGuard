@@ -137,12 +137,13 @@ class StatusImpl {
 
   /**
    * 用户主动关闭 / 明确启动异常 / VPN进程关闭 → 关闭开关意图
-   * 同时置 hasLocalOff：本进程此后再看到"VPN运行但意图关"均视为陈旧启动
+   * switchConfigId 不清空：保留为"最后一次意图的配置id"，供关闭任务执行时校验
+   * 目标id是否一致（开关任务无论开关，只有id对上才执行）。读取方均以
+   * isSwitchOpen 为门控，保留id不影响任何现有逻辑。
    */
   switchOffIntent() {
     const c = this.getConfig()
     c.isSwitchOpen = false
-    c.switchConfigId = undefined
     c.running = false
     c.runningConfigId = undefined
     c.hasLocalOff = true

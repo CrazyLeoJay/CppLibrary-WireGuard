@@ -26,9 +26,9 @@ import {
   getDnsMode,
   dnsResolveByMode,
   formatDnsError,
-  SiteUrlType,
-  vpnKeepAliveManager
+  SiteUrlType
 } from 'wg_tunnel';
+import { vpnToggleService } from './VpnToggleService';
 import { JSON } from '@kit.ArkTS';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
@@ -101,12 +101,10 @@ export default class WGConfigPreViewModel {
   async updateData() {
     if (this.params) {
       await this.loadData(this.params);
-      if (this.data && WireGuard.config.status.isRunning(this.params.id)) {
-        try {
-          await WireGuard.switchVpnConfig(this.params.id, this.data);
-        } catch (e) {
-          LLog.error(TAG, `切换VPN配置失败: ${JSON.stringify(e)}`);
-        }
+      // 保存后自动热切换（保留）：接入单飞行槽，链内校验运行意图=本配置才发SWITCH；
+      // 两页面并发时后到意图生效，本任务若id不匹配自动作废
+      if (this.data) {
+        await vpnToggleService.requestConfigReloadSwitch(this.params.id, this.data);
       }
     } else {
       LLog.info(TAG, "没有获取到当前配置ID")
@@ -129,80 +127,38 @@ export default class WGConfigPreViewModel {
     }
   }
 
-  /**
-   * 改变Vpn配置，启动或停止
-   *
-   * 意图驱动流程：点击立即置开关意图与UI显示 → 启动/关闭VPN进程
-   * → 开启成功发起即启动长时任务、关闭即停止长时任务；异常则回滚意图并停长时任务。
-   */
-  async changeVpnConfig(context: UIContext, isOn: boolean) {
-    // 当点击启动按钮时，需要设置异常标记为false
-    this.isVPNNoGetParamThrow = false;
-    const id = this.params?.id;
-    const config = this.data;
-    if (id == undefined || config == undefined) {
-      return;
-    }
-    const status = WireGuard.config.status.getConfig();
-    // 防重复：该配置已是用户意图开启状态
-    if (isOn && status.isSwitchOpen && status.switchConfigId == id) {
-      return;
-    }
-    // 1. 立即置开关意图与UI显示（意图先行）
-    if (isOn) {
-      WireGuard.config.status.switchOnIntent(id);
-      this.isVpnOpen = true;
-    } else {
-      WireGuard.config.status.switchOffIntent();
-      this.isVpnOpen = false;
-    }
-    try {
-      // 2. 启动/关闭VPN进程
-      await WireGuard.runWGConfig(id, config, isOn)
-      // 3. 开启：成功发起启动即启动长时任务；关闭：停止长时任务
-      if (isOn) {
-        vpnKeepAliveManager.onSwitchOn();
-      } else {
-        vpnKeepAliveManager.onSwitchOff();
-      }
-    } catch (e) {
-      // 启动/关闭异常 → 回滚意图：开关为关、停止长时任务
-      WireGuard.config.status.switchOffIntent();
-      this.isVpnOpen = false;
-      vpnKeepAliveManager.onSwitchOff();
-      WireGuard.event.publishVpnNoOpen()
-      // 开启失败展示Toast，关闭操作不展示（用户主动关闭不应提示错误）
-      if (isOn) {
-        const reason = e != undefined ? String(e) : '';
-        context.getPromptAction().showToast({ message: reason.length > 0 ? 'VPN启动失败：' + reason : 'VPN启动失败' })
-      }
-      LLog.error(TAG, { error: e, message: `${isOn ? "开启" : "关闭"}VPN异常` });
-    }
-  }
-
-
   isSwitchClick: boolean = false;
   @Trace isSwitchEnable: boolean = true;
 
+  /**
+   * 预览页开关点击处理（第一道闸门：isSwitchClick 手势守卫——仅真实点击进入，
+   * 程序性赋值引发的 onChange 因标记 false 空跑返回；主界面被动刷新亦不触发本方法）
+   *
+   * 与主界面共用 vpnToggleService：意图先行 → updateStatus 刷显示（纯显示写入）→
+   * 单飞行槽内 id 校验后执行，只有目标任务执行。
+   */
   onSwitchChange(context: UIContext, isOn: boolean) {
     this.isSwitchEnable = false
     if (this.isSwitchClick) {
-      if (isOn) {
-        LLog.info(TAG, "点击开启VPN")
-        // 等启停流程（含异常回滚）完成后再恢复开关可点，防止快速连点造成操作交错
-        this.changeVpnConfig(context, true).finally(() => {
-          this.isSwitchEnable = true
-        })
-      } else {
-        LLog.info(TAG, "点击关闭VPN")
-        this.changeVpnConfig(context, false).finally(() => {
-          this.isSwitchEnable = true
-        })
+      this.isSwitchClick = false
+      // 当点击启动按钮时，需要设置异常标记为false
+      this.isVPNNoGetParamThrow = false;
+      const id = this.params?.id;
+      const config = this.data;
+      if (id == undefined || config == undefined) {
+        this.isSwitchEnable = true
+        return;
       }
+      vpnToggleService.requestVpnToggle(context, id, isOn, config,
+        () => {
+          this.updateStatus();
+        },
+        () => {
+          this.isSwitchEnable = true
+        });
     } else {
       this.isSwitchEnable = true
     }
-    this.isSwitchClick = false
   }
 
   setSwitchClick() {
