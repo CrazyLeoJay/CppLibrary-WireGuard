@@ -332,6 +332,10 @@ namespace WireGuard {
                             break;
                         }
                         if (received == -2) {
+                            // 多路复用层真实错误（关闭信号走SOCKET_CLOSE_SING异常路径，不会到这）：
+                            // 线程将退出，按报错策略经回调通知（心跳守护会自动重新拉起，不算崩溃）
+                            LOG_WARN("socket读循环多路复用层异常(-2)，线程退出等待守护重新拉起");
+                            reportSocketEvent("Socket读线程因多路复用错误退出，等待守护重新拉起");
                             break;
                         }
                         if (readErrno == EAGAIN || readErrno == EWOULDBLOCK) {
