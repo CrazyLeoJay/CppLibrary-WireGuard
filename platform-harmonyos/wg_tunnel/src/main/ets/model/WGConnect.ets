@@ -166,7 +166,10 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
   const vpnIp = config.vpn.vpnIp!;
   const vpnAddress = vpnIp.address.ip!;
   const vpnAddressFamily = vpnIp.address.isIpv4 ? 1 : 2;
-  const vpnAddressPrefixLen = vpnIp?.cidr ?? (vpnIp.address.isIpv4 ? 32 : 128)
+  // Interface Address 支持无掩码配置（cidr=-1 表示未指定），
+  // 创建VPN时归一化为默认掩码（IPv4 /32、IPv6 /128），否则 prefixLength=-1 导致create失败
+  const vpnAddressPrefixLen = (vpnIp.cidr != undefined && vpnIp.cidr >= 0)
+    ? vpnIp.cidr : (vpnIp.address.isIpv4 ? 32 : 128);
   const dns = config.vpn.dns ?? []
   const mtu = config.vpn.mtu ?? 1400
   if (config.peers.length == 0) {
@@ -179,7 +182,8 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
         interface: "vpn-tun",
         destination: {
           address: { address: allowed.address.ip, family: allowed.address.isIpv4 ? 1 : 2 },
-          prefixLength: allowed.cidr ?? (allowed.address.isIpv4 ? 32 : 128),
+          prefixLength: (allowed.cidr != undefined && allowed.cidr >= 0)
+            ? allowed.cidr : (allowed.address.isIpv4 ? 32 : 128),
         },
         gateway: {
           address: vpnAddress,
