@@ -166,6 +166,7 @@ namespace WireGuard {
         std::lock_guard<std::mutex> lockIndex(_indexMutex);
         _keypairIndexPeers.clear();
         _receiverIndexPeers.clear();
+        _pendingInitiatorIndexes.clear();
         LOG_INFO("device 索引清除");
         // 清理所有 Peer
         std::lock_guard<std::mutex> guard(_peerMutex);
@@ -752,6 +753,8 @@ namespace WireGuard {
         if (keypair) {
             // keypair 建立索引
             _keypairIndexPeers[ntohl(msg->receiverIndex)] = keypair;
+            // 握手完成：解除"待响应"保护（此后该索引由"存活密钥对"保护）
+            _pendingInitiatorIndexes.erase(ntohl(msg->receiverIndex));
             // 发送等待的数据包
             sendStagedPackets(currentPeer);
             LOG_INFO("握手成功 并存储密钥 remoteIndex=%{public}s", crypto::bin2Hex(msg->senderIndex).c_str());
@@ -871,12 +874,41 @@ namespace WireGuard {
     void Device::indexMapClear() {
         std::lock_guard<std::mutex> guard(_indexMutex);
 
-        for (auto it = _receiverIndexPeers.begin(); it != _receiverIndexPeers.end();) {
-            if (!it->second->isActive()) {
-                it = _receiverIndexPeers.erase(it);
+        // 1) 过期仍未收到响应的"本地发起索引"记录：正常往返只有几十毫秒，30 秒足够宽松
+        const auto nowMs = steadyNowMs();
+        constexpr int64_t PENDING_TTL_MS = 30 * 1000;
+        for (auto it = _pendingInitiatorIndexes.begin(); it != _pendingInitiatorIndexes.end();) {
+            if (nowMs - it->second > PENDING_TTL_MS) {
+                it = _pendingInitiatorIndexes.erase(it);
             } else {
                 ++it;
             }
+        }
+
+        for (auto it = _receiverIndexPeers.begin(); it != _receiverIndexPeers.end();) {
+            const auto index = it->first;
+            // 2) 正在等待对端握手响应的本地索引：绝不能清理。
+            //    密钥过期阈值 REKEY_AFTER_TIME 与 Peer::isActive()（对端 120 秒内是否有收包）同为 120 秒，
+            //    且服务端不向客户端发 keepalive，于是"该轮换了"与"对端已 120 秒无收包"必然同时成立：
+            //    刚 createNewIndex() 出来的握手索引会在同一次心跳循环的清理里被删掉，
+            //    对端响应到达时被判"未找到远端Peer"丢弃，客户端只能反复重发握手（约每 6 秒一次），
+            //    直到对端主动发包把 isActive() 刷回 true —— 用户表现为"周期性断流 / 一段时间没反应"。
+            if (_pendingInitiatorIndexes.find(index) != _pendingInitiatorIndexes.end()) {
+                ++it;
+                continue;
+            }
+            // 3) 仍绑定存活会话密钥的索引：接收数据包要靠它反查 Peer，同样必须保留
+            const auto kpIt = _keypairIndexPeers.find(index);
+            if (kpIt != _keypairIndexPeers.end() && !kpIt->second.expired()) {
+                ++it;
+                continue;
+            }
+            // 4) 对端近期有收包 → 保留（原有语义）
+            if (it->second->isActive()) {
+                ++it;
+                continue;
+            }
+            it = _receiverIndexPeers.erase(it);
         }
 
         for (auto it = _keypairIndexPeers.begin(); it != _keypairIndexPeers.end();) {
@@ -1293,6 +1325,8 @@ namespace WireGuard {
 
         // 配置 peer 索引
         const auto index = createNewIndex(peer);
+        // 登记为"本地发起、等待响应"的索引：心跳线程的 indexMapClear() 不能把它清掉
+        markPendingInitiatorIndex(index);
         const auto msg = peer->createHandshakeInitiation(index, force);
         const auto endpoint = peer->getEndpoint();
 
@@ -1473,6 +1507,11 @@ namespace WireGuard {
         // if (peer->getIAmInitiator()) {
         sendInitiation(peer);
         // }
+    }
+
+    void Device::markPendingInitiatorIndex(const uint32_t index) {
+        std::lock_guard<std::mutex> guard(_indexMutex);
+        _pendingInitiatorIndexes[index] = steadyNowMs();
     }
 
     uint32_t Device::createNewIndex(std::shared_ptr<Peer> peer) {

@@ -66,6 +66,10 @@ namespace WireGuard {
 
         std::unordered_map<uint32_t, std::shared_ptr<Peer> > _receiverIndexPeers{};
         std::unordered_map<uint32_t, std::weak_ptr<KeyPair> > _keypairIndexPeers{};
+        // 本地主动发起握手时创建的索引 → 创建时刻（steady 毫秒，防系统时间跳变）。
+        // 在收到对端握手响应之前，这些索引必须一直保留在 _receiverIndexPeers 中，否则响应到达时
+        // 会因找不到 Peer 被丢弃（日志表现为"未找到远端Peer"）。详见 indexMapClear() 的注释。
+        std::unordered_map<uint32_t, int64_t> _pendingInitiatorIndexes{};
 
         // 用于判断当前设备是否运行，所有任务都要受到这个参数控制
         mutable std::atomic<bool> isRunning{false};
@@ -475,6 +479,12 @@ namespace WireGuard {
          * @return 索引
          */
         uint32_t createNewIndex(std::shared_ptr<Peer> peer);
+
+        /**
+         * 登记"本地主动发起握手、正在等待响应"的索引。
+         * 收到响应前该索引不能被 indexMapClear() 清理，否则握手永远完不成（响应被判"未找到远端Peer"）。
+         */
+        void markPendingInitiatorIndex(uint32_t index);
 
         /**
          * 移除索引
