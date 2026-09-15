@@ -308,26 +308,37 @@ namespace WireGuard {
         int activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
         // 如果 select 返回负值，说明发生错误（如被信号中断等）
         if (activeFd < 0) {
-            return -2;
+            // EINTR（被信号打断）属可恢复错误：绝不能当成停止信号，否则读线程会永久退出
+            if (errno == EINTR) {
+                return READ_RETRY;
+            }
+            LOG_WARN("select 出错 errno=%{public}d，交由上层决定是否重建socket", errno);
+            return READ_ERROR;
         }
 
         // 检查是否是自管道可读（即收到了停止信号）
         if (wakeup_fd != -1 && FD_ISSET(wakeup_fd, &read_fds)) {
             pip_read_wake();
-            return -2;
+            return READ_STOP;
         }
 
         // 如果不是停止信号，那么应该是 socket 数据
         if (_fd.load() != -1 && FD_ISSET(fd, &read_fds)) {
             return pip_read_socket(buf, len, endpoint);
         }
-        return -2;
+        // 未知就绪事件：不是停止信号，交给上层重读
+        return READ_RETRY;
     }
 
     ssize_t UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
         const int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
         if (nfds == -1) {
-            return -2;
+            // EINTR（被信号打断）属可恢复错误：绝不能当成停止信号，否则读线程会永久退出
+            if (errno == EINTR) {
+                return READ_RETRY;
+            }
+            LOG_WARN("epoll_wait 出错 errno=%{public}d，交由上层决定是否重建socket", errno);
+            return READ_ERROR;
         }
         for (int i = 0; i < nfds; ++i) {
             const int fd = events[i].data.fd;
@@ -335,10 +346,11 @@ namespace WireGuard {
                 return pip_read_socket(buf, len, endpoint);
             } else if (fd == wakeup_pipe_[0]) {
                 pip_read_wake();
-                return -2;
+                return READ_STOP;
             }
         }
-        return -2;
+        // 未知就绪事件：不是停止信号，交给上层重读
+        return READ_RETRY;
     }
 
     void UDPSocket::pip_read_wake() const {

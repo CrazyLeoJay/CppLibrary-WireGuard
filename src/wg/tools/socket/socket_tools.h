@@ -57,6 +57,18 @@ namespace WireGuard {
 
     public:
         /**
+         * 阻塞读取的返回值约定（read/read_select/read_epoll 共用）
+         *
+         * 调用方据此区分"可重试"与"真停止"：
+         * 历史实现把所有异常情况统一返回 -2，导致读线程把一次被信号打断（EINTR）
+         * 误判为关闭信号而永久退出，隧道随后变成"只写不读"——
+         * 表现为 VPN 显示已连接、通知与长时任务都正常，但再也收不到任何数据。
+         */
+        static constexpr ssize_t READ_ERROR = -1; ///< 读取出错，errno 有效（上层可决定是否重建 socket）
+        static constexpr ssize_t READ_STOP = -2;  ///< 收到停止/关闭信号（仅唤醒管道被触发，即主动 close）
+        static constexpr ssize_t READ_RETRY = -3; ///< 可重试：EINTR/无就绪事件/未知事件，应 continue 重读
+
+        /**
          * 初始化  UDPSocket 参数和状态，并且创建一个socket
          * 使用参数创建一个 socket
          *

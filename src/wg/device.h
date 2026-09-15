@@ -66,6 +66,10 @@ namespace WireGuard {
 
         std::unordered_map<uint32_t, std::shared_ptr<Peer> > _receiverIndexPeers{};
         std::unordered_map<uint32_t, std::weak_ptr<KeyPair> > _keypairIndexPeers{};
+        // 本地主动发起握手时创建的索引 → 创建时间。
+        // 这些索引在收到对端握手响应之前必须一直保留在 _receiverIndexPeers 中，否则响应会因
+        // 找不到 Peer 被丢弃（"未找到远端Peer"）。细节见 indexMapClear() 的注释。
+        std::unordered_map<uint32_t, TimePoint> _pendingInitiatorIndexes{};
 
         // 用于判断当前设备是否运行，所有任务都要受到这个参数控制
         mutable std::atomic<bool> isRunning{false};
@@ -75,6 +79,10 @@ namespace WireGuard {
         // ============ Socket 数据读写任务 ===============
         std::thread _loopSocketTask{};
         mutable std::atomic<bool> isSocketRunning{false}; // 用于判断和控制 socket 线程是否执行
+        mutable std::mutex _socketTaskMutex{}; // 保护读线程的重启/join，避免看门狗与 close() 并发操作同一个 std::thread
+        std::atomic<bool> _socketReadTaskExited{true}; // 读线程是否已真正退出（只有它为 true 时才允许 join/重启，避免 join 到仍在运行的线程而阻塞）
+        std::atomic<uint32_t> _socketReadRestartCount{0}; // 读线程累计重启次数（连续多次说明故障未消除，需要退避）
+        TimePoint _socketTaskRestartNextAllowed{Clock::now()}; // 看门狗退避窗口：该时刻之前不再重启读线程
         std::function<void(int &)> onSocketFDChange{}; // 当socket发生变化时调用
         // =============== 虚拟VPN网卡读取 ===============
         mutable std::atomic<uint32_t> tunFd{0};
@@ -278,6 +286,12 @@ namespace WireGuard {
          * @return 索引
          */
         uint32_t createNewIndex(std::shared_ptr<Peer> peer);
+
+        /**
+         * 登记"本地主动发起握手、正在等待响应"的索引。
+         * 这些索引在收到响应前不能被 indexMapClear() 清理，否则响应会被丢弃导致握手永远完不成。
+         */
+        void markPendingInitiatorIndex(uint32_t index);
 
         /**
          * 移除索引
