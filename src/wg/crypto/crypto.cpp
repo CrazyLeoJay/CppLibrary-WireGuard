@@ -124,13 +124,12 @@ namespace WireGuard {
         }
 
         PublicKey generatePublicKey(const PrivateKey &priv) {
+            // 死代码缺陷修复：原实现布尔判断写反——crypto_scalarmult...base 成功时返回 0，
+            // 原代码却把“成功”当失败抛异常，失败分支还会返回未初始化的 pub。
+            // 改为失败（返回值非 0）时抛异常，成功返回正确公钥。
             PublicKey pub{};
-            // 计算公钥：pub = base × priv（Curve25519 标量基乘法）
-            // 使用 libsodium 标准 API：crypto_scalarmult_curve25519_base
-            // 返回值：0 表示成功，-1 表示失败
-            const auto let = crypto_scalarmult_curve25519_base(pub.data(), priv.data()) == 0;
-            if (let != 0) {
-                throw std::runtime_error("Failed to generate public key");
+            if (crypto_scalarmult_curve25519_base(pub.data(), priv.data()) != 0) {
+                throw WGException("生成公钥失败");
             }
             return pub;
         }
@@ -466,11 +465,12 @@ namespace WireGuard {
         }
 
         uint32_t createIndex() {
-            // 随机数分布（均匀的 32 位整数）
-            std::uniform_int_distribution<uint32_t> dist;
-            std::mt19937_64 rng_{};
-            // 尝试找到一个未使用的索引
-            return dist(rng_);
+            // 死代码缺陷修复：原实现每次重建未播种的 std::mt19937_64（默认种子 5489），
+            // 返回固定可预测值，若用作握手 senderIndex 将破坏会话索引唯一性。
+            // 改用 libsodium 安全随机数（均匀分布且不可预测）。
+            uint32_t index = 0;
+            randombytes(reinterpret_cast<uint8_t *>(&index), sizeof(index));
+            return index;
         }
 
         void printHashChainKey(

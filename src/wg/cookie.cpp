@@ -51,6 +51,10 @@ namespace WireGuard {
     }
 
     std::unique_ptr<CookieData> CookieChecker::getCookieNoMake(const Endpoint &endpoint) const {
+        // L1修复：cookieIndex 的写侧（getCookie/fillSecretHash2SecureRandom）持 secret_lock_，
+        // 本方法也须持同一把锁，遵守类注释“所有公共方法线程安全”的契约
+        // （secret_lock_ 已声明为 mutable，可在 const 方法内加锁）
+        std::lock_guard<std::mutex> lock(secret_lock_);
         if (cookieIndex.find(endpoint) == cookieIndex.end()) {
             return nullptr;
         }
@@ -105,7 +109,13 @@ namespace WireGuard {
 
         // 生成cookie消息
         MessageCookie cookieMsg{};
-        cookieMsg.receiverIndex = htonl(msg.senderIndex);
+        // 原样回显发起方的 senderIndex。msg.senderIndex 取自线缆结构体（网络字节序），
+        // 故先 ntohl 还原主机序、再 htonl 写回，净效果即“原样回显”——与
+        // createHandshakeResponse（nonce.cpp: htonl(ntohl(...))）的做法一致。
+        // 修复：原写法直接 htonl(msg.senderIndex) 会多交换一次字节序，导致发起方
+        // 无法把 cookie 关联到本次握手；因 index 恰为 0 时字节序交换无差别，
+        // 现有单测（tests/test_cookie.cpp 使用 index=0）未能暴露。
+        cookieMsg.receiverIndex = htonl(ntohl(msg.senderIndex));
         // cookieMsg.nonce
         crypto::randombytes(cookieMsg.nonce, NONCE_LEN);
         Logs::print_space([&]() { LOG_DEBUG("生成NONE，开始将Cookie加密入消息"); });
@@ -170,7 +180,8 @@ namespace WireGuard {
         const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
         constexpr size_t mac2_input_length = sizeof(MessageInitiation) - COOKIE_LEN;
         const auto mac2 = crypto::MAC(last_received_cookie.data(), COOKIE_LEN, bytes, mac2_input_length);
-        if (std::memcmp(msg.mac2, mac2.data(), COOKIE_LEN) != 0) {
+        // L2修复：改用恒定时间比较，避免 std::memcmp 的提前返回带来时序侧信道
+        if (crypto_verify_16(msg.mac2, mac2.data()) != 0) {
             throw WGException(
                 "mac2 验证失败msg.mac2=%s c_mac2=%s", crypto::bin2B64(msg.mac2, COOKIE_LEN).c_str(),
                 crypto::bin2B64(mac2.data(), COOKIE_LEN).c_str()
@@ -186,7 +197,8 @@ namespace WireGuard {
         const auto *bytes = reinterpret_cast<const uint8_t *>(&msg);
         constexpr size_t mac2_input_length = sizeof(msg) - COOKIE_LEN;
         const auto mac2 = crypto::MAC(last_received_cookie.data(), COOKIE_LEN, bytes, mac2_input_length);
-        if (std::memcmp(msg.mac2, mac2.data(), COOKIE_LEN) != 0) {
+        // L2修复：改用恒定时间比较，避免 std::memcmp 的提前返回带来时序侧信道
+        if (crypto_verify_16(msg.mac2, mac2.data()) != 0) {
             throw WGException(
                 "mac2 验证失败msg.mac2=%s c_mac2=%s", crypto::bin2B64(msg.mac2, COOKIE_LEN).c_str(),
                 crypto::bin2B64(mac2.data(), COOKIE_LEN).c_str()

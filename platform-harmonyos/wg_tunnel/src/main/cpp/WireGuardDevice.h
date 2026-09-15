@@ -29,6 +29,7 @@
 #include <cstdint>
 #include <memory>
 #include <mutex>
+#include <atomic>
 
 #ifndef WIREGUARD_WIREGUARDDEVICE_H
     #define WIREGUARD_WIREGUARDDEVICE_H
@@ -44,6 +45,8 @@ public:
 
 private:
     mutable std::mutex _deviceMutex;
+    // 关闭中标记：工作线程的回调看到后直接跳过，避免与 close 的 join 互相等待造成死锁
+    std::atomic<bool> closing_{false};
 
 public:
     napi_threadsafe_function _currentSocketFdListener{};
@@ -80,6 +83,22 @@ namespace wg_napi {
     napi_value Start(napi_env env, napi_callback_info info);
     napi_value setStreamLogListener(napi_env env, napi_callback_info info);
     napi_value Close(napi_env env, napi_callback_info info);
+
+    /**
+     * 更新指定 Peer 的网络端点（DDNS 漂移自愈）。
+     * 入参 (index:number, ip:string, port:number)，返回 boolean：
+     * true=端点已变化并已强制重握手；false=未生效（调用方走整隧道重启兜底）。
+     */
+    napi_value UpdatePeerEndpoint(napi_env env, napi_callback_info info);
+
+    /**
+     * 网络承载切换（WiFi↔蜂窝）快速通道：立即重建本地 Socket 并强制重新握手。
+     *
+     * 入参无，返回 boolean：
+     * true=已受理并请求重建；false=设备未运行 / 读取线程不可用 / 防抖期内被忽略。
+     * 不重启隧道、不发布故障哨兵，因此不会触发上层整隧道重启（α）。
+     */
+    napi_value ForceRebindSocket(napi_env env, napi_callback_info info);
 
     void GetConnectConfig(napi_env env, napi_value arg, WireGuard::DeviceRegisterConfig &config);
     void GetDeviceConfig(napi_env env, napi_value arg, WireGuard::DeviceConfig &peer);

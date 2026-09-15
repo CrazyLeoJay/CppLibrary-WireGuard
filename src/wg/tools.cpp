@@ -101,19 +101,21 @@ namespace WireGuard {
          *
          * 时间格式说明：
          * - TAI（International Atomic Time）：国际原子时
-         * - Unix epoch 偏移：+10 秒（TAI-UTC offset as of 2024: 37 leap seconds）
+         * - 基址 0x400000000000000a = TAI64 纪元（10 秒初始偏移），再加 Unix 秒数；
+         *   与 WireGuard 官方实现一致，不再额外累加 37 秒闰秒偏移
          * - 大端格式存储（网络字节序）
          */
         void tai64nNow(Timestamp &timestamp) {
+            // 死代码缺陷修复：原实现写成 seconds + 10 + 37，把 10 秒基址与 37 秒闰秒
+            // 重复计入，与握手实际使用的 crypto::tai64n_now 不一致。统一为同一算法。
             // TAI64N 格式：64 位 TAI 时间 + 32 位纳秒
             auto now = Clock::now();
             auto epoch = now.time_since_epoch();
             auto seconds = std::chrono::duration_cast<std::chrono::seconds>(epoch).count();
             auto nanos = std::chrono::duration_cast<std::chrono::nanoseconds>(epoch).count() % 1000000000;
 
-            // TAI offset from Unix epoch (10 + 37 leap seconds as of 2024)
-            // 10 seconds initial offset + 37 leap seconds = 47 seconds total
-            uint64_t taiSeconds = static_cast<uint64_t>(seconds) + 10ULL + 37ULL;
+            // TAI64 基址 0x400000000000000a（即 0x4000000000000000 + 10）+ Unix 秒数
+            uint64_t taiSeconds = 0x400000000000000aULL + static_cast<uint64_t>(seconds);
 
             // 写入大端格式（网络字节序）
             for (int i = 7; i >= 0; --i) {

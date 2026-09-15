@@ -26,6 +26,8 @@
 
 #include <unistd.h>
 #include <netinet/in.h>
+#include <cerrno>
+#include <cstring>
 
 #include "WGException.h"
 
@@ -105,7 +107,7 @@ namespace WireGuard {
         if (_fd.load() == -1) {
             throw WGException(WGErrType::SOCKET_CLOSE_SING);
         }
-        if (epoll_fd_ != -1) {
+        if (epoll_fd_.load() != -1) {
             return read_epoll(buf, len, endpoint);
         } else {
             return read_select(buf, len, endpoint);
@@ -174,12 +176,23 @@ namespace WireGuard {
         return !_isFinish.load();
     }
 
+    void UDPSocket::wakeUpReader() const {
+        std::lock_guard<std::mutex> lock(_wakeupMutex);
+        if (wakeup_pipe_[1] != -1) {
+            LOG_DEBUG("wakeUpReader write");
+            char wake = 1;
+            ::write(wakeup_pipe_[1], &wake, 1);
+        }
+    }
+
     void UDPSocket::close() {
         if (_isFinish.load() == true) {
             LOG_INFO("Socket早已关闭 %{public}s", _isFinish.load()?"true":"false");
             return;
         }
         LOG_INFO("Socket关闭 ");
+        // 与读线程、wakeUpReader 串行访问 wakeup_pipe_ / epoll_fd_，避免数据竞争
+        std::lock_guard<std::mutex> lock(_wakeupMutex);
         if (wakeup_pipe_[1] != -1) {
             // 管道写入唤醒包
             LOG_DEBUG("socket wakeUp write");
@@ -189,19 +202,22 @@ namespace WireGuard {
 
         if (_fd != -1) {
             ::close(_fd);
-            // _fd = -1;
+            // 立即重置：看门狗唤醒（wakeUpReader）在close后仍可能触发，
+            // 若fd数值已被系统复用会误写无关fd；置-1后write(-1)返回EBADF无害
+            _fd = -1;
         }
 
-        if (epoll_fd_ != -1) {
-            ::close(epoll_fd_);
-            // epoll_fd_ = -1;
+        const int epfd = epoll_fd_.load();
+        if (epfd != -1) {
+            ::close(epfd);
+            epoll_fd_.store(-1);
         }
         // 关闭唤醒通道
         for (int &i: wakeup_pipe_) {
             const auto wp_fd = i;
             if (wp_fd != -1) {
                 ::close(wp_fd);
-                // i = -1;
+                i = -1;
             }
         }
         _initialized = false;
@@ -245,14 +261,22 @@ namespace WireGuard {
         // 通过 pipe(int fd[2]) 创建一个单向通信通道：
         // fd[0]：读端
         // fd[1]：写端
-        if (pipe(wakeup_pipe_) != 0) {
+        // pipe() 需要 int*，必须在锁内写 wakeup_pipe_；而错误分支会调用 close()（同锁），
+        // 故先出作用域再处理错误，避免自死锁
+        int pipeRet = 0;
+        {
+            std::lock_guard<std::mutex> lock(_wakeupMutex);
+            pipeRet = pipe(wakeup_pipe_);
+        }
+        if (pipeRet != 0) {
             close();
             throw WGException("创建唤醒管道异常");
         }
 
         // 增加 epoll 多路复用方式获取数据
-        epoll_fd_ = epoll_create1(EPOLL_CLOEXEC);
-        if (epoll_fd_ == -1) {
+        const int epfd = epoll_create1(EPOLL_CLOEXEC);
+        epoll_fd_.store(epfd);
+        if (epfd == -1) {
             // 如果 epoll_fd 创建失败，使用 select 方式多路复用
             return;
         }
@@ -260,14 +284,19 @@ namespace WireGuard {
         epoll_event ev{};
         ev.events = EPOLLIN;
         ev.data.fd = _fd.load();
-        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, _fd.load(), &ev) == -1) {
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, _fd.load(), &ev) == -1) {
             close();
             throw WGException("将 socketFd 添加入 epoll 失败");
         }
 
         // 将唤醒管道添加入 epoll
-        ev.data.fd = wakeup_pipe_[0];
-        if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, wakeup_pipe_[0], &ev) == -1) {
+        int wakeupReadFd = -1;
+        {
+            std::lock_guard<std::mutex> lock(_wakeupMutex);
+            wakeupReadFd = wakeup_pipe_[0];
+        }
+        ev.data.fd = wakeupReadFd;
+        if (epoll_ctl(epfd, EPOLL_CTL_ADD, wakeupReadFd, &ev) == -1) {
             close();
             throw WGException("将 wakeup_pip 添加入 epoll 失败");
         }
@@ -275,7 +304,12 @@ namespace WireGuard {
 
     ssize_t UDPSocket::read_select(char *buf, size_t len, Endpoint &endpoint) const {
         const int fd = _fd.load();
-        const int wakeup_fd = wakeup_pipe_[0];
+        // 取唤醒管道读端快照（加锁避免与 close() 并发读写同一数组）
+        int wakeup_fd;
+        {
+            std::lock_guard<std::mutex> lock(_wakeupMutex);
+            wakeup_fd = wakeup_pipe_[0];
+        }
 
         if (fd == -1) {
             return -2;
@@ -305,10 +339,15 @@ namespace WireGuard {
         //   - 自管道有数据可读（即收到停止信号）
         //   - 发生错误
         // 第四个参数 timeout 为 nullptr，表示无限期阻塞
-        int activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
-        // 如果 select 返回负值，说明发生错误（如被信号中断等）
+        int activeFd;
+        do {
+            activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
+        } while (activeFd < 0 && errno == EINTR); // 信号中断（如系统冻结/调度信号）属于暂时性错误，重试等待
+        // 如果 select 返回负值，说明发生错误
         if (activeFd < 0) {
-            return -2;
+            LOG_ERROR("select 异常: errno=%{public}d (%{public}s)", errno, strerror(errno));
+            // 返回 -1 触发上层重建 Socket，而不是 -2 导致读取线程永久退出
+            return -1;
         }
 
         // 检查是否是自管道可读（即收到了停止信号）
@@ -325,26 +364,58 @@ namespace WireGuard {
     }
 
     ssize_t UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
-        const int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
-        if (nfds == -1) {
+        // 取唤醒管道读端快照，避免在 epoll_wait 循环中与 close() 并发读写同一数组
+        int wakeupFd;
+        {
+            std::lock_guard<std::mutex> lock(_wakeupMutex);
+            wakeupFd = wakeup_pipe_[0];
+        }
+        // 有限超时兜底（真机实证的 40 秒黑洞根因）：
+        // close() 先写唤醒包、随即关闭 epoll fd 与管道；若「唤醒包写入」与「epoll 关闭」
+        // 之间发生交错，或 epoll_wait 已在管道被关闭后才进入等待，内核不会因该 epoll
+        // 实例被释放而唤醒等待者（Linux 行为）——读取线程将永久阻塞在 epoll_wait，
+        // 上层 close() 的 join() 永不返回，stopServer() 卡死、拆除后无任何重建。
+        // 故改为带超时轮询：超时后自检是否已进入停止流程，是则按唤醒信号返回。
+        while (true) {
+            int nfds;
+            do {
+                nfds = epoll_wait(epoll_fd_.load(), events, MAX_EVENTS, EPOLL_WAIT_TIMEOUT_MS);
+            } while (nfds == -1 && errno == EINTR); // 信号中断（如系统冻结/调度信号）属于暂时性错误，重试等待
+            if (nfds == -1) {
+                LOG_ERROR("epoll_wait 异常: errno=%{public}d (%{public}s)", errno, strerror(errno));
+                // 返回 -1 触发上层重建 Socket，而不是 -2 导致读取线程永久退出
+                return -1;
+            }
+            if (nfds == 0) {
+                // 超时（无事件）：仅当 Socket 已进入停止流程才返回 -2（上层据 isRunning()
+                // 判定并退出）；否则继续等待，避免把"暂时无数据"误报为唤醒信号触发无谓重建
+                if (!isRunning() || epoll_fd_.load() == -1) {
+                    return -2;
+                }
+                continue;
+            }
+            for (int i = 0; i < nfds; ++i) {
+                const int fd = events[i].data.fd;
+                if (fd == _fd.load()) {
+                    return pip_read_socket(buf, len, endpoint);
+                } else if (fd == wakeupFd) {
+                    pip_read_wake();
+                    return -2;
+                }
+            }
             return -2;
         }
-        for (int i = 0; i < nfds; ++i) {
-            const int fd = events[i].data.fd;
-            if (fd == _fd.load()) {
-                return pip_read_socket(buf, len, endpoint);
-            } else if (fd == wakeup_pipe_[0]) {
-                pip_read_wake();
-                return -2;
-            }
-        }
-        return -2;
     }
 
     void UDPSocket::pip_read_wake() const {
         // 从管道读取一个字节（必须读走，否则下次 select 仍会触发）
         char dummy[64]; // 一次多读，减少系统调用
-        ::read(wakeup_pipe_[0], &dummy, sizeof(dummy));
+        int wakeupFd;
+        {
+            std::lock_guard<std::mutex> lock(_wakeupMutex);
+            wakeupFd = wakeup_pipe_[0];
+        }
+        ::read(wakeupFd, &dummy, sizeof(dummy));
         // 抛出异常，表示管道正常关闭
         throw WGException(WGErrType::SOCKET_CLOSE_SING);
     }
@@ -354,7 +425,9 @@ namespace WireGuard {
             if (type == DNS::IPV4) {
                 sockaddr_in addr{};
                 socklen_t addrLen = sizeof(addr);
-                ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
+                do {
+                    ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
+                } while (ret < 0 && errno == EINTR); // 信号中断属于暂时性错误，重试读取
                 if (ret < 0) {
                     return -1;
                 }
@@ -364,7 +437,9 @@ namespace WireGuard {
             } else {
                 sockaddr_in6 addr{};
                 socklen_t addrLen = sizeof(addr);
-                ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
+                do {
+                    ret = recvfrom(_fd.load(), buf, len, 0, reinterpret_cast<struct sockaddr *>(&addr), &addrLen);
+                } while (ret < 0 && errno == EINTR); // 信号中断属于暂时性错误，重试读取
                 if (ret < 0) {
                     return -1;
                 }

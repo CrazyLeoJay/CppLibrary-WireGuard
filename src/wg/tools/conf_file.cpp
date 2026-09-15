@@ -111,14 +111,45 @@ namespace WireGuard {
             return port > 0 && port <= 65535;
         }
 
+        /**
+         * M5修复：把 std::stoi 的异常统一转换为 WGException。
+         * 畸形配置（如 "abc"、"999999999999"）会抛 std::invalid_argument /
+         * std::out_of_range，若逃逸到只捕获 WGException 的上层会直接崩溃进程。
+         */
+        int parseIntOrThrow(const std::string &raw, const char *fieldName) {
+            const std::string value = trim(raw);
+            try {
+                size_t consumed = 0;
+                const int parsed = std::stoi(value, &consumed);
+                // 严格校验：std::stoi 只解析能识别的前缀（如 "8080x" 会得到 8080、
+                // "1.5" 会得到 1），畸形配置会被静默接受。要求整串被消费完。
+                if (consumed != value.size()) {
+                    throw WGException("%s 含非法字符（必须为纯整数）：%s", fieldName, value.c_str());
+                }
+                return parsed;
+            } catch (const std::invalid_argument &) {
+                throw WGException("%s 格式非法（必须为整数）：%s", fieldName, value.c_str());
+            } catch (const std::out_of_range &) {
+                throw WGException("%s 数值超出范围：%s", fieldName, value.c_str());
+            }
+        }
+
         IPAddress parseIPAddress(const std::string &ipStr) {
             IPAddress addr{};
-            if (isIPv4(ipStr)) {
+            const std::string value = trim(ipStr);
+            if (isIPv4(value)) {
                 addr.family = IPAddress::IPv4;
-                inet_pton(AF_INET, ipStr.c_str(), &addr.ip.ipv4);
-            } else if (isIPv6(ipStr)) {
+                // M5修复：原实现忽略 inet_pton 返回值，非法地址会静默变成 0.0.0.0 被当作有效
+                if (inet_pton(AF_INET, value.c_str(), &addr.ip.ipv4) != 1) {
+                    throw WGException("非法 IPv4 地址：%s", value.c_str());
+                }
+            } else if (isIPv6(value)) {
                 addr.family = IPAddress::IPv6;
-                inet_pton(AF_INET6, ipStr.c_str(), addr.ip.ipv6);
+                if (inet_pton(AF_INET6, value.c_str(), addr.ip.ipv6) != 1) {
+                    throw WGException("非法 IPv6 地址：%s", value.c_str());
+                }
+            } else {
+                throw WGException("非法 IP 地址：%s", value.c_str());
             }
             return addr;
         }
@@ -462,7 +493,11 @@ namespace WireGuard {
                         if (slashPos != std::string::npos) {
                             std::string ipStr = value.substr(0, slashPos);
                             conf.inter.ipArea.address = parseIPAddress(ipStr);
-                            conf.inter.ipArea.cidr = std::stoi(value.substr(slashPos + 1));
+                            const int cidr = parseIntOrThrow(value.substr(slashPos + 1), "Address CIDR");
+                            if (!isValidCIDR(cidr, conf.inter.ipArea.address.family)) {
+                                throw WGException("Address CIDR 超出范围：%d", cidr);
+                            }
+                            conf.inter.ipArea.cidr = cidr;
                         }
                     } else if (key == "DNS") {
                         std::vector<std::string> dnsList = split(value, ',');
@@ -470,11 +505,19 @@ namespace WireGuard {
                             conf.inter.dns.push_back(parseIPAddress(dns));
                         }
                     } else if (key == "ListenPort") {
-                        conf.inter.ListenPort = std::make_shared<uint32_t>(std::stoi(value));
+                        const int listenPort = parseIntOrThrow(value, "ListenPort");
+                        if (listenPort < 0 || listenPort > 65535) {
+                            throw WGException("ListenPort 超出范围(0-65535)：%d", listenPort);
+                        }
+                        conf.inter.ListenPort = std::make_shared<uint32_t>(static_cast<uint32_t>(listenPort));
                     } else if (key == "ConfigName") {
                         conf.inter.configName = value;
                     } else if (key == "MTU") {
-                        conf.inter.mtu = std::make_shared<uint32_t>(std::stoi(value));
+                        const int mtu = parseIntOrThrow(value, "MTU");
+                        if (mtu <= 0) {
+                            throw WGException("MTU 必须为正整数：%d", mtu);
+                        }
+                        conf.inter.mtu = std::make_shared<uint32_t>(static_cast<uint32_t>(mtu));
                     } else if (key == "ExcludedApplications") {
                         conf.inter.excludedApplications = split(value, ',');
                     } else if (key == "IncludedApplications") {
@@ -493,12 +536,20 @@ namespace WireGuard {
                             size_t slashPos = ipStr.find('/');
                             if (slashPos != std::string::npos) {
                                 area.address = parseIPAddress(ipStr.substr(0, slashPos));
-                                area.cidr = std::stoi(ipStr.substr(slashPos + 1));
+                                const int cidr = parseIntOrThrow(ipStr.substr(slashPos + 1), "AllowedIPs CIDR");
+                                if (!isValidCIDR(cidr, area.address.family)) {
+                                    throw WGException("AllowedIPs CIDR 超出范围：%d", cidr);
+                                }
+                                area.cidr = cidr;
                             }
                             currentPeer->allowedIPs.push_back(area);
                         }
                     } else if (key == "PersistentKeepalive") {
-                        currentPeer->persistentKeepalive = static_cast<uint32_t>(std::stoi(value));
+                        const int keepalive = parseIntOrThrow(value, "PersistentKeepalive");
+                        if (keepalive < 0 || keepalive > 65535) {
+                            throw WGException("PersistentKeepalive 超出范围(0-65535)：%d", keepalive);
+                        }
+                        currentPeer->persistentKeepalive = static_cast<uint32_t>(keepalive);
                     } else if (key == "PreSharedKey" || key == "PresharedKey") {
                         currentPeer->preSharedKey = std::make_shared<WGKey>(crypto::base642Bin32Array(value));
                     }

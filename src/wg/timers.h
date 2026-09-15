@@ -26,8 +26,10 @@
 
 
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
+#include <mutex>
 #include <thread>
 #include <atomic>
 #include "version.h"
@@ -146,13 +148,21 @@ namespace WireGuard {
          * 4. 执行用户注册的回调函数
          * 
          * 该函数在线程中被调用，实现了非阻塞的定时机制。
+         *
+         * @param generation 本线程启动时的世代号。线程只在世代号未被刷新时循环，
+         *        用于处理"回调内自停 → detach → 紧接着 start()"的场景：此时旧的
+         *        detached 线程可能尚未退出，而 running 已被新 start() 置回 true，
+         *        单靠 running 判断会让旧线程继续运行，形成两条定时线程。
          */
-        void run();
+        void run(uint64_t generation);
 
         Callback callback_; ///< 定时器回调函数，保存用户定义的操作
         std::chrono::milliseconds interval_; ///< 定时器间隔，决定多久执行一次回调
         std::atomic<bool> running{false}; ///< 运行状态标志（原子操作保证线程安全）
         std::unique_ptr<std::thread> timer_thread_; ///< 定时器工作线程，负责执行定时任务
+        mutable std::mutex mutex_; ///< 保护 timer_thread_ / running / stopping_ 的状态迁移（start/stop 可跨线程并发）
+        bool stopping_{false}; ///< stop() 进行中标志：阻止未 join 完成时 start() 再次拉起线程（避免双线程）
+        std::atomic<uint64_t> generation_{0}; ///< 世代号：每次 start() 自增，旧线程据此退出（防止 detach 后残留线程与新线程并存）
     };
 
     // 定时器管理函数

@@ -17,7 +17,9 @@ import { LLog } from 'wg_tunnel';
 
 const TAG: string = 'NotifUpdater';
 
-/** 默认保活超时时间：10秒 */
+/** 活跃模式默认保活间隔：3秒（屏幕亮/前台，保持原有通知刷新节奏）。
+ * HarmonyOS DATA_TRANSFER 长时任务要求10分钟内必须有进度更新，
+ * 活跃间隔与熄屏间隔由LongTaskModel跟随屏幕状态动态切换。 */
 const DEFAULT_TIMEOUT_MS: number = 3 * 1000;
 
 /**
@@ -67,12 +69,16 @@ export class NotificationUpdater {
   private provider: NotificationProvider;
   /** deadline倒计时器ID（setTimeout），到期后重发旧数据并重新调度 */
   private deadlineTimer?: number;
+  /** 上次实际发布通知的时间戳（节流基准） */
+  private lastPublishAt: number = 0;
+  /** 动态间隔提供者：每次节流判断/重置计时实时调用（返回当前屏幕状态对应的间隔） */
+  private intervalProvider?: () => number = undefined;
 
   /**
    * 构造通知更新器
    *
    * @param provider 通知内容提供者回调，Updater在需要发布通知时调用
-   * @param timeoutMs 保活超时时间（毫秒），默认10秒。
+   * @param timeoutMs 保活超时时间（毫秒），默认3秒（活跃模式）。
    *                  保证从上次发布到下次发布的间隔不超过此值，
    *                  超时则重发旧数据，防止后台任务被系统回收。
    */
@@ -111,8 +117,23 @@ export class NotificationUpdater {
    */
   update(): void {
     this.cancelDeadline();
-    this.provider();
+    this.publishIfDue();
     this.scheduleDeadline();
+  }
+
+  /**
+   * 注入动态间隔提供者（由LongTaskModel传入：亮屏/熄屏统一3秒）
+   */
+  setIntervalProvider(provider: () => number): void {
+    this.intervalProvider = provider;
+  }
+
+  /** 当前生效的节流间隔：优先用动态提供者实时查询屏幕状态 */
+  private currentInterval(): number {
+    if (this.intervalProvider) {
+      return this.intervalProvider();
+    }
+    return this.timeoutMs;
   }
 
   /**
@@ -135,8 +156,35 @@ export class NotificationUpdater {
     this.deadlineTimer = setTimeout(() => {
       this.deadlineTimer = undefined;
       LLog.info(TAG, 'deadline到期：无新数据，重发旧通知保活');
-      this.provider();
+      this.publishIfDue();
       this.scheduleDeadline();
-    }, this.timeoutMs);
+    }, this.currentInterval());
+  }
+
+  /**
+   * 节流发布：距上次实际发布不足当前间隔时只积累数据不发布。
+   *
+   * 【解决什么】解冻瞬间系统批量补投冻结期间积压的流日志广播，
+   * 每条都会触发update()；若无节流，上万次publish连发会撞系统限频
+   * (1600009)并长时间占用主线程。节流窗口内到达的积压事件只更新
+   * 数据，整场补投只产生一次发布。
+   */
+  private publishIfDue(): void {
+    const now = Date.now();
+    if (now - this.lastPublishAt < this.currentInterval()) {
+      return;
+    }
+    this.lastPublishAt = now;
+    this.provider();
+  }
+
+  /**
+   * 立即强制发布一次并重置计时（回前台恢复刷新时调用）
+   */
+  refreshNow(): void {
+    this.cancelDeadline();
+    this.lastPublishAt = Date.now();
+    this.provider();
+    this.scheduleDeadline();
   }
 }

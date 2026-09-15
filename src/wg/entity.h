@@ -53,6 +53,21 @@ namespace WireGuard {
     constexpr size_t BLAKE2S_HASH_SIZE = 32;
 
     constexpr int TUN_READ_BUFFER_SIZE = 65535; // 65kb
+    // tun读取硬错误（非EAGAIN/EINTR）判定：必须"窗口内连续达到阈值"才判定fd失效并退出线程。
+    // 只看次数会把网络切换等瞬时EIO/ENETDOWN误判为fd失效，白白杀掉本可自愈的读取线程。
+    constexpr int32_t TUN_READ_ERROR_EXIT_THRESHOLD = 50;
+    constexpr int64_t TUN_READ_ERROR_WINDOW_MS = 1000; // 1秒内连续50次硬错误才判定fd失效
+
+    // tun读取线程连续重启失败上限：fd真失效时重启线程无法恢复（重启的是同一个坏fd），
+    // 达上限后不再空转重启，改为主动向上层上报失效信号（见TUN_DEAD_NOTIFY_INTERVAL_MS）
+    constexpr int32_t TUN_RESTART_MAX_FAILS = 3;
+
+    // tun fd失效信号向上层重发的间隔（毫秒）。
+    // fd失效后UDP keepalive/握手照常收发、流日志心跳持续刷新，上层既有的
+    // "进程消失"与"数据心跳超时"两条判据全部失明，必须由本信号兜底触发恢复。
+    // 限频重发而非只发一次：上报时刻上层可能正处在恢复流程中（信号会被丢弃），
+    // 周期性重发保证恢复链路最终一定能被触发；60s 远低于用户可感知的"断网"阈值。
+    constexpr int64_t TUN_DEAD_NOTIFY_INTERVAL_MS = 60 * 1000;
 
     constexpr uint64_t REKEY_AFTER_MESSAGES = 1ULL << 60; // 表示最大发送的消息数量，超过需要重新握手或者更新密钥
     constexpr uint64_t RECEIVING_WINDOW_LEN = 8192ULL; // 接收的重放计数器中，window的长度
@@ -62,6 +77,53 @@ namespace WireGuard {
     constexpr uint64_t REKEY_AFTER_TIME = 120000000000ULL; // 120 秒
     constexpr uint64_t REJECT_AFTER_TIME = 180000000000ULL; // 180 秒
     constexpr uint64_t KEEPALIVE_TIMEOUT = 10000000000ULL; // 10 秒
+
+    // 看门狗：持续发送中但超过该时长未收到任何远端数据，判定通路故障，触发 Socket 重建
+    constexpr int64_t WATCHDOG_RECV_TIMEOUT_MS = 90000; // 90 秒
+    // 连续发送失败次数达到该阈值时，触发 Socket 重建
+    constexpr int32_t SEND_FAIL_REBUILD_THRESHOLD = 8;
+    // 发送失败"静默重建"的升级窗口（毫秒）。
+    // 达到 SEND_FAIL_REBUILD_THRESHOLD 时先做静默重建（不发布 SOCKET_REBUILT 哨兵）：
+    // 承载切换场景下上层已有 P0-b 快速通道，抢先发布哨兵只会让上层白做一次域名重解析
+    // （真机实测：native 早于承载检测 4 秒发哨兵，触发了一次无用的自愈流程）。
+    // 只有当"距上次成功发送"超过本窗口仍持续失败时，才判定为真故障并升级为故障上报。
+    // 取值需大于上层承载切换检测耗时（通常 1~5 秒），10 秒留足余量。
+    constexpr int64_t SEND_FAIL_ESCALATE_MS = 10000; // 10 秒
+    // 两次 Socket 重建请求之间的最小间隔（防抖，避免异常场景下频繁重建）
+    constexpr int64_t WATCHDOG_REBUILD_MIN_INTERVAL_MS = 15000; // 15 秒
+
+    // 承载切换（WiFi↔蜂窝）后快速重建 Socket 的最小间隔（防抖）。
+    // 弱信号下系统可能在两种承载间反复抖动，若每次都重建会引入额外握手流量与抖动，
+    // 故限制同向 3 秒内只重建一次；该防抖独立于 WATCHDOG_REBUILD_MIN_INTERVAL_MS
+    // （后者服务于"故障判定"语义，间隔更长）。
+    constexpr int64_t CARRIER_REBIND_MIN_INTERVAL_MS = 3000; // 3 秒
+
+    // 发送失败"静默重建"的最小间隔（毫秒）。
+    // 与请求哨兵重建的 WATCHDOG_REBUILD_MIN_INTERVAL_MS（15 秒）相互独立：
+    // 静默重建要足够快（承载切换后立刻自愈），又不能无限频发，故另设较短间隔；
+    // 二者独立可使"静默重建 → 持续失败 → 升级上报"不被对方的防抖挡住。
+    constexpr int64_t QUIET_REBUILD_MIN_INTERVAL_MS = 3000; // 3 秒
+
+    // 承载切换会话内的看门狗接收超时（毫秒）。
+    // 网络切换后若"重建 Socket + 强制重握手"仍未恢复，说明问题不只是本地 fd：
+    // 此时不应再等 90 秒才进入探针阶段，改用短阈值把兜底路径压缩到 15s+15s。
+    // 首个有效接收到达后自动恢复为 WATCHDOG_RECV_TIMEOUT_MS（仅在切换窗口内加速，
+    // 不影响健康空闲隧道的正常判据）。
+    constexpr int64_t WATCHDOG_SWITCH_RECV_TIMEOUT_MS = 15000; // 15 秒
+
+    // 域名解析超时（毫秒）。
+    // getaddrinfo 本身无超时参数，域名服务器不可达/丢包时会阻塞很久（历史实测 5 分 8 秒），
+    // 由于该调用位于 VEA 主线程（同步 NAPI），会把整个串行重连链一起饿死。
+    // 这里给解析加硬上限，超时即快速失败，把"最长数分钟"压到"最长数秒"。
+    constexpr int32_t DNS_RESOLVE_TIMEOUT_MS = 5000; // 5 秒
+
+    // "peer 未准备好"期间，由 TUN 数据路径触发握手的节流间隔（毫秒）。
+    // 背景（真机实证）：换网导致 peer 迟迟握不上手时，每个出站数据包都会走
+    // consumeTunData 的"未准备好"分支去发握手；而 REKEY_TIMEOUT(5s) 内的重复请求
+    // 必被速率限制拒绝（抛"创建太频繁"），于是变成纯粹的无效调用 + 日志刷屏
+    // （实测 8 秒 320 条），既淹掉真正有用的日志，也空转 CPU。
+    // 数据包本身不丢（仍全部入队），仅把"握手尝试 + 日志"节流到本间隔一次。
+    constexpr int64_t PEER_NOT_READY_THROTTLE_MS = 1000; // 1 秒
 
     /**
      * 消息类型

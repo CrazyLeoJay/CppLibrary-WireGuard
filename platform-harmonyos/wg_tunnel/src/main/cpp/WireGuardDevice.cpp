@@ -62,11 +62,21 @@ bool isMainThread() {
 }
 
 void DevicePeerHelper::close() {
-    std::lock_guard<std::mutex> lock(_deviceMutex);
-    LOG_DEBUG("close begin");
-    if (device) {
-        device->close();
+    // 持有 shared_ptr 拷贝，保证锁外 join 期间对象生命周期
+    std::shared_ptr<WireGuard::Device> deviceToClose = nullptr;
+    {
+        std::lock_guard<std::mutex> lock(_deviceMutex);
+        LOG_DEBUG("close begin");
+        // 标记关闭中：工作线程的 fd/日志回调看到后直接跳过
+        closing_.store(true, std::memory_order_release);
+        deviceToClose = device;
     }
+    // 在锁外关闭设备（内部会 join 读取/心跳/网卡线程）：
+    // 工作线程的重建路径会调用回调并获取 _deviceMutex，若此处持锁 join 会互相等待造成死锁
+    if (deviceToClose) {
+        deviceToClose->close();
+    }
+    std::lock_guard<std::mutex> lock(_deviceMutex);
     // 释放线程安全函数
     if (_currentSocketFdListener) {
         LOG_DEBUG("释放 _currentSocketFdListener");
@@ -83,6 +93,11 @@ void DevicePeerHelper::close() {
 }
 
 void DevicePeerHelper::callbackOnSocketChangeListener(int socketFd) {
+    // 关闭流程中丢弃 fd 回调（上层无需再 protect，且避免与 close 的 join 相互等待）
+    if (closing_.load(std::memory_order_acquire)) {
+        LOG_DEBUG("closing，忽略 socket fd 回调");
+        return;
+    }
     std::lock_guard<std::mutex> lock(_deviceMutex);
     if (isMainThread()) {
         LOG_DEBUG("callbackOnSocketChangeListener main");
@@ -125,6 +140,10 @@ void DevicePeerHelper::callbackOnSocketChangeListener(int socketFd) {
 }
 
 void DevicePeerHelper::callbackOnStreamLogListener(WireGuard::StreamLog::Message &msg) {
+    // 关闭流程中丢弃日志回调，避免与 close 的 join 相互等待
+    if (closing_.load(std::memory_order_acquire)) {
+        return;
+    }
     std::lock_guard<std::mutex> lock(_deviceMutex);
     if (isMainThread()) {
         LOG_DEBUG("callbackOnStreamLogListener main");
@@ -188,6 +207,8 @@ napi_value Init(napi_env env, napi_value exports) {
         {"initVpn", nullptr, InitVpn, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"start", nullptr, Start, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"setStreamLogListener", nullptr, setStreamLogListener, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"updatePeerEndpoint", nullptr, UpdatePeerEndpoint, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"forceRebindSocket", nullptr, ForceRebindSocket, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"close", nullptr, Close, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
 
@@ -505,6 +526,99 @@ napi_value Close(napi_env env, napi_callback_info info) {
     napi_value result;
     napi_get_undefined(env, &result);
     return result;
+}
+
+/**
+ * 更新指定 Peer 的网络端点（DDNS 漂移自愈用）。
+ *
+ * 对应 d.ts: updatePeerEndpoint(index: number, ip: string, port: number): Promise<boolean>
+ * 返回 true 表示端点确实发生变化并已强制重握手；false 表示未生效（调用方走整隧道重启兜底）。
+ */
+napi_value UpdatePeerEndpoint(napi_env env, napi_callback_info info) {
+    napi_value jsThis;
+    size_t argc = 3;
+    napi_value args[3];
+    napi_get_cb_info(env, info, &argc, args, &jsThis, nullptr);
+    LOG_DEBUG("NAPI UpdatePeerEndpoint");
+    try {
+        DevicePeerHelper *deviceHelper = nullptr;
+        auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&deviceHelper));
+        if (state != napi_ok || deviceHelper == nullptr) {
+            throw WireGuard::WGException("对象获取失败");
+        }
+        if (!deviceHelper->device) {
+            throw WireGuard::WGException("Device 尚未构造，请先使用 new WireGuardDevice(config) 创建设备");
+        }
+        if (argc < 3) {
+            throw WireGuard::WGException("updatePeerEndpoint 需要 (index, ip, port) 三个参数，实际 %zu 个", argc);
+        }
+
+        int32_t index = -1;
+        napi_status ns = napi_get_value_int32(env, args[0], &index);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("获取 peerIndex 参数失败");
+        }
+        if (index < 0) {
+            throw WireGuard::WGException("peerIndex 非法：%d", index);
+        }
+        const auto ip = NapiTools::napiGetString(env, args[1], "updatePeerEndpoint ip 参数");
+        uint32_t port = 0;
+        ns = napi_get_value_uint32(env, args[2], &port);
+        if (ns != napi_ok) {
+            throw WireGuard::WGException("获取 port 参数失败");
+        }
+        if (port == 0 || port > 65535) {
+            throw WireGuard::WGException("port 非法：%u", port);
+        }
+
+        const bool updated = deviceHelper->device->updatePeerEndpoint(
+            static_cast<size_t>(index), ip, static_cast<uint16_t>(port)
+        );
+        LOG_INFO(
+            "NAPI updatePeerEndpoint: index=%{public}d ip=%{public}s port=%{public}u updated=%{public}s",
+            index, ip.c_str(), port, updated ? "true" : "false"
+        );
+        return NapiTools::makeNapiBool(env, updated);
+    } catch (const std::exception &e) {
+        std::string error("updatePeerEndpoint 异常: ");
+        error += (e.what());
+        LOG_ERROR("%{public}s", error.data());
+        napi_throw_error(env, TAG.data(), error.data());
+        return NapiTools::makeNapiBool(env, false);
+    }
+}
+
+/**
+ * 网络承载切换（WiFi↔蜂窝）快速通道：立即重建本地 Socket 并强制重新握手。
+ *
+ * 对应 d.ts: forceRebindSocket(): Promise<boolean>
+ * 返回 true 表示已受理重建请求；false 表示未生效（设备未运行/读取线程不可用/防抖）。
+ * 与看门狗重建的关键区别：不发布 SOCKET_REBUILT 哨兵、不重启隧道，
+ * 因此不会驱动上层重新解析域名或升级为整隧道重启（α）。
+ */
+napi_value ForceRebindSocket(napi_env env, napi_callback_info info) {
+    napi_value jsThis;
+    napi_get_cb_info(env, info, nullptr, nullptr, &jsThis, nullptr);
+    LOG_DEBUG("NAPI ForceRebindSocket");
+    try {
+        DevicePeerHelper *deviceHelper = nullptr;
+        auto state = napi_unwrap(env, jsThis, reinterpret_cast<void **>(&deviceHelper));
+        if (state != napi_ok || deviceHelper == nullptr) {
+            throw WireGuard::WGException("对象获取失败");
+        }
+        if (!deviceHelper->device) {
+            throw WireGuard::WGException("Device 尚未构造，请先使用 new WireGuardDevice(config) 创建设备");
+        }
+        const bool accepted = deviceHelper->device->forceRebindSocket();
+        LOG_INFO("NAPI forceRebindSocket: accepted=%{public}s", accepted ? "true" : "false");
+        return NapiTools::makeNapiBool(env, accepted);
+    } catch (const std::exception &e) {
+        std::string error("forceRebindSocket 异常: ");
+        error += (e.what());
+        LOG_ERROR("%{public}s", error.data());
+        napi_throw_error(env, TAG.data(), error.data());
+        return NapiTools::makeNapiBool(env, false);
+    }
 }
 
 
