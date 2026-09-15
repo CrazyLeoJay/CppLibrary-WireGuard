@@ -16,6 +16,8 @@
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../../../../Index';
 import { WGDBConf } from './entity/WGConfigEntity';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { buffer } from '@kit.ArkTS';
 
 const TAG = "WGConfig"
 
@@ -119,6 +121,7 @@ class StatusImpl {
 export class RunArgConfig {
   @Trace pendingConfigId?: number = undefined;
   @Trace pendingDbConf?: WGDBConf = undefined;
+  @Trace runningConfMd5?: string = undefined;
 }
 
 function getRunArgConfig(): RunArgConfig {
@@ -143,6 +146,7 @@ class RunArgImpl {
     const c = this.getConfig();
     c.pendingConfigId = undefined;
     c.pendingDbConf = undefined;
+    c.runningConfMd5 = undefined;
   }
 
   hasConfig(): boolean {
@@ -156,6 +160,14 @@ class RunArgImpl {
 
   getDbConf(): WGDBConf | undefined {
     return this.getConfig().pendingDbConf;
+  }
+
+  setRunningMd5(md5: string): void {
+    this.getConfig().runningConfMd5 = md5;
+  }
+
+  getRunningMd5(): string | undefined {
+    return this.getConfig().runningConfMd5;
   }
 }
 
@@ -175,3 +187,11 @@ class WGConfigImpl {
 const WGConfig = new WGConfigImpl();
 
 export default WGConfig;
+
+export function computeConfMd5(conf: WGDBConf): string {
+  const json = JSON.stringify(conf);
+  const md = cryptoFramework.createMd('MD5');
+  md.updateSync({ data: new Uint8Array(buffer.from(json, 'utf-8').buffer) });
+  const result = md.digestSync();
+  return Array.from(result.data).map(b => b.toString(16).padStart(2, '0')).join('');
+}

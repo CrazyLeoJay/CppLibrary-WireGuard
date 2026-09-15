@@ -50,6 +50,7 @@ export default class ShareConfigViewModel {
   @Trace showMessage: boolean = false;
   @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
   @Trace debugShareInfos: ShareDebugRecordInfo[] = [];
+  @Trace tempFilterMode: number = WGSettingsPrefs.getDefaultFilterMode();
 
   private storage: LocalStorage | undefined = undefined;
   private session: UIExtensionContentSession | undefined = undefined;
@@ -86,7 +87,7 @@ export default class ShareConfigViewModel {
     this.configs = configs;
     this.debugShareInfos = debugInfos;
     if (configs.length === 1) {
-      this.selectedIndex = 0;
+      this.onConfigSelected(0);
     }
     this.developerMode = true;
     this.isLoading = false;
@@ -108,7 +109,7 @@ export default class ShareConfigViewModel {
       this.configs = WireGuard.helper.config.allDBConfig();
       LLog.info(TAG, `Loaded ${this.configs.length} configs`);
       if (this.configs.length === 1) {
-        this.selectedIndex = 0;
+        this.onConfigSelected(0);
       }
     } catch (e) {
       LLog.error(TAG, { error: e, message: 'Failed to load configs' });
@@ -308,7 +309,17 @@ export default class ShareConfigViewModel {
    * 获取默认过滤模式描述文字
    */
   getDefaultFilterModeText(): string {
-    return WGSettingsPrefs.getDefaultFilterMode() === AppFilterMode.INCLUDED ? '白名单' : '黑名单';
+    return this.tempFilterMode === AppFilterMode.INCLUDED ? '白名单' : '黑名单';
+  }
+
+  onConfigSelected(index: number): void {
+    this.selectedIndex = index;
+    if (index >= 0 && index < this.configs.length) {
+      const config = this.configs[index];
+      if (this.getFilterMode(config) === AppFilterMode.NONE) {
+        this.tempFilterMode = WGSettingsPrefs.getDefaultFilterMode();
+      }
+    }
   }
 
   /**
@@ -342,9 +353,7 @@ export default class ShareConfigViewModel {
       };
 
       if (mode === AppFilterMode.NONE) {
-        // NONE → 使用默认过滤模式
-        const defaultMode = WGSettingsPrefs.getDefaultFilterMode();
-        if (defaultMode === AppFilterMode.INCLUDED) {
+        if (this.tempFilterMode === AppFilterMode.INCLUDED) {
           config.conf.inter.includedApplications = [bundleName];
           LLog.info(TAG, `Auto-enabled whitelist mode for config "${config.name}", added "${bundleName}"`);
         } else {

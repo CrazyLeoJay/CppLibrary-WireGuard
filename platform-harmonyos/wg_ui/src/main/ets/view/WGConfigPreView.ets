@@ -81,6 +81,10 @@ export struct WGConfigPreViewNavDest {
     //   main: `WireGuard：${this.vm.configName}`,
     //   sub: this.subTitle,
     // })
+    .onBackPressed(() => {
+      this.vm.nav.pop({});
+      return true;
+    })
     .onReady((data) => {
       if (data.pathStack instanceof NavPathStack) {
         this.vm.nav = data.pathStack
@@ -90,7 +94,6 @@ export struct WGConfigPreViewNavDest {
         const params = data.pathInfo.param as WGConfigPreViewParams;
         this.vm.params = params;
         this.vm.loadData(params);
-        // 打开预览界面时主动查询VPN状态，获取VPN进程实际连接IP
         WireGuard.event.publishVpnStatusQuery();
       } else {
         LLog.warn(TAG, "未得到参数！")
@@ -389,6 +392,7 @@ struct InterfaceCardView {
           top: '24vp',
           right: '40vp',
         })
+        .enabled(this.vm.isSwitchEnable)
         .onChange((isOn) => {
           this.vm.onSwitchChange(this.getUIContext(), isOn)
         })
@@ -490,7 +494,11 @@ struct PeerCardView {
 
       Column({ space: ConfigColumnSpace }) {
         Text(`连接保活时间`).width('100%').TagStyle()
-        Text(`每隔 ${this.data.keepaliveInterval ?? 25} 秒`).width('100%').TagContentStyle()
+        if (this.data.keepaliveInterval) {
+          Text(`每隔 ${this.data.keepaliveInterval ?? 0} 秒`).width('100%').TagContentStyle()
+        } else {
+          Text(`不发送心跳包`).width('100%').TagContentStyle()
+        }
       }
 
       if (this.vm.isVpnOpen) {

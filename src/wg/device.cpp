@@ -75,6 +75,9 @@ namespace WireGuard {
         this->tunFd = tunFd;
         isRunning.store(true, std::memory_order_release);
         isLoopTunRunning.store(true, std::memory_order_release);
+        // 先置读线程运行标记，再创建线程：避免心跳线程的看门狗在线程尚未起步时误判"读线程已停"
+        isSocketRunning.store(true, std::memory_order_release);
+        _socketReadTaskExited.store(false, std::memory_order_release);
         // 启动心跳线程
         _loopSocketHeartbeatTask = std::thread(&Device::loopSocketHeartbeatTask, this);
         // 轮询读取远端 Socket 数据包
@@ -106,8 +109,12 @@ namespace WireGuard {
         LOG_INFO("Tun read task stoped");
 
         // 等待Socket读取线程结束
-        if (_loopSocketTask.joinable()) {
-            _loopSocketTask.join();
+        {
+            // 与看门狗重启读线程互斥，避免并发 join/赋值同一个 std::thread
+            std::lock_guard<std::mutex> lockSocketTask(_socketTaskMutex);
+            if (_loopSocketTask.joinable()) {
+                _loopSocketTask.join();
+            }
         }
         LOG_INFO("socket read task stoped");
 
@@ -122,6 +129,7 @@ namespace WireGuard {
         std::lock_guard<std::mutex> lockIndex(_indexMutex);
         _keypairIndexPeers.clear();
         _receiverIndexPeers.clear();
+        _pendingInitiatorIndexes.clear();
         LOG_INFO("device 索引清除");
         // 清理所有 Peer
         std::lock_guard<std::mutex> guard(_peerMutex);
@@ -181,6 +189,55 @@ namespace WireGuard {
                 }
             }
 
+            // ===== 读线程看门狗 =====
+            // 读线程一旦退出，历史实现没有任何机制恢复 → 隧道变成"只写不读"
+            // （VPN 显示已连接、通知正常，但再也收不到数据）。
+            // 这里发现"设备仍在运行但读线程已停"就（必要时重建 socket）重启读线程。
+            if (isRunning.load(std::memory_order_acquire) && !isSocketRunning.load(std::memory_order_acquire) &&
+                _socketReadTaskExited.load(std::memory_order_acquire)) {
+                if (Clock::now() >= _socketTaskRestartNextAllowed) {
+                    // 与 close() 互斥，避免并发 join/赋值同一个 std::thread
+                    std::lock_guard<std::mutex> lockSocketTask(_socketTaskMutex);
+                    // 持锁后二次确认，避免与 close() 竞争
+                    if (isRunning.load(std::memory_order_acquire) &&
+                        !isSocketRunning.load(std::memory_order_acquire) &&
+                        _socketReadTaskExited.load(std::memory_order_acquire)) {
+                        LOG_WARN("检测到Socket读取任务已停止，准备重启读取任务");
+                        if (!socket.isRunning()) {
+                            try {
+                                const auto fd = socket.resetSocketFd();
+                                LOG_WARN("看门狗重建Socket fd=%{public}d", fd);
+                                socketNewFd(fd);
+                            } catch (const std::exception &e) {
+                                LOG_ERROR("看门狗重建Socket失败：%{public}s", e.what());
+                            }
+                        }
+                        if (_loopSocketTask.joinable()) {
+                            _loopSocketTask.join();
+                        }
+                        if (isRunning.load(std::memory_order_acquire) && socket.isRunning()) {
+                            _socketReadTaskExited.store(false, std::memory_order_release);
+                            isSocketRunning.store(true, std::memory_order_release);
+                            _loopSocketTask = std::thread(&Device::loopReceiveForSocket, this);
+                            const uint32_t restarts =
+                                    _socketReadRestartCount.fetch_add(1, std::memory_order_acq_rel) + 1;
+                            LOG_WARN("Socket读取任务已重启，累计=第%{public}d次", static_cast<int>(restarts));
+                            // 连续多次重启说明故障未消除：拉长退避窗口，避免忙循环
+                            const auto backoff = restarts >= 3
+                                                     ? std::chrono::seconds(30)
+                                                     : std::chrono::seconds(3);
+                            _socketTaskRestartNextAllowed = Clock::now() + backoff;
+                        } else {
+                            _socketTaskRestartNextAllowed = Clock::now() + std::chrono::seconds(3);
+                        }
+                    }
+                }
+            } else if (isSocketRunning.load(std::memory_order_acquire)) {
+                // 读线程存活：清零连续重启计数，恢复正常退避窗口
+                _socketReadRestartCount.store(0, std::memory_order_release);
+                _socketTaskRestartNextAllowed = Clock::now();
+            }
+
             for (const auto &peer: peers) {
                 if (!peer) {
                     continue;
@@ -213,12 +270,34 @@ namespace WireGuard {
                     if (peer->canSendHeartbeatPacket()) {
                         // 发送心跳包需要判断段是否需要发送，如果间隔时间为0，则只需要判断握手即可
                         try {
+                            // 心跳也必须先检查密钥是否可用/过期（与数据路径一致）：
+                            // 否则息屏/doze 唤醒后仍会用过期密钥发心跳，服务器静默丢弃，
+                            // 隧道进入"一直发但收不到"的僵尸状态，只能等真实数据包才触发重握手
+                            // （用户表现为"回到前台要等一会儿才好"）。
+                            peer->needsReKey();
                             encryptPacketAndSendSocket(peer, nullptr, 0); // 发送心跳包
                             peer->updateHeartbeatPacketSendTime();
                             // 成功后计算下一次时间
                             const auto keep = std::chrono::seconds(peer->getKeepaliveInterval());
                             const auto keep_ms = std::chrono::duration_cast<std::chrono::milliseconds>(keep);
                             nextSleepDuration = std::min(nextSleepDuration, keep_ms);
+                        } catch (const WGException &e) {
+                            // 密钥过期/失效：立即重新握手，而不是继续用过期密钥发心跳
+                            LOG_WARN(
+                                "心跳前检查需重新握手：%{public}s，peerIndex=%{public}zu 发起握手", e.what(),
+                                peer->getIndex()
+                            );
+                            try {
+                                sendInitiation(peer);
+                                peer->updateHeartbeatPacketSendTime();
+                                nextSleepDuration = std::chrono::seconds(1);
+                            } catch (const std::exception &e2) {
+                                LOG_WARN(
+                                    "心跳触发握手失败 peerIndex=%{public}zu err=%{public}s，2秒后重试",
+                                    peer->getIndex(), e2.what()
+                                );
+                                nextSleepDuration = std::chrono::seconds(2);
+                            }
                         } catch (const std::exception &e) {
                             // 如果发送发生异常，就设置一个小的等待时间，再次尝试
                             LOG_WARN(
@@ -251,6 +330,8 @@ namespace WireGuard {
         Endpoint endpoint;
         isSocketRunning = true;
         int i = 0;
+        // 连续错误计数：用于异常路径退避，避免异常反复触发时忙循环
+        int consecutiveErrors = 0;
         while (isRunning.load(std::memory_order_acquire) && isSocketRunning.load(std::memory_order_acquire) &&
                socket.isRunning()) {
             try {
@@ -259,21 +340,37 @@ namespace WireGuard {
                 LOG_INFO("socket read for count=%{public}d red end, received=%{public}zd", i, received);
                 if (received < 0) {
                     if (!isRunning.load(std::memory_order_acquire) ||
-                        !isSocketRunning.load(std::memory_order_acquire)) {
+                        !isSocketRunning.load(std::memory_order_acquire) ||
+                        !socket.isRunning()) {
                         break;
                     }
-                    if (received == -2) {
+                    if (received == UDPSocket::READ_STOP) {
+                        // 只有主动 close()（唤醒管道）才走这里
+                        LOG_INFO("socket 读取收到停止信号，读取任务退出");
                         break;
                     }
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                    if (received == UDPSocket::READ_RETRY || errno == EAGAIN || errno == EWOULDBLOCK ||
+                        errno == EINTR) {
+                        // 可重试：被信号打断(EINTR)/暂无数据/未知就绪事件。
+                        // 历史实现在这里直接 break 退出读线程，导致隧道变成"只写不读"
+                        // （VPN 显示已连接、通知正常，但再也收不到任何数据），必须继续重读。
+                        consecutiveErrors++;
                         std::this_thread::sleep_for(std::chrono::milliseconds(1));
                         continue;
                     }
-                    auto fd = socket.resetSocketFd();
-                    LOG_SOCKET("更换Socket fd=%{public}d", fd);
-                    socketNewFd(fd);
+                    // 其它错误：重建 socket 后继续；重建失败也不退出读线程
+                    try {
+                        auto fd = socket.resetSocketFd();
+                        LOG_SOCKET("更换Socket fd=%{public}d", fd);
+                        socketNewFd(fd);
+                        consecutiveErrors = 0;
+                    } catch (const std::exception &e) {
+                        LOG_ERROR("重建Socket失败，1秒后重试：%{public}s", e.what());
+                        std::this_thread::sleep_for(std::chrono::seconds(1));
+                    }
                     continue;
                 }
+                consecutiveErrors = 0;
                 Logs::print_space([&]() {
                     LOG_SOCKET(
                         "数据流:Socket接收目标 %{public}s len: %{public}zd", endpoint.address.toIpStr().c_str(),
@@ -289,13 +386,21 @@ namespace WireGuard {
                     break;
                 }
                 LOG_ERROR("socket 异常中断： %{public}s", e.what());
-                break;
+                // 单个异常不应终止读线程（否则隧道只写不读）：退避后继续
+                consecutiveErrors++;
+                std::this_thread::sleep_for(
+                    consecutiveErrors > 5 ? std::chrono::seconds(5) : std::chrono::milliseconds(500)
+                );
             } catch (const std::exception &e) {
                 LOG_ERROR("socket 异常中断： %{public}s", e.what());
-                break;
+                consecutiveErrors++;
+                std::this_thread::sleep_for(
+                    consecutiveErrors > 5 ? std::chrono::seconds(5) : std::chrono::milliseconds(500)
+                );
             }
         }
         isSocketRunning = false;
+        _socketReadTaskExited.store(true, std::memory_order_release);
         LOG_INFO("Socket读取任务(%{public}d) 读取停止", socket.fd());
     }
 
@@ -571,6 +676,8 @@ namespace WireGuard {
         if (keypair) {
             // keypair 建立索引
             _keypairIndexPeers[ntohl(msg->receiverIndex)] = keypair;
+            // 握手已完成：解除"待响应"保护（此后该索引由"存活密钥对"保护）
+            _pendingInitiatorIndexes.erase(ntohl(msg->receiverIndex));
             // 发送等待的数据包
             sendStagedPackets(currentPeer);
             LOG_INFO("握手成功 并存储密钥 remoteIndex=%{public}s", crypto::bin2Hex(msg->senderIndex).c_str());
@@ -670,12 +777,41 @@ namespace WireGuard {
     void Device::indexMapClear() {
         std::lock_guard<std::mutex> guard(_indexMutex);
 
-        for (auto it = _receiverIndexPeers.begin(); it != _receiverIndexPeers.end();) {
-            if (!it->second->isActive()) {
-                it = _receiverIndexPeers.erase(it);
+        // 1) 过期未收到响应的"本地发起索引"记录：正常往返只有几十毫秒，30 秒足够宽松
+        const auto now = Clock::now();
+        const auto pendingTtl = std::chrono::seconds(30);
+        for (auto it = _pendingInitiatorIndexes.begin(); it != _pendingInitiatorIndexes.end();) {
+            if (now - it->second > pendingTtl) {
+                it = _pendingInitiatorIndexes.erase(it);
             } else {
                 ++it;
             }
+        }
+
+        for (auto it = _receiverIndexPeers.begin(); it != _receiverIndexPeers.end();) {
+            const auto index = it->first;
+            // 2) 正在等待对端握手响应的本地索引：绝不能清理。
+            //    历史实现在这里只看 isActive()（对端 2 分钟内是否有收包），而密钥过期阈值同样是 120 秒：
+            //    轮换密钥的那一刻"对端已 2 分钟没发包"几乎必然同时成立，于是刚 createNewIndex 出来的索引
+            //    会在同一次心跳循环的清理里被立刻删掉，对端的握手响应全部以"未找到远端Peer"被丢弃，
+            //    客户端只能以 REKEY_TIMEOUT 的节奏反复重发握手（实测每 6 秒一次、持续 1 分多钟），
+            //    直到对端主动发包刷新活跃状态才恢复 —— 用户表现为"VPN 连着但一段时间没反应"。
+            if (_pendingInitiatorIndexes.find(index) != _pendingInitiatorIndexes.end()) {
+                ++it;
+                continue;
+            }
+            // 3) 仍绑定着存活会话密钥的索引：接收数据包要靠它反查 Peer，同样必须保留
+            const auto kpIt = _keypairIndexPeers.find(index);
+            if (kpIt != _keypairIndexPeers.end() && !kpIt->second.expired()) {
+                ++it;
+                continue;
+            }
+            // 4) 对端近期有收包 → 保留（原有语义）
+            if (it->second->isActive()) {
+                ++it;
+                continue;
+            }
+            it = _receiverIndexPeers.erase(it);
         }
 
         for (auto it = _keypairIndexPeers.begin(); it != _keypairIndexPeers.end();) {
@@ -698,6 +834,8 @@ namespace WireGuard {
 
         // 配置 peer 索引
         const auto index = createNewIndex(peer);
+        // 登记为"本地发起、等待响应"的索引：心跳循环里的清理任务不能在同一次循环中把它删掉
+        markPendingInitiatorIndex(index);
         const auto msg = peer->createHandshakeInitiation(index, force);
         const auto endpoint = peer->getEndpoint();
 
@@ -836,6 +974,11 @@ namespace WireGuard {
         // if (peer->getIAmInitiator()) {
         sendInitiation(peer);
         // }
+    }
+
+    void Device::markPendingInitiatorIndex(const uint32_t index) {
+        std::lock_guard<std::mutex> guard(_indexMutex);
+        _pendingInitiatorIndexes[index] = Clock::now();
     }
 
     uint32_t Device::createNewIndex(std::shared_ptr<Peer> peer) {

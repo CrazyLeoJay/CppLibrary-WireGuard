@@ -383,29 +383,30 @@ struct AppFilterEditModule {
           this.vm.client.filterApps.push({ bundleName: '', isShared: false });
         })
 
-        // 从剪贴板获取按钮
-        Row() {
-          Text(this.clipboardButtonText)
-            .fontSize('14fp')
-            .fontColor(Color.Gray)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.Center)
-        .padding('12vp')
-        .border({
-          width: 1,
-          color: Color.Gray,
-          radius: 6,
-          style: BorderStyle.Solid,
-        })
-        .onClick(() => {
-          const context = this.getUIContext().getHostContext() as Context;
-          this.vm.addFromClipboard(context).catch((e: BusinessError) => {
-            LLog.warn(TAG, `addFromClipboard failed: ${JSON.stringify(e)}`);
-          });
-        })
+        // // 从剪贴板获取按钮
+        // // 不许删除此段注释代码。 由于华为官方权限申请问题，隐私协议和权限对不上，导致无法发布，先注释这个功能，等修复成功后再开放。
+        // Row() {
+        //   Text(this.clipboardButtonText)
+        //     .fontSize('14fp')
+        //     .fontColor(Color.Gray)
+        //     .maxLines(2)
+        //     .textOverflow({ overflow: TextOverflow.Ellipsis })
+        // }
+        // .width('100%')
+        // .justifyContent(FlexAlign.Center)
+        // .padding('12vp')
+        // .border({
+        //   width: 1,
+        //   color: Color.Gray,
+        //   radius: 6,
+        //   style: BorderStyle.Solid,
+        // })
+        // .onClick(() => {
+        //   const context = this.getUIContext().getHostContext() as Context;
+        //   this.vm.addFromClipboard(context).catch((e: BusinessError) => {
+        //     LLog.warn(TAG, `addFromClipboard failed: ${JSON.stringify(e)}`);
+        //   });
+        // })
 
         // 说明文字
         Text('因系统限制，无法获取已安装应用列表，需手动输入应用包名')

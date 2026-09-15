@@ -65,16 +65,16 @@
         "name": "ohos.permission.KEEP_BACKGROUND_RUNNING",
         "reason": "$string:keep_background_running_description",
       },
-      {
-        "name": "ohos.permission.READ_PASTEBOARD",
-        "reason": "$string:perm_reason_read_pasteboard",
-        "usedScene": {
-          "abilities": [
-            "EntryAbility"
-          ],
-          "when": "inuse"
-        }
-      }
+//      {
+//        "name": "ohos.permission.READ_PASTEBOARD",
+//        "reason": "$string:perm_reason_read_pasteboard",
+//        "usedScene": {
+//          "abilities": [
+//            "EntryAbility"
+//          ],
+//          "when": "inuse"
+//        }
+//      }
     ]
   }
 }

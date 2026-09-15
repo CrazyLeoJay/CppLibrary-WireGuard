@@ -16,7 +16,18 @@
  */
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard, getDnsMode, dnsResolveByMode, formatDnsError, SiteUrlType } from 'wg_tunnel';
+import {
+  LLog,
+  StreamLogMessage,
+  Tools,
+  WGConfPeer,
+  WGDBConf,
+  WireGuard,
+  getDnsMode,
+  dnsResolveByMode,
+  formatDnsError,
+  SiteUrlType
+} from 'wg_tunnel';
 import { JSON } from '@kit.ArkTS';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
@@ -86,7 +97,16 @@ export default class WGConfigPreViewModel {
 
   async updateData() {
     if (this.params) {
-      this.loadData(this.params);
+      await this.loadData(this.params);
+      if (this.data && WireGuard.config.status.isRunning(this.params.id)) {
+        try {
+          await WireGuard.switchVpnConfig(this.params.id, this.data);
+        } catch (e) {
+          LLog.error(TAG, `切换VPN配置失败: ${JSON.stringify(e)}`);
+        }
+      }
+    } else {
+      LLog.info(TAG, "没有获取到当前配置ID")
     }
   }
 
@@ -150,8 +170,10 @@ export default class WGConfigPreViewModel {
 
 
   isSwitchClick: boolean = false;
+  @Trace isSwitchEnable: boolean = true;
 
   onSwitchChange(context: UIContext, isOn: boolean) {
+    this.isSwitchEnable = false
     if (this.isSwitchClick) {
       if (isOn) {
         LLog.info(TAG, "点击开启VPN")
@@ -162,6 +184,7 @@ export default class WGConfigPreViewModel {
       }
     }
     this.isSwitchClick = false
+    this.isSwitchEnable = true
   }
 
   setSwitchClick() {
@@ -169,7 +192,7 @@ export default class WGConfigPreViewModel {
   }
 
   updateStreamParams(log: StreamLogMessage) {
-    if (this.isVpnOpen) {// 如果vpn开启才需要更新，后续应该添加接口的 私钥 比对，判断日志是否为当前日志的日志。可以在注册时就指定。
+    if (this.isVpnOpen) { // 如果vpn开启才需要更新，后续应该添加接口的 私钥 比对，判断日志是否为当前日志的日志。可以在注册时就指定。
       this.logData.updateLogMessage(log);
       LLog.debug(TAG, `stream log: index=${log.peerIndex} receive=${log.sc.receiveTotal} send=${log.sc.sendTotal ?? 0}`)
     }
@@ -225,7 +248,6 @@ export default class WGConfigPreViewModel {
 
 @ObservedV2
 export class WGStreamLogsData {
-
   @Trace logs: StreamLogMessage[] = []
   @Trace lastLogForMap: Map<number, StreamLogMessage> = new Map(); // // 上一条日志，一直表示最新,不过需要根据peer区分
 
