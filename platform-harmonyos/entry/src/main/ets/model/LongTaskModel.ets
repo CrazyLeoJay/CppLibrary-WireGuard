@@ -18,10 +18,31 @@ import { bundleManager, common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
-import { LLog, StreamLogMessage, MessageType } from 'wg_tunnel';
+import { LLog, StreamLogMessage, MessageType, WireGuard } from 'wg_tunnel';
 import { NotificationUpdater } from './NotificationUpdater';
 
 const TAG: string = 'VpnKeepAlive';
+
+/**
+ * 长时任务被系统取消后的自愈退避序列（毫秒）
+ *
+ * 系统可能连续取消（如息屏后长时任务通知被上层清理），无间隔重申请会变成忙循环；
+ * 首次1秒即满足"取消后5秒内恢复"的目标，之后逐步退避，最多重试序列长度次。
+ */
+const SELF_HEAL_BACKOFF_MS: number[] = [1000, 2000, 5000, 10000, 10000];
+
+/**
+ * 延时（自愈退避用）
+ *
+ * @param ms 毫秒
+ */
+function sleep(ms: number): Promise<void> {
+  return new Promise<void>((resolve: () => void) => {
+    setTimeout(() => {
+      resolve();
+    }, ms);
+  });
+}
 
 /**
  * VPN通知内容数据 - 纯数据类，用于构建通知文本
@@ -136,6 +157,8 @@ function formatDuration(startTime: number): string {
 class LongTaskModel {
   private updater: NotificationUpdater;
   private vpnData: VpnNotificationData = new VpnNotificationData();
+  /** 自愈流程进行中标记：系统连续取消时避免并发重申请 */
+  private selfHealing: boolean = false;
 
   constructor() {
     this.updater = new NotificationUpdater(() => {
@@ -259,6 +282,101 @@ class LongTaskModel {
   }
 
   /**
+   * 长时任务被系统取消后的自愈入口
+   *
+   * 触发时机：backgroundTaskManager.on('continuousTaskCancel')（由EntryAbility注册并转发）
+   *
+   * 处理顺序（顺序不可调换）：
+   *   1. 停止通知更新器（取消后不再按旧状态发布通知）
+   *   2. resetState() 清理缓存状态 —— 关键：isRunning() 读的是缓存，
+   *      不清则恒为 true，startLongTask() 会直接 return，永远无法自愈
+   *   3. VPN仍在运行时，按退避序列重新申请长时任务（最多 SELF_HEAL_BACKOFF_MS.length 次）
+   *
+   * @param currentContext UIAbilityContext，用于重新申请长时任务
+   * @param reason 系统给出的取消原因（ContinuousTaskCancelReason）
+   */
+  async onContinuousTaskCancelled(currentContext: common.UIAbilityContext, reason: number): Promise<void> {
+    // 1. 先停更新器
+    this.updater.stop();
+    // 2. 清缓存状态（让 isRunning() 归假，否则重申请会被"已启动"分支挡掉）
+    this.resetState();
+    LLog.warn(TAG, `已清理长时任务状态(reason=${reason})，准备重新申请`);
+
+    // 3. VPN已停止就不必重申请（用户主动断开）
+    if (!WireGuard.isRunning()) {
+      LLog.info(TAG, 'VPN未运行，无需重新申请长时任务');
+      return;
+    }
+    // 4. 连续取消场景：已有自愈流程在跑就不再另起一个
+    if (this.selfHealing) {
+      LLog.info(TAG, '自愈流程进行中，跳过重复启动');
+      return;
+    }
+
+    this.selfHealing = true;
+    try {
+      for (let i = 0; i < SELF_HEAL_BACKOFF_MS.length; i++) {
+        await sleep(SELF_HEAL_BACKOFF_MS[i]);
+        if (!WireGuard.isRunning()) {
+          LLog.info(TAG, `VPN已停止，终止自愈(第${i + 1}次尝试前)`);
+          return;
+        }
+        try {
+          await this.startLongTask(currentContext);
+          LLog.info(TAG, `自愈成功：已重新申请长时任务 taskId=${getLongTaskState().continuousTaskId}`);
+          return;
+        } catch (error) {
+          LLog.error(TAG, `自愈重试${i + 1}失败: ${(error as Error).message}`);
+        }
+      }
+      LLog.error(TAG, `自愈失败：连续${SELF_HEAL_BACKOFF_MS.length}次重新申请长时任务均未成功`);
+    } finally {
+      this.selfHealing = false;
+    }
+  }
+
+  /**
+   * 长时任务真实状态体检（API 20+，需 ohos.permission.KEEP_BACKGROUND_RUNNING）
+   *
+   * isRunning() 读的是 AppStorageV2 缓存，若系统取消了任务而取消回调未送达（或送达较晚），
+   * 缓存会失真。本方法向系统查询本应用真实的长时任务列表并回写缓存；
+   * 查询失败（权限/系统异常）时退化为缓存判断，不抛异常、不影响主流程。
+   *
+   * @param currentContext UIAbilityContext
+   * @returns 系统侧是否仍有本应用的长时任务
+   */
+  async refreshRunningState(currentContext: common.UIAbilityContext): Promise<boolean> {
+    const state = getLongTaskState();
+    try {
+      const tasks: backgroundTaskManager.ContinuousTaskInfo[] =
+        await backgroundTaskManager.getAllContinuousTasks(currentContext);
+      if (tasks.length === 0) {
+        if (state.continuousTaskId != undefined) {
+          LLog.warn(TAG, `体检：系统侧已无长时任务，清理缓存 taskId=${state.continuousTaskId}`);
+        }
+        this.resetState();
+        return false;
+      }
+      const matched: backgroundTaskManager.ContinuousTaskInfo | undefined = tasks.find(
+        (task: backgroundTaskManager.ContinuousTaskInfo) => task.continuousTaskId === state.continuousTaskId);
+      const task: backgroundTaskManager.ContinuousTaskInfo = matched != undefined ? matched : tasks[0];
+      if (state.continuousTaskId != task.continuousTaskId) {
+        LLog.warn(TAG, `体检：回写长时任务状态 taskId=${task.continuousTaskId}, notificationId=${task.notificationId}`);
+      }
+      state.continuousTaskId = task.continuousTaskId;
+      state.notificationId = task.notificationId;
+      if (state.startTime == undefined) {
+        state.startTime = Date.now();
+      }
+      return true;
+    } catch (error) {
+      const err = error as BusinessError;
+      LLog.warn(TAG, `体检失败，退化为缓存状态: code=${err.code}, message=${err.message}`);
+      return this.isRunning();
+    }
+  }
+
+  /**
    * 构建通知内容文本行
    * 基于当前vpnData中的连接IP、流量统计、握手时间生成多行文本
    *
@@ -348,7 +466,10 @@ class LongTaskModel {
       const request: notificationManager.NotificationRequest = {
         id: state.notificationId,
         isOngoing:true,
-        isUnremovable:false,
+        // 标记为不可清除：息屏/被上层清理会直接取消长时任务（reason=1），进而导致VPN后台掉线
+        // TODO(待真机确认): 应用侧用长时任务的 notificationId 覆盖系统通知，是否会把系统通知降级为可清除；
+        //  若确认降级，则改用 backgroundTaskManager.updateBackgroundRunning()，或改用独立通知id（见交接单 §3.3.3）
+        isUnremovable:true,
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_MULTILINE,
           multiLine: {

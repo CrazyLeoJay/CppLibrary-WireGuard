@@ -64,10 +64,14 @@ export default class EntryAbility extends UIAbility {
     // 初始化VPN事件监听（backgroundTaskManager要求UIAbilityContext，因此放在EntryAbility中）
     this.initVpnListeners();
 
-    // 注册长时任务取消回调，打印取消原因
+    // 注册长时任务取消回调：打印取消原因，并触发自愈（清理状态 + 带退避地重新申请）
     try {
       backgroundTaskManager.on('continuousTaskCancel', (info: backgroundTaskManager.ContinuousTaskCancelInfo) => {
         LLog.warn(TAG, `长时任务被取消: taskId=${info.id}, reason=${info.reason}`);
+        // 自愈：先清状态再重申请，否则 isRunning() 恒真会挡掉重新申请（详见 LongTaskModel.onContinuousTaskCancelled）
+        longTaskModel.onContinuousTaskCancelled(this.context, info.reason).catch((e: Error) => {
+          LLog.error(TAG, `长时任务取消后自愈异常: ${e.message}`);
+        });
       });
     } catch (error) {
     }
@@ -115,10 +119,15 @@ export default class EntryAbility extends UIAbility {
   onBackground(): void {
     LLog.info(TAG, 'Ability onBackground');
     // VPN运行中但长时任务被停止，重新吊起
-    if (WireGuard.config.status.getConfig().isOpen() && !longTaskModel.isRunning()) {
-      LLog.warn(TAG, 'VPN运行中但长时任务已停止，重新启动');
-      this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
-    }
+    // 先向系统做一次真实状态体检再判断：漏掉取消回调时纯缓存判断会失真（isRunning() 恒真）
+    longTaskModel.refreshRunningState(this.context).then((running: boolean) => {
+      if (WireGuard.config.status.getConfig().isOpen() && !running) {
+        LLog.warn(TAG, 'VPN运行中但长时任务已停止，重新启动');
+        this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
+      }
+    }).catch((e: Error) => {
+      LLog.warn(TAG, `长时任务体检异常: ${e.message}`);
+    });
   }
 
   /**
