@@ -14,6 +14,31 @@
  * limitations under the License.
  */
 
+/**
+ * ============================================================================
+ * 【已归档 / DEPRECATED —— 请勿使用，请勿在此文件新增功能或修复】
+ * ============================================================================
+ * 本文件是 WGVpnExtAbility **V1**（初版：启动时经 want.parameters 传入配置、
+ * 切换配置需重启整个 Extension）。
+ *
+ * 状态：**死代码（dead code）** —— 已不再被任何入口引用：
+ *   - VpnExtensionAbility 的注册入口 `wg_tunnel/src/main/module.json5` 中，
+ *     对应条目 `"name": "WGVpnExtAbility"` 的 `srcEntry` 已指向
+ *     `./ets/ability/WGVpnExtAbilityV2.ets`（即 V2 实现）；
+ *   - 全工程无任何 `import ... WGVpnExtAbility`（裸 V1 类）的引用。
+ *
+ * 与 V2 的差异：V2 支持 want.parameters 直传（API 22+）+ 轮询降级、
+ * 热切换/更新/重启配置无需重启 Extension、事件驱动串行调度等。
+ *
+ * 归档原因：保留仅为对照历史实现与审计追溯。本文件**未随 V2 同步**最新修复
+ * （例如其 onDestroy 未 `await stopServer`、流日志回调缺 try/catch 等），
+ * 因此**即使被误引用也视为不可靠**。如需恢复使用，须先与 V2 逐项对齐。
+ *
+ * 后续动作：若无对照价值，建议直接删除本文件；删除前请确认
+ * `module.json5` 与全工程 grep 均无引用（当前已确认无引用）。
+ * ============================================================================
+ */
+
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { connection } from '@kit.NetworkKit';
 import { bundleManager, Want } from '@kit.AbilityKit';
@@ -21,7 +46,7 @@ import { LLog } from '../tools/LLog';
 import { WireGuard } from '../model/WGHelper';
 import { WGDeviceConfig, WGDBConf } from '../model/entity/WGConfigEntity';
 import { VpnConnHelper, makeWGConf2VpnStartConfig } from '../model/WGConnect';
-import { StreamDirection } from '../../../../Index';
+import { MessageType, StreamDirection } from '../../../../Index';
 import { WGEventThrowParam } from '../error/WGEventThrow';
 import WGTools from '../model/WGTools';
 import VPNEventStatusParams, { VpnEventTag } from '../model/entity/VPNEventStatusParams';
@@ -91,7 +116,7 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
     try {
       const config = await makeWGConf2VpnStartConfig(wgDbConf);
       this.currentConfig = config;
-      this.hasDomainEndpoint = this.checkHasDomainEndpoint(config);
+      this.hasDomainEndpoint = this.checkHasDomainEndpoint(wgDbConf);
       this.startVpnInternal(id, config);
       if (this.hasDomainEndpoint) {
         this.registerNetConnection();
@@ -102,18 +127,11 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
     }
   }
 
-  /**
-   * 检查配置中是否存在域名类型的端点（非直接IP地址）
-   * @param config VPN设备配置
-   * @returns 是否包含域名端点
-   */
-  private checkHasDomainEndpoint(config: WGDeviceConfig): boolean {
-    for (const peer of config.peers) {
-      if (peer.endpoint) {
-        const ip = peer.endpoint.address.ip;
-        if (!this.isDirectIp(ip)) {
-          return true;
-        }
+  private checkHasDomainEndpoint(dbConf: WGDBConf): boolean {
+    for (const peer of dbConf.conf.peers) {
+      const value = peer.endpoint.ipStrOrDomain;
+      if (!this.isDirectIp(value)) {
+        return true;
       }
     }
     return false;
@@ -139,10 +157,15 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
     LLog.debug(TAG, `开启配置:${JSON.stringify(config)}`);
     this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context), config)
       .setStreamListener((msg) => {
-        const direction = msg.direction == StreamDirection.RECEIVE ? "接收" : "发送"
-        const mtype: string = WGTools.getMessageTypeDesc(msg.messageType);
-        LLog.info(TAG,
-          `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length} `)
+        // 本文件为V1遗留实现（module.json5的srcEntry已指向WGVpnExtAbilityV2），
+        // 此处不再按包打印DATA日志（原写法25~65条/秒会淹没hilog），
+        // 仅保留低频的握手事件；完整实现（3秒汇总打印）见WGVpnExtAbilityV2
+        if (msg.messageType !== MessageType.DATA) {
+          const direction = msg.direction == StreamDirection.RECEIVE ? "接收" : "发送"
+          const mtype: string = WGTools.getMessageTypeDesc(msg.messageType);
+          LLog.info(TAG,
+            `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length} `)
+        }
         WireGuard.event.publishVpnStreamLogs(msg)
       });
 
@@ -265,6 +288,8 @@ export default class WGVpnExtAbility extends VpnExtensionAbility {
   override onDestroy(): void {
     super.onDestroy();
     LLog.info(TAG, "WG VPN onDestroy")
+    // 下发聚合窗口内残留的流日志，避免尾部流量数据滞留丢失（与V2 stopStreamLogStat 对齐）
+    WireGuard.event.flushVpnStreamLogs();
     this.unregisterNetConnection();
     VPNChangeHelper.stopVpn()
     this.vpnConnection?.stopServer()

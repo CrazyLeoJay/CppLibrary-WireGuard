@@ -48,21 +48,22 @@ namespace WireGuard {
      * 这个结构体用于在队列中传递数据包，避免频繁的内存拷贝。
      */
     struct Packet {
-        uint8_t *data; ///< 指向数据包原始数据的指针
+        std::unique_ptr<uint8_t[]> data; ///< 指向数据包原始数据（拥有所有权，析构自动释放）
         size_t len; ///< 数据包长度（字节）
         bool is_ipv4; ///< 协议类型：true表示IPv4，false表示IPv6
 
         /**
          * @brief 构造函数
-         * @param data 数据包原始数据指针
+         * @param data 数据包原始数据指针（所有权转移给 Packet，须由 new uint8_t[] 分配）
          * @param len 数据包长度
          * @param is_ipv4 协议类型标识
-         * 
-         * 注意：此构造函数不复制数据，只存储指针。
-         * 调用者必须确保数据在Packet对象生命周期内有效。
+         *
+         * 死代码缺陷修复：原实现持裸指针且 Packet 无析构，PacketQueue 析构/dequeue
+         * 均不释放数据 → 若启用则必然内存泄漏。改为 unique_ptr 显式拥有所有权，
+         * 队列销毁或出队后由智能指针自动释放。
          */
-        Packet(uint8_t *data, size_t len, bool is_ipv4)
-            : data(data), len(len), is_ipv4(is_ipv4) {
+        Packet(std::unique_ptr<uint8_t[]> data, size_t len, bool is_ipv4)
+            : data(std::move(data)), len(len), is_ipv4(is_ipv4) {
         }
     };
 

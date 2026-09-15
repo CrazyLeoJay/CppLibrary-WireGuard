@@ -50,9 +50,16 @@ export default class ShareConfigViewModel {
   @Trace showMessage: boolean = false;
   @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
   @Trace debugShareInfos: ShareDebugRecordInfo[] = [];
+  @Trace tempFilterMode: number = WGSettingsPrefs.getDefaultFilterMode();
 
   private storage: LocalStorage | undefined = undefined;
   private session: UIExtensionContentSession | undefined = undefined;
+  // L5修复：异步等待数据的轮询定时器句柄，页面销毁时需清理
+  private asyncDataTimer: number | undefined = undefined;
+  // 修复：confirmAdd 的延迟关闭会话、showPromptMessage 的提示自动隐藏同为游离定时器，
+  // 页面在延迟窗口内被 pop 后仍会触发，统一登记为成员以便 release() 清理。
+  private closeSessionTimer: number | undefined = undefined;
+  private messageHideTimer: number | undefined = undefined;
 
   /**
    * 异步初始化（@Entry 页面入口调用，传入 SharedLocalStorage）
@@ -86,7 +93,7 @@ export default class ShareConfigViewModel {
     this.configs = configs;
     this.debugShareInfos = debugInfos;
     if (configs.length === 1) {
-      this.selectedIndex = 0;
+      this.onConfigSelected(0);
     }
     this.developerMode = true;
     this.isLoading = false;
@@ -108,7 +115,7 @@ export default class ShareConfigViewModel {
       this.configs = WireGuard.helper.config.allDBConfig();
       LLog.info(TAG, `Loaded ${this.configs.length} configs`);
       if (this.configs.length === 1) {
-        this.selectedIndex = 0;
+        this.onConfigSelected(0);
       }
     } catch (e) {
       LLog.error(TAG, { error: e, message: 'Failed to load configs' });
@@ -128,10 +135,11 @@ export default class ShareConfigViewModel {
     let debugReady = !this.developerMode; // 非开发者模式不等 debug 数据
     let nameFetched = false;
 
-    const timer = setInterval(() => {
+    this.clearAsyncDataTimer();
+    this.asyncDataTimer = setInterval(() => {
       attempts++;
       if (!this.storage) {
-        clearInterval(timer);
+        this.clearAsyncDataTimer();
         return;
       }
 
@@ -192,7 +200,7 @@ export default class ShareConfigViewModel {
       }
 
       if ((bundleNameReady && debugReady) || attempts >= maxAttempts) {
-        clearInterval(timer);
+        this.clearAsyncDataTimer();
         // 超时后如果还需要抓取名称，尝试一次
         if (!nameFetched && this.bundleName.length > 0 && this.hasAppGalleryUrl &&
           this.appName.length === 0) {
@@ -203,6 +211,34 @@ export default class ShareConfigViewModel {
         }
       }
     }, 100);
+  }
+
+  /**
+   * L5修复：页面销毁时调用，释放轮询定时器。
+   * 原实现定时器句柄为局部变量，页面在 3s 轮询窗口内被 pop 时无法取消，
+   * 定时器仍会跑满 30 次（含网络抓取），属资源泄漏。
+   */
+  release(): void {
+    this.clearAsyncDataTimer();
+    this.clearTransientTimers();
+  }
+
+  private clearAsyncDataTimer(): void {
+    if (this.asyncDataTimer != undefined) {
+      clearInterval(this.asyncDataTimer);
+      this.asyncDataTimer = undefined;
+    }
+  }
+
+  private clearTransientTimers(): void {
+    if (this.closeSessionTimer != undefined) {
+      clearTimeout(this.closeSessionTimer);
+      this.closeSessionTimer = undefined;
+    }
+    if (this.messageHideTimer != undefined) {
+      clearTimeout(this.messageHideTimer);
+      this.messageHideTimer = undefined;
+    }
   }
 
   /**
@@ -308,7 +344,17 @@ export default class ShareConfigViewModel {
    * 获取默认过滤模式描述文字
    */
   getDefaultFilterModeText(): string {
-    return WGSettingsPrefs.getDefaultFilterMode() === AppFilterMode.INCLUDED ? '白名单' : '黑名单';
+    return this.tempFilterMode === AppFilterMode.INCLUDED ? '白名单' : '黑名单';
+  }
+
+  onConfigSelected(index: number): void {
+    this.selectedIndex = index;
+    if (index >= 0 && index < this.configs.length) {
+      const config = this.configs[index];
+      if (this.getFilterMode(config) === AppFilterMode.NONE) {
+        this.tempFilterMode = WGSettingsPrefs.getDefaultFilterMode();
+      }
+    }
   }
 
   /**
@@ -342,9 +388,7 @@ export default class ShareConfigViewModel {
       };
 
       if (mode === AppFilterMode.NONE) {
-        // NONE → 使用默认过滤模式
-        const defaultMode = WGSettingsPrefs.getDefaultFilterMode();
-        if (defaultMode === AppFilterMode.INCLUDED) {
+        if (this.tempFilterMode === AppFilterMode.INCLUDED) {
           config.conf.inter.includedApplications = [bundleName];
           LLog.info(TAG, `Auto-enabled whitelist mode for config "${config.name}", added "${bundleName}"`);
         } else {
@@ -384,7 +428,8 @@ export default class ShareConfigViewModel {
       const displayName = this.appName.length > 0 ? `${this.appName} (${bundleName})` : bundleName;
       this.showPromptMessage(`已将 "${displayName}" 添加到配置 "${config.name}"`);
 
-      setTimeout(() => {
+      this.closeSessionTimer = setTimeout(() => {
+        this.closeSessionTimer = undefined;
         this.closeSession();
       }, 1500);
     } catch (e) {
@@ -420,7 +465,8 @@ export default class ShareConfigViewModel {
   showPromptMessage(msg: string): void {
     this.messageText = msg;
     this.showMessage = true;
-    setTimeout(() => {
+    this.messageHideTimer = setTimeout(() => {
+      this.messageHideTimer = undefined;
       this.showMessage = false;
     }, 3000);
   }

@@ -35,6 +35,8 @@ export enum VpnEventTag {
   ON_CREATE = 'onCreate',
   /** VPN连接建立成功 */
   START_VPN = 'startVpn',
+  /** VEA隧道重连中（网络切换重建失败，长时任务与通知保留，VEA静默重试） */
+  VPN_RECONNECTING = 'vpnReconnecting',
   /** VPN正常停止（VEA进程关闭） */
   STOP_VPN = 'stopVpn',
   /** VPN运行异常 */
@@ -86,4 +88,6 @@ export default interface VPNEventStatusParams {
   status?: StatusConfigDTO,              // VPN运行状态（纯数据DTO，用于跨进程序列化）
   connectedIps?: Record<number, string>, // peerIndex -> 实际连接的IP地址（域名端点DNS解析后的IP）
   vpnThreadRunning?: boolean,            // VPN线程是否正在运行（onCreate时为true，onDestroy/关闭时为false）
+  startTime?: number,                    // VPN连接建立时刻毫秒戳（START_VPN/QUERY_STATUS运行时携带，两端通知共用同一时间戳）
+  keepaliveInterval?: number,            // 当前配置的keepalive秒数（0=用户取消；START_VPN携带，F18功能死阈值自适应联动的依据）
 }

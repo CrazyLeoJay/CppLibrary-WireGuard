@@ -90,6 +90,13 @@ namespace WireGuard {
          * 接收端
          */
         class NOISEReceive final : public NOISE {
+        private:
+            // M2修复：重放防护——记录该 peer 已接受的最大 TAI64N 时间戳，
+            // 后续收到的握手时间戳必须严格大于它，否则判为重放。
+            // 不随 init() 复位：保持单调性，避免重新初始化后被重放旧报文绕过。
+            mutable Timestamp lastHandshakeTimestamp{};
+            mutable bool hasHandshakeTimestamp{false};
+
         public:
             void init(const PrivateKey &local_private) const;
             /**

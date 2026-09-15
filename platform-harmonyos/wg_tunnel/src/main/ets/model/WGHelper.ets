@@ -25,11 +25,12 @@ import { LLog } from '../tools/LLog';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { KeyPair, WGConf } from './entity/napi_entity';
 import ParamsRegex from './ParamsRegex';
-import WGConfig from './WGConfig';
+import WGConfig, { computeConfMd5 } from './WGConfig';
 import WGEvent from './WGEvent';
 import WGTools from './WGTools';
 import { VpnConfigAction, VpnConfigRequestParams } from './entity/VpnConfigAction';
 import { VpnConnHelper } from './WGConnect';
+import { clearSelfHealRecord, clearUserStopSuppression } from './VpnSelfHealPrefsKey';
 import WGAppException from '../error/WGAppException';
 
 const TAG = "wgHelper"
@@ -52,11 +53,15 @@ class WGHelper {
  * @author leojay`fu
  */
 export namespace WireGuard {
+  /** 应用上下文缓存（init时写入，关闭VPN时同步清除自愈持久化记录使用） */
+  let selfHealContext: Context | undefined = undefined;
+
   /**
    * 初始化
    * @param context
    */
   export function init(context: Context) {
+    selfHealContext = context;
     db.init(context);
   }
 
@@ -159,8 +164,11 @@ export namespace WireGuard {
     const abilityName = 'WGVpnExtAbility';
 
     if (isOne) {
+      // 解除关闭抑制：用户关了又立刻开时，不能让抑制窗口吞掉正常的自愈记录写入
+      clearUserStopSuppression();
       // 1. 缓存配置
       WireGuard.config.runArg.set(id, config);
+      WireGuard.config.runArg.setRunningMd5(computeConfMd5(config));
 
       // 2. 检测VEA是否运行
       const isRunning = await WGTools.isVpnExtensionRunning();
@@ -187,7 +195,10 @@ export namespace WireGuard {
           .catch((e: BusinessError) => {
             switch (e.code) {
               case 15501001:
-                LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
+                // VEA已在启动/运行中（自愈与手动开启并发等竞态）：配置已缓存到runArg，
+                // VEA就绪后会经CONFIG_QUERY轮询或参数直传正常连接，视为成功不抛异常
+                LLog.warn(TAG, { error: e, message: "VEA已在启动中，配置已缓存待连接" })
+                return;
               case 201:
                 LLog.warn(TAG, { error: e, message: "未授权！" })
               default:
@@ -196,11 +207,17 @@ export namespace WireGuard {
             throw new WGAppException({ e: e, message: "VPN启动异常" });
           })
           .then(() => {
-            LLog.info(TAG, "VPN Extension启动成功，等待VEA请求配置")
+            LLog.info(TAG, "start指令流程结束，等待VEA拉起并请求配置")
           })
       }
     } else {
       WireGuard.config.runArg.clear();
+      // 用户主动关闭VPN：本地同步清除自愈持久化记录，不能等VEA的STOP回执广播——
+      // 回执是跨进程异步链路（发STOP→VEA销毁VPN→回发广播→主进程落盘），
+      // 用户关开关后立即杀app会落在此窗口内，残留记录会导致下次冷启动自愈
+      // 误判"VPN本应在运行"而自动重连（实测竞态场景）。
+      // 无条件执行：VEA已不在（进程崩溃等脏记录遗留）时同样需要清除。
+      clearSelfHealRecord(selfHealContext);
       if (await WGTools.isVpnExtensionRunning()) {
         // 先通知VEA停止VPN服务（优雅关闭连接）
         event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
@@ -230,12 +247,19 @@ export namespace WireGuard {
       LLog.warn(TAG, 'VEA未运行，无法切换配置，请先启动VPN');
       throw new WGAppException({ e: new Error("VEA未运行，无法切换配置"), message: "VEA未运行，无法切换配置" });
     }
+    const newMd5 = computeConfMd5(wgDbConf);
+    const currentMd5 = WireGuard.config.runArg.getRunningMd5();
+    if (newMd5 === currentMd5) {
+      LLog.info(TAG, `配置未变化，跳过切换: configId=${configId}, md5=${newMd5}`);
+      return;
+    }
     event.publishVpnConfigRequest({
       action: VpnConfigAction.SWITCH,
       configId: configId,
       wgDbConf: wgDbConf,
     });
-    LLog.info(TAG, `已发送切换配置指令: configId=${configId}`);
+    WireGuard.config.runArg.setRunningMd5(newMd5);
+    LLog.info(TAG, `已发送切换配置指令: configId=${configId}, md5=${newMd5}`);
   }
 
   /**

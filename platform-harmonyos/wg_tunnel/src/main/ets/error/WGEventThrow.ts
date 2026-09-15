@@ -28,7 +28,7 @@
  * - want_no_get_args 表示在启动时，未从Want中获取到启动参数。
  */
 export interface WGEventThrow {
-  type: 'none' | 'normal' | `want_no_get_args`
+  type: 'none' | 'normal' | 'info' | `want_no_get_args`
   message: string,
 }
 

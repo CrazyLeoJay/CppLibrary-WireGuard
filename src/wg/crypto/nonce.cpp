@@ -25,6 +25,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstring>
 #include <netinet/in.h>
 #include <random>
 #include <sys/stat.h>
@@ -216,9 +217,9 @@ namespace WireGuard {
                 LOG_DEBUG("%{public}s", log.c_str());
             });
         });
+        Timestamp timestamp{};
         try {
             // 解密时间戳 并且将时间戳加入 hash
-            Timestamp timestamp{};
             constexpr auto etLen = sizeof(msg.encryptedTimestamp);
             const auto time = crypto::decodeAEAD(temp_key, 0, msg.encryptedTimestamp, etLen, &hash);
             std::memcpy(timestamp.data(), time.data(), TIMESTAMP_LEN);
@@ -226,6 +227,20 @@ namespace WireGuard {
         } catch (const WGException &e) {
             throw WGException("解析时间戳异常：%{public}s", e.what());
         }
+
+        // M2修复：重放防护——按 WireGuard 白皮书 §5.4.3，响应方须校验 TAI64N 时间戳
+        // 严格大于该 peer 上次已接受的值（TAI64N 为大端编码，逐字节字典序即数值比较）。
+        // 说明：此处不引入“基于本地时钟的允许窗口”，因两端设备时钟可能存在偏差，
+        // 误判会直接破坏正常握手；单调性叠加 cookie 挑战与限速已足以抵御重放。
+        if (std::all_of(timestamp.begin(), timestamp.end(), [](uint8_t v) { return v == 0; })) {
+            throw WGException("握手时间戳非法（全零），已拒绝");
+        }
+        if (hasHandshakeTimestamp &&
+            std::memcmp(timestamp.data(), lastHandshakeTimestamp.data(), TIMESTAMP_LEN) <= 0) {
+            throw WGException("握手时间戳未递增，判定为重放，已拒绝");
+        }
+        lastHandshakeTimestamp = timestamp;
+        hasHandshakeTimestamp = true;
         Logs::print_space([&]() {
             crypto::printHashChainKey(hash, chain_key, "add 加密后时间戳 ", [](const std::string &log) {
                 LOG_DEBUG("%{public}s", log.c_str());

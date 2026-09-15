@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 import { commonEventManager } from '@kit.BasicServicesKit';
-import { LLog, StreamLogMessage, WireGuard } from '../../../../Index';
+import { LLog, MessageType, StreamLogMessage, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
 import VPNEventStatusParams, { VpnEventTag } from './entity/VPNEventStatusParams';
 import { VpnConfigRequestParams } from './entity/VpnConfigAction';
@@ -39,6 +39,7 @@ const VPN_STATUS_QUERY = `${packageName}.VPN_STATUS_QUERY` // VPN状态查询
 const VPN_STREAM_LOGS = `${packageName}.VPN_STREAM_LOGS` // VPN Stream 流日志
 const VPN_CONFIG_QUERY = `${packageName}.VPN_CONFIG_QUERY` // VEA请求配置（V2模式）
 const VPN_CONFIG_REQUEST = `${packageName}.VPN_CONFIG_REQUEST` // 主进程下发配置指令（V2模式）
+const VPN_NOTIFICATION_ID = `${packageName}.VPN_NOTIFICATION_ID` // 主进程下发长时任务托管通知id（VEA接管通知发布用）
 
 export interface SubEventCancel {
   cancel(): void
@@ -62,7 +63,9 @@ export class SubEvent implements SubEventCancel {
         error?.(err)
         return;
       }
-      LLog.info(TAG, `Succeeded in creating subscriber. tag: ${this.tag}`);
+      // 注意：官方示例把"Succeeded in creating subscriber"写在事件回调里，实际该回调
+      // 每收到一次事件就触发一次，流日志场景下会按包刷屏（实测8秒4416条）。
+      // 注册日志统一由调用方（下方WGSystemEventDef.subscribe）在注册时打一次，此处不再打印。
 
       try {
         invoke(data)
@@ -83,7 +86,25 @@ export class SubEvent implements SubEventCancel {
 /**
  * 跨进程系统通知
  */
+/**
+ * 流日志广播聚合窗口（毫秒）
+ *
+ * 原实现每收到一个数据包就发布一次公共事件，实测25~65次/秒，已触发系统限流
+ * （code 1500003 "sending frequency too high"），且日志量与CPU开销显著。
+ * DATA类消息按本窗口合并为一条批量广播下发；握手类消息承载"最后握手时间"
+ * 等关键状态且发生频率低，不参与聚合、立即下发。
+ */
+const STREAM_LOG_AGGREGATE_WINDOW_MS = 3000;
+
 export class WGSystemEventDef {
+  /** 窗口内待下发的流日志，key = `${peerIndex}_${direction}`，同键只保留最新一条 */
+  private pendingStreamLogs: Map<string, StreamLogMessage> = new Map();
+  /** 聚合窗口定时器句柄（undefined = 未启动）
+   * 不用数值 -1 判定"未启动"：setTimeout 返回值理论上可为 0，`< 0` 判断会把"已启动"
+   * 误判为"未启动"并重复覆盖句柄，旧句柄失控后窗口再也不会 flush——广播停摆会让
+   * 主进程的VEA数据心跳停更，90秒后被自愈误判为"功能死"而误杀健康VEA。 */
+  private streamLogFlushTimer: number | undefined = undefined;
+
   private publish(tag: string, data?: string) {
     try {
       const callback = (err: BusinessError, data: void) => {
@@ -214,15 +235,96 @@ export class WGSystemEventDef {
     })
   }
 
+  /**
+   * 发布VPN流日志（跨进程广播）
+   *
+   * DATA类消息进入聚合窗口；握手类与故障类（success=false / INVALID）立即下发
+   * （理由见 STREAM_LOG_AGGREGATE_WINDOW_MS 注释）。
+   * 聚合只保留每个"peer+方向"的最新一条：sc.receiveTotal/sendTotal 是累计值，
+   * 丢弃窗口内的中间态不会丢流量统计，只影响中间过程的瞬时长度显示。
+   */
   publishVpnStreamLogs(msg: StreamLogMessage) {
-    this.publish(VPN_STREAM_LOGS, JSON.stringify(msg))
+    // 故障语义消息必须立即下发，绝不进聚合窗口：
+    //  - success=false：native 侧握手异常/ tunnel 级故障上报（含 tun fd 失效信号）
+    //  - INVALID：无效类型，仅用于错误上报
+    // 这类消息频率极低（分钟级），但一旦滞留在待发队列里（定时器异常/进程被冻结），
+    // 上层就再也收不到故障信号——而它正是自愈重连的唯一触发源。
+    if (msg.success === false || msg.messageType === MessageType.INVALID ||
+      msg.messageType === MessageType.HANDSHAKE_INITIATION ||
+      msg.messageType === MessageType.HANDSHAKE_RESPONSE ||
+      msg.messageType === MessageType.HANDSHAKE_COOKIE) {
+      this.publish(VPN_STREAM_LOGS, JSON.stringify(msg));
+      return;
+    }
+    const key = `${msg.peerIndex}_${msg.direction}`;
+    this.pendingStreamLogs.set(key, msg);
+    if (this.streamLogFlushTimer === undefined) {
+      this.streamLogFlushTimer = setTimeout(() => {
+        this.flushVpnStreamLogs();
+      }, STREAM_LOG_AGGREGATE_WINDOW_MS);
+    }
+  }
+
+  /**
+   * 立即下发窗口内积压的流日志并停止定时器
+   *
+   * VPN停止/VEA销毁时调用，避免尾部流量数据滞留在待发队列中丢失。
+   */
+  flushVpnStreamLogs(): void {
+    if (this.streamLogFlushTimer !== undefined) {
+      clearTimeout(this.streamLogFlushTimer);
+      this.streamLogFlushTimer = undefined;
+    }
+    if (this.pendingStreamLogs.size === 0) {
+      return;
+    }
+    const logs: StreamLogMessage[] = [];
+    this.pendingStreamLogs.forEach((log: StreamLogMessage) => {
+      logs.push(log);
+    });
+    this.pendingStreamLogs.clear();
+    this.publish(VPN_STREAM_LOGS, JSON.stringify(logs));
   }
 
   subscribeVpnStreamLogs(logListener: (msg: StreamLogMessage) => void): SubEventCancel {
     return this.subscribe(VPN_STREAM_LOGS, (data) => {
       if (data.data) {
-        const log = JSON.parse(data.data) as StreamLogMessage
-        logListener(log);
+        // 兼容两种载荷：聚合窗口下发的是数组，握手类实时下发的是单条
+        const parsed = JSON.parse(data.data) as StreamLogMessage | StreamLogMessage[];
+        if (Array.isArray(parsed)) {
+          parsed.forEach((log: StreamLogMessage) => logListener(log));
+        } else {
+          logListener(parsed);
+        }
+      }
+    })
+  }
+
+  /**
+   * 【跨进程】主进程下发长时任务托管通知id
+   *
+   * VEA进程收到后用同一id发布通知内容（与托管通知同id）：
+   * 主进程死亡（长时任务随之回收、托管通知被删）后，
+   * VEA可用同一id以普通常驻通知形态重建并持续刷新，用户无感知。
+   *
+   * @param id 长时任务托管通知id
+   */
+  publishVpnNotificationId(id: number) {
+    this.publish(VPN_NOTIFICATION_ID, String(id))
+  }
+
+  /**
+   * 【跨进程】VEA订阅主进程下发的通知id
+   *
+   * @param invoke 收到通知id的回调
+   */
+  subscribeVpnNotificationId(invoke: (id: number) => void): SubEventCancel {
+    return this.subscribe(VPN_NOTIFICATION_ID, (data) => {
+      if (data.data) {
+        const id = Number(data.data);
+        if (!isNaN(id)) {
+          invoke(id);
+        }
       }
     })
   }

@@ -17,6 +17,7 @@
 import { ORM } from '@ibestservices/ibest-orm';
 import { JSON } from '@kit.ArkTS';
 import { WGDBConf } from '../entity/WGConfigEntity';
+import { LLog } from '../../tools/LLog';
 import WgConfigTable from './table/WgConfigTable';
 
 const TAG = "db"
@@ -45,15 +46,25 @@ export default class WGDao {
   }
 
   allDBConfig(): WGDBConf[] {
-    return this.orm.query(WgConfigTable)
+    // M4修复：单条配置的 config 字段 JSON 损坏（异常断电/旧版本迁移/写入中断）时，
+    // 原实现在 map 内直接 JSON.parse 会抛 SyntaxError 中断整个列表加载，
+    // 导致主页配置列表完全空白。改为逐条 try/catch，坏行跳过并记警告，
+    // 保证其余正常配置仍可正常展示与管理。
+    const rows = this.orm.query(WgConfigTable)
       .orderBy("createdAt", 'desc')
       .find()
       .filter((it) => {
         return it.config && it.config.length > 0
       })
-      .map((it) => {
-        return JSON.parse(it.config) as WGDBConf
-      })
+    const result: WGDBConf[] = []
+    for (const it of rows) {
+      try {
+        result.push(JSON.parse(it.config) as WGDBConf)
+      } catch (e) {
+        LLog.warn(TAG, { error: e, message: `配置记录解析失败，已跳过: id=${it.id}` })
+      }
+    }
+    return result
   }
 
   getConfigForId(id: number): WGDBConf | undefined {
@@ -64,7 +75,13 @@ export default class WGDao {
     if (!result || !result.config || result.config?.length == 0) {
       return undefined;
     }
-    return JSON.parse(result.config) as WGDBConf
+    // M4修复：同上，单条损坏不应把异常抛给调用方
+    try {
+      return JSON.parse(result.config) as WGDBConf
+    } catch (e) {
+      LLog.warn(TAG, { error: e, message: `配置记录解析失败: id=${id}` })
+      return undefined
+    }
   }
 
   insertNewConfig(config: WGDBConf | WGDBConf[]) {

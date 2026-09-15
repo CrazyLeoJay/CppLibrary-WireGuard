@@ -74,16 +74,24 @@ namespace WireGuard {
      * - 使用原子操作确保状态一致性
      */
     void Timer::start() {
-        // 检查是否已经在运行，避免重复启动
-        if (running.load()) {
+        // 死代码缺陷修复：加锁保护 timer_thread_ / running 的状态迁移，
+        // 避免 start 与 stop 跨线程并发时 stop 读到尚未 make_unique 的空指针而跳过 join
+        std::lock_guard<std::mutex> lock(mutex_);
+        // stopping_ 期间禁止启动：旧线程可能尚未 join 完成，若此时拉起新线程，
+        // 旧线程会因 running 复为 true 而继续运行，形成两条定时线程
+        if (running.load() || stopping_) {
             return;
         }
 
         // 标记为运行状态
         running.store(true);
 
+        // 世代号自增：使旧的（含 detach 后尚未退出的）线程在下一轮循环判定失效而退出。
+        // 单靠 running 无法区分"新 start() 置回 true"与"旧线程仍在跑"，会并存两条线程
+        const uint64_t gen = generation_.fetch_add(1, std::memory_order_acq_rel) + 1;
+
         // 创建并启动工作线程
-        timer_thread_ = std::make_unique<std::thread>(&Timer::run, this);
+        timer_thread_ = std::make_unique<std::thread>(&Timer::run, this, gen);
     }
 
     /**
@@ -97,24 +105,36 @@ namespace WireGuard {
      * - 使用join()等待线程安全退出
      */
     void Timer::stop() {
-        // 检查是否已经停止，避免重复操作
-        if (!running.load()) {
-            return;
+        // 死代码缺陷修复：与 start() 共用 mutex_，保证 stop 一定读到已创建的线程句柄
+        // （原实现无锁，stop 可能在 make_unique 完成前读到空指针而跳过 join，
+        //  最终析构 joinable 线程触发 std::terminate）
+        std::unique_ptr<std::thread> toJoin;
+        {
+            std::lock_guard<std::mutex> lock(mutex_);
+            // 检查是否已经停止，避免重复操作
+            if (!running.load()) {
+                return;
+            }
+            // 先置停止/进行中标志，再取走句柄
+            running.store(false);
+            stopping_ = true;
+            toJoin = std::move(timer_thread_);
         }
 
-        // 标记为停止状态
-        running.store(false);
-
-        // 等待工作线程安全退出
-        if (timer_thread_ && timer_thread_
-            ->
-            joinable()
-        ) {
-            timer_thread_->join();
+        // 在锁外 join：若回调内部再调用 stop()/restart()，持锁 join 会造成自死锁
+        if (toJoin && toJoin->joinable()) {
+            if (toJoin->get_id() == std::this_thread::get_id()) {
+                // 从定时器线程内部停止自身：join 自己会 std::terminate，改为 detach
+                // （running 已置 false，run() 循环会在当前回调返回后自然退出）
+                toJoin->detach();
+            } else {
+                toJoin->join();
+            }
         }
 
-        // 重置线程指针
-        timer_thread_.reset();
+        // 清除进行中标志，允许后续 start()
+        std::lock_guard<std::mutex> lock(mutex_);
+        stopping_ = false;
     }
 
     /**
@@ -148,13 +168,16 @@ namespace WireGuard {
      * 注意：在睡眠后再次检查running状态，
      * 以确保在stop()被调用时不会执行回调函数。
      */
-    void Timer::run() {
-        while (running.load()) {
+    void Timer::run(uint64_t generation) {
+        // 循环条件同时校验 running 与世代号：
+        // 世代号被新 start() 刷新后，本线程（含 stop() 从回调内自停而 detach 的残留线程）
+        // 立即退出，不会因 running 复为 true 而继续运行形成双线程。
+        while (running.load() && generation_.load(std::memory_order_acquire) == generation) {
             // 睡眠指定的间隔时间
             std::this_thread::sleep_for(interval_);
 
-            // 再次检查运行状态（防止在睡眠期间被停止）
-            if (running.load()) {
+            // 再次检查运行状态与世代号（防止在睡眠期间被停止/被新线程取代）
+            if (running.load() && generation_.load(std::memory_order_acquire) == generation) {
                 // 执行回调函数
                 callback_();
             }

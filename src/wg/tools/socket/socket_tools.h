@@ -26,8 +26,12 @@
 #define WG_MAIN_SOCKET_TOOLS_H
 #define MAX_WAKEUP_PIP_COUNT 2
 #define MAX_EVENTS           2
+// 读等待的有限超时（毫秒）。close() 关闭 epoll fd 不会唤醒正阻塞在该 epoll 上的
+// epoll_wait（Linux 行为），只靠唤醒管道存在交错竞态；超时用于周期性自检退出。
+#define EPOLL_WAIT_TIMEOUT_MS 500
 
 #include <atomic>
+#include <mutex>
 #include <sys/socket.h>
 #include <sys/epoll.h>
 
@@ -48,8 +52,13 @@ namespace WireGuard {
         mutable std::atomic<bool> _initialized{false};
         mutable std::atomic<bool> _isFinish{false};
 
+        // 唤醒管道：pipe() 需要传入 int[2]，无法改成原子类型，
+        // 与读线程（read_epoll/read_select）存在跨线程并发读写，统一由 _wakeupMutex 保护
         int wakeup_pipe_[MAX_WAKEUP_PIP_COUNT]{-1, -1};
-        int epoll_fd_ = -1; // epoll 文件描述符
+        // 保护 wakeup_pipe_ 的并发读写（wakeUpReader 写、close 重置、读线程取快照）
+        mutable std::mutex _wakeupMutex{};
+        // epoll 文件描述符：close()/initEpollFd() 写、读线程 read_epoll() 读，故用原子
+        mutable std::atomic<int> epoll_fd_{-1};
 
         // epoll 事件数组，这里只监听两个 fd，所以大小为 2 足够
         // 实际应用中可根据需要调整
@@ -99,6 +108,13 @@ namespace WireGuard {
         bool isRunning() const;
 
         void close();
+
+        /**
+         * 唤醒阻塞在读等待（epoll/select）中的读取线程。
+         * 用于看门狗请求重建 Socket：读取线程被唤醒后自行完成重建，
+         * 不会关闭 Socket，也不会终止读取循环。
+         */
+        void wakeUpReader() const;
 
     private:
         void bindPortForIpv4(uint32_t port, const std::shared_ptr<IPAddress> &bindHost);

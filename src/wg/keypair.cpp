@@ -183,6 +183,12 @@ namespace WireGuard {
     }
 
     std::vector<uint8_t> WireGuard::KeyPair::decrypt(const MessageData *msg, const size_t len) {
+        // L3修复：public API 防御——len < sizeof(MessageData) 时 len - sizeof(...) 会下溢，
+        // 进而产生超大 cipherLen 触发越界读。唯一调用方 device.cpp 虽有前置检查，
+        // 此处补齐 API 自身的长度校验。
+        if (msg == nullptr || len < sizeof(MessageData)) {
+            throw WGException("MessageData 长度不足：len=%zu", len);
+        }
         size_t cipherLen = len - sizeof(MessageData);
         const uint8_t *data = msg->encryptedData;
         auto nonce = msg->counter;

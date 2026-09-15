@@ -136,8 +136,14 @@ namespace WireGuard {
 #define LOG_ERROR(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::ERROR, fmt, ##__VA_ARGS__)
 #endif
 
+// 与 LOG_DEBUG 保持一致的编译期开关：LOG_SOCKET 是数据面每包级日志，
+// Release(NDEBUG) 下必须一并消失（此前独立于 NDEBUG 恒打，与 LOG_DEBUG 的语义不一致）。
 #ifndef LOG_SOCKET
+#ifdef NDEBUG
+#define LOG_SOCKET(...)
+#else
 #define LOG_SOCKET(fmt, ...) LOG_PRINT(::WireGuard::Logs::LogLevel::DEBUG, fmt, ##__VA_ARGS__)
+#endif
 #endif
 
 

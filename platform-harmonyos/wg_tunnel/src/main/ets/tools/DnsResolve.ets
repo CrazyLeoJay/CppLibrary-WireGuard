@@ -17,7 +17,7 @@
 import native from 'libwg_tunnel.so';
 import { connection } from '@kit.NetworkKit';
 import { DnsResolveMode, WebSitePoint } from '../model/entity/napi_entity';
-import { LLog } from './LLog';
+import { LLog, errToString } from './LLog';
 
 const TAG = "DNS解析"
 
@@ -44,9 +44,16 @@ async function systemDnsResolve(domain: string, wantIpv6: boolean): Promise<stri
 
 /**
  * 按解析偏好解析域名
- * IPv4 使用 C++ native（dnsToIp），IPv6 使用 HarmonyOS connection API
+ * IPv4 走 C++ native（dnsToIpWithType）+ 系统 connection API 双路回退
+ * IPv6 走 HarmonyOS connection API
  * 原因：HarmonyOS C++ 层 getaddrinfo(AF_INET6) 返回 EAI_SYSTEM (System error)，
- * 系统 connection API 能正确解析 IPv6
+ * 系统 connection API 能正确解析 IPv6。
+ *
+ * 双路回退的必要性（真机实证）：承载切换的数百毫秒内，native 的 getaddrinfo 会
+ * 拿到 EAI_AGAIN（"Try again"）——出网路径此刻本来就不可用。而系统
+ * connection.getAddressesByName 走 netd，同一时刻往往当场就能拿到结果。
+ * 原实现只回退到另一族（IPv4 失败→IPv6），两族都不可达时直接失败，
+ * 上层据此判"DNS 不可用"并升级为整隧道重启——这是切换后长时间断网的关键放大器。
  *
  * @param domain 域名
  * @param mode 解析偏好
@@ -68,20 +75,41 @@ export async function dnsResolveByMode(domain: string, mode: DnsResolveMode): Pr
         try {
           result = await systemDnsResolve(domain, true);
         } catch (e) {
-          LLog.warn(TAG, `IPv6解析失败，回退IPv4: domain=${domain}, error=${e}`)
-          result = await native.dnsToIpWithType(domain, 4);
+          LLog.warn(TAG, `IPv6解析失败，回退系统IPv4: domain=${domain}, error=${errToString(e)}`)
+          try {
+            result = await systemDnsResolve(domain, false);
+          } catch (e2) {
+            LLog.warn(TAG, `系统IPv4解析亦失败，回退native IPv4: domain=${domain}, error=${errToString(e2)}`)
+            result = await native.dnsToIpWithType(domain, 4);
+          }
         }
         break;
       case DnsResolveMode.PREFER_IPV4:
       default:
-        result = await native.dnsToIp(domain);
+        try {
+          result = await native.dnsToIpWithType(domain, 4);
+        } catch (e) {
+          LLog.warn(TAG, `IPv4解析失败（native），回退系统IPv4: domain=${domain}, error=${errToString(e)}`)
+          try {
+            // 系统解析走 netd，网络切换瞬间比 native getaddrinfo 更可靠（真机实测当场可成）
+            result = await systemDnsResolve(domain, false);
+          } catch (e2) {
+            // 两路 IPv4 均失败即认定失败，不再回退 IPv6：域名通常只有 A 记录，
+            // 回退 IPv6 必然抛"无IPv6地址"，既白耗一次 2 秒超时，又让上层把
+            // "IPv4 解析失败"误读为"DNS 不可用"（真机实证：该误判是切换后长时间断网的放大器）
+            LLog.warn(TAG, `系统IPv4解析亦失败，放弃本次（IPv4优先，不再回退IPv6）: domain=${domain}, error=${errToString(e2)}`)
+            throw new Error(`IPv4解析失败: ${domain}, native=${errToString(e)}`)
+          }
+        }
         break;
     }
     LLog.info(TAG, `dnsResolveByMode: domain=${domain}, resolved=${result}`)
     return result;
   } catch (e) {
-    const errMsg = e instanceof Error ? e.message : String(e);
-    LLog.error(TAG, `dnsResolveByMode failed: domain=${domain}, mode=${mode}, error=${errMsg}`)
+    const errMsg = errToString(e);
+    // 传对象而非拼字符串：LLog 的 p2s 能展开 error.message/stack，
+    // 拼进模板串反而会把普通对象变成 "[object Object]"（真机实证的丢根因方式）
+    LLog.error(TAG, { error: e, message: `dnsResolveByMode failed: domain=${domain}, mode=${mode}` })
     throw new Error(`dnsResolveByMode failed: domain=${domain}, mode=${mode}, error=${errMsg}`);
   }
 }

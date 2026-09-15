@@ -59,6 +59,16 @@ namespace WireGuard {
 
     #define LOG_ERROR(fmt, ...) OH_LOG_ERROR(LOG_APP, fmt, ##__VA_ARGS__)
 
-    #define LOG_SOCKET(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)
+    // 数据面高频日志（每包 1~3 条，如"数据流:Socket接收目标/写出到Socket/写入网卡数据"）。
+    // **必须**与 LOG_DEBUG 一样受 SHOW_DEBUG_LOGS 约束：此前恒打 OH_LOG_DEBUG、无视开关，
+    // 真机实测（2026-09-12 wg_buf6.txt）本域(A00002) 86,629 行、峰值 507 行/秒、
+    // LMK 前 7 秒 10,878 行，是日志刷屏与后台负载的主要来源。
+    // 刻意用编译期空宏而非运行时级别判断：空宏下参数表达式不求值，
+    // 可省掉 toIpStr() 等每包字符串构造开销。
+    #ifdef SHOW_DEBUG_LOGS
+        #define LOG_SOCKET(fmt, ...) OH_LOG_DEBUG(LOG_APP, fmt, ##__VA_ARGS__)
+    #else
+        #define LOG_SOCKET(fmt, ...)
+    #endif
 
 #endif

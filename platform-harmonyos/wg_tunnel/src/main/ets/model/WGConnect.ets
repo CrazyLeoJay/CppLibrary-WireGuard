@@ -17,7 +17,8 @@
 import native, { WireGuardDevice } from 'libwg_tunnel.so';
 import { WGDBConf, WGDeviceConfig } from './entity/WGConfigEntity';
 import { vpnExtension } from '@kit.NetworkKit';
-import { LLog } from '../tools/LLog';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { LLog, errToString } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
 import { IPAddressArea, PeerConfig, StreamLogMessage } from './entity/napi_entity';
 import { WireGuard } from './WGHelper';
@@ -48,6 +49,56 @@ export class VpnConnHelper {
   }
 
   /**
+   * 更新指定 Peer 的网络端点（β 自愈：DDNS 漂移后重解析结果下发，无需重启隧道）。
+   *
+   * native 侧会更新 Peer 的 Endpoint 并立即强制重握手一次，恢复在毫秒级；
+   * 对比整隧道重启（stopServer + startServer）的秒级中断与保护重建成本。
+   *
+   * @param index Peer 顺序索引（与配置 peers 下标一致）
+   * @param ip 新的 IP 地址
+   * @param port 新的端口
+   * @returns true=端点已变化并已下发；false=未生效，调用方应退化为整隧道重启
+   */
+  async updatePeerEndpoint(index: number, ip: string, port: number): Promise<boolean> {
+    return await this.client.updatePeerEndpoint(index, ip, port);
+  }
+
+  /**
+   * P0-b 快速通道：网络承载切换（WiFi↔蜂窝）时立即重建本地 Socket。
+   *
+   * 与整隧道重启（stopServer + startServer）的对比：只重建本地 fd + 强制重握手，
+   * 不销毁 VEA、不动长时任务与通知，恢复在毫秒~秒级；
+   * 也不发布故障哨兵，不会触发上层 DDNS 重解析或 α 兜底。
+   *
+   * @returns true=已受理重建请求；false=未生效（设备未运行/读取线程不可用/防抖）
+   */
+  async forceRebindSocket(): Promise<boolean> {
+    return await this.client.forceRebindSocket();
+  }
+
+  /**
+   * 对指定 fd 执行 protect，带重试。
+   * protect 失败时发往服务器的数据会进入 TUN 形成环路被丢弃，隧道表现为“有图标但不通”，
+   * 因此失败必须重试，最终失败时返回 false 由调用方决定后续处理。
+   */
+  private async protectSocketFd(fd: number, retries: number = 3): Promise<boolean> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await this.vpnConnection.protect(fd);
+        LLog.info(TAG, `Socket protect 成功 fd=${fd}(第${attempt}次尝试)`)
+        return true;
+      } catch (e) {
+        const err = e as BusinessError;
+        LLog.error(TAG, `Socket protect 失败 fd=${fd}(第${attempt}/${retries}次): code=${err.code}, msg=${err.message}`)
+        if (attempt < retries) {
+          await new Promise<void>((resolve) => setTimeout(resolve, 500 * attempt));
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
    * @throws
    */
   async startServer() {
@@ -59,16 +110,26 @@ export class VpnConnHelper {
     LLog.info(TAG, "client initVpn")
     const socketFd = await this.client.initVpn(async (fd: number) => {
       LLog.info(TAG, `Socket FD更新: ${fd}`)
-      this.vpnConnection.protect(fd).catch((e: BusinessError) => {
-        LLog.error(TAG, e)
-      });
+      // 底层 Socket 重建后会回调此方法，protect 失败会导致路由环路，必须重试
+      const ok = await this.protectSocketFd(fd);
+      if (!ok) {
+        LLog.error(TAG, `Socket protect 最终失败 fd=${fd}，等待底层看门狗下次重建时重试`)
+      }
     });
     if (socketFd < 0) {
+      // 通道建立失败：close幂等清理（未初始化时_isFinish守卫直接返回），
+      // 避免原生fd依赖GC finalize才释放（静默重试60秒一次会累积）
+      await this.client.close();
       throw new WGAppException(`Socket 通道建立异常：${socketFd}`);
     }
     LLog.info(TAG, "socket 创建")
-    // 保护 socket
-    await this.vpnConnection.protect(socketFd);
+    // 保护 socket（带重试，最终失败直接抛出终止启动）
+    const protectedOk = await this.protectSocketFd(socketFd);
+    if (!protectedOk) {
+      // protect失败：释放已建立的socket通道再抛出，避免fd依赖GC释放
+      await this.client.close();
+      throw new WGAppException(`Socket protect 失败 fd=${socketFd}，无法建立VPN通道`);
+    }
     LLog.info(TAG, "socket 保护")
 
     // 生成VPN ID 多VPN服务时使用 配置到vpnConfig 中
@@ -77,10 +138,23 @@ export class VpnConnHelper {
 
     // 启动 VPN
     LLog.info(TAG, "tun create")
-    const tunFd = await this.vpnConnection.create(vpnConfig)
-    // 启动VPN双读取线程（socket和VPN读取）
-    LLog.info(TAG, "client start fd=%d", tunFd)
-    await this.client.start(tunFd);
+    try {
+      const tunFd = await this.vpnConnection.create(vpnConfig)
+      // 启动VPN双读取线程（socket和VPN读取）
+      LLog.info(TAG, "client start fd=%d", tunFd)
+      await this.client.start(tunFd);
+    } catch (e) {
+      // tun创建/启动失败：同样释放socket通道，避免fd依赖GC释放
+      try {
+        await this.client.close();
+      } catch (e2) {
+        LLog.error(TAG, `startServer失败清理close异常: ${e2}`);
+      }
+      // ArkTS严格模式禁止throw任意类型（release编译强校验），包装为Error。
+      // 用 errToString 而非模板串：普通对象走 `${e}` 会得到 "[object Object]"，
+      // 抛到上层后日志里就只剩这个无信息量的串（真机实证），根因彻底丢失。
+      throw e instanceof Error ? e : new Error(errToString(e));
+    }
     LLog.info(TAG, "VPN 启动成功")
   }
 
@@ -105,10 +179,20 @@ export class VpnConnHelper {
  * @returns
  */
 export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
-  const vpnIp = config.vpn.vpnIp!;
-  const vpnAddress = vpnIp.address.ip!;
+  // L6修复：原实现用非空断言 vpnIp!，运行时若 vpnIp 缺失会在 vpnIp.address.isIpv4
+  // 处抛出难以理解的 TypeError。改为显式校验并给出明确错误。
+  const vpnIp = config.vpn.vpnIp;
+  if (vpnIp == undefined || vpnIp.address == undefined) {
+    throw new WGAppException("VPN 配置缺少 tun 地址（vpnIp）");
+  }
+  // 修复：ip 虽在类型上为 string，但来自数据库 JSON 反序列化，运行时可能缺失/为空串。
+  // 原实现用非空断言 ! 掩盖了这一点，若缺省会得到晦涩的底层 TypeError。
+  const vpnAddress = vpnIp.address.ip;
+  if (!vpnAddress || vpnAddress.length == 0) {
+    throw new WGAppException("VPN 配置缺少 tun 地址 ip");
+  }
   const vpnAddressFamily = vpnIp.address.isIpv4 ? 1 : 2;
-  const vpnAddressPrefixLen = vpnIp?.cidr ?? (vpnIp.address.isIpv4 ? 32 : 128)
+  const vpnAddressPrefixLen = vpnIp.cidr ?? (vpnIp.address.isIpv4 ? 32 : 128)
   const dns = config.vpn.dns ?? []
   const mtu = config.vpn.mtu ?? 1400
   if (config.peers.length == 0) {

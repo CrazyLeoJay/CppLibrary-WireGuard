@@ -53,14 +53,16 @@ namespace WireGuard {
             if (!format) {
                 return;
             }
+            // OHOS hilog 格式符（%{public}s / %{private}d 等）不被 vsnprintf 识别，
+            // 会令其返回 -1 而把参数整段丢弃；先归一化为标准格式符再格式化
+            const std::string fmt = normalizeFormat(format);
             va_list args;
             va_start(args, format);
             // 先计算所需缓冲区大小
-            int len = vsnprintf(nullptr, 0, format, args);
+            int len = vsnprintf(nullptr, 0, fmt.c_str(), args);
             va_end(args);
-            if (len <= 0) {
-                //                throw std::runtime_error("Format error");
-                message = format;
+            if (len < 0) {
+                message = fmt;
                 return;
             }
 
@@ -68,21 +70,45 @@ namespace WireGuard {
             std::unique_ptr<char[]> buffer(new char[len + 1]);
 
             va_start(args, format);
-            int result = vsnprintf(buffer.get(), len + 1, format, args);
+            int result = vsnprintf(buffer.get(), len + 1, fmt.c_str(), args);
             va_end(args);
 
-            if (result < 0 || result != len) {
-                message = format;
+            if (result < 0) {
+                message = fmt;
                 return;
             }
 
-            message = buffer.get();
+            message.assign(buffer.get(), static_cast<size_t>(result));
         };
 
         const char *what() const noexcept override { return message.c_str(); }
 
     private:
         std::string message{};
+
+        /**
+         * 将 OHOS 日志格式符归一化为标准 printf 格式符：
+         *   "%{public}s" -> "%s"、" %{private}d" -> "%d"、"%{public}lu" -> "%lu"
+         * 仅保留一个 '%'，丢弃 {public}/{private} 标记，其余（长度修饰符/转换符）原样保留。
+         * 这样 vsnprintf 才能正确替换参数，避免异常信息退化为未替换的格式串。
+         */
+        static std::string normalizeFormat(const char *format) {
+            const std::string src(format);
+            std::string out;
+            out.reserve(src.size());
+            for (size_t i = 0; i < src.size(); ++i) {
+                if (src[i] == '%' && i + 1 < src.size() && src[i + 1] == '{') {
+                    const size_t closeBrace = src.find('}', i + 2);
+                    if (closeBrace != std::string::npos) {
+                        out.push_back('%');
+                        i = closeBrace; // 跳过 "{...}" 标记
+                        continue;
+                    }
+                }
+                out.push_back(src[i]);
+            }
+            return out;
+        }
 
     public:
         WGErrType type{WGErrType::NONE};

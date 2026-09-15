@@ -52,6 +52,8 @@ export * from './src/main/ets/model/ClipboardParser';
 
 export * from './src/main/ets/model/WGSettingsPrefs';
 
+export * from './src/main/ets/model/VpnSelfHealPrefsKey';
+
 export * from './src/main/ets/model/ShareRecordParser';
 
 export { VpnEventTag } from './src/main/ets/model/entity/VPNEventStatusParams';

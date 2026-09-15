@@ -183,7 +183,11 @@ export default class WGMainViewModel {
     }
   }
 
-  lastOpenConfigId: number = +1;
+  // 哨兵值：-1 表示“当前没有已开启的配置”。
+  // H1修复：原实现误写为 +1，而 WgConfigTable 主键自增，首条配置 id 即 1，
+  // 导致冷启动（未收到状态广播）时点击 id=1 的开关被 changeVpnConfig 提前 return，
+  // VPN 无法启动且无任何提示（单配置用户 100% 复现）。
+  lastOpenConfigId: number = -1;
 
   /**
    * 改变Vpn配置，启动或停止
@@ -206,6 +210,12 @@ export default class WGMainViewModel {
       await WireGuard.runWGConfig(item.id, config, isOn)
     } catch (e) {
       item.open = false;
+      // 修复：lastOpenConfigId 是"乐观置位"（拨动即置位、不等 VEA 确认），
+      // 启动失败时必须回滚，否则用户再次拨动同一开关会被开头的
+      // `isOn && this.lastOpenConfigId == item.id` 提前 return，静默无任何响应。
+      if (isOn) {
+        this.lastOpenConfigId = -1
+      }
       WireGuard.event.publishVpnNoOpen()
       // 开启失败展示Toast，关闭失败不展示（用户主动关闭不应提示错误）
       if (isOn) {
