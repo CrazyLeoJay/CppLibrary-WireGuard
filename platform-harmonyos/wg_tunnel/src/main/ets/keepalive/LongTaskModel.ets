@@ -17,7 +17,6 @@ import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { bundleManager, common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { liveViewManager } from '@kit.LiveViewKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
 import { StreamLogMessage, MessageType } from '../model/entity/napi_entity';
@@ -25,8 +24,8 @@ import { NotificationUpdater } from './NotificationUpdater';
 
 const TAG: string = 'VpnKeepAlive';
 
-/** VPN实况窗固定ID（单实例实况窗） */
-const VPN_LIVE_VIEW_ID: number = 20260914;
+/** VPN自定义通知固定ID：同id发布原地更新，保证任何情况下只有一条自定义通知 */
+const VPN_NOTIFY_ID: number = 20260912;
 
 /**
  * 长时任务在系统侧的真实状态（用于区分"内存候选ID存在"与"系统确实在保活"）
@@ -160,10 +159,6 @@ export class LongTaskModel {
   private vpnData: VpnNotificationData = new VpnNotificationData();
   /** 长时任务关联的wantAgent：通知点击跳转App，创建长时任务时构建一次复用 */
   private taskWantAgent?: WantAgent;
-  /** 实况窗是否激活：激活后通知更新走liveViewManager（dataTransfer进度更新的正规通道） */
-  private liveViewActive: boolean = false;
-  /** 实况窗更新序号：单调递增保证更新顺序 */
-  private liveViewSequence: number = 0;
 
   constructor() {
     this.updater = new NotificationUpdater(() => {
@@ -306,6 +301,15 @@ export class LongTaskModel {
    */
   private removeNotification(): void {
     const state = getLongTaskState();
+    // 固定id：本版本自定义通知（发布同id原地更新，取消固定id即可清理）
+    notificationManager.cancel(VPN_NOTIFY_ID).then(() => {
+      LLog.info(TAG, `已移除旧通知: id=${VPN_NOTIFY_ID}`);
+    }).catch((err: BusinessError) => {
+      if (err.code !== 1600004) {
+        LLog.warn(TAG, `移除旧通知失败: id=${VPN_NOTIFY_ID}, code=${err.code}`);
+      }
+    });
+    // 兼容：清理旧版本使用系统动态id发布产生的残留通知
     if (state.notificationId != undefined) {
       const oldId = state.notificationId;
       notificationManager.cancel(oldId).then(() => {
@@ -353,8 +357,6 @@ export class LongTaskModel {
 
       this.publishNotification();
       this.updater.start();
-      // 实况窗创建（异步，失败自动回退普通多行通知，不影响长时任务）
-      this.tryStartLiveView();
     } catch (error) {
       const err = error as BusinessError;
       LLog.error(TAG, `startBackgroundRunning失败. code: ${err.code}, message: ${err.message}`);
@@ -441,139 +443,9 @@ export class LongTaskModel {
    */
   publishNotification(): void {
     const state = getLongTaskState();
-    if (state.notificationId == undefined) {
-      return;
-    }
-    // 实况窗激活时以实况窗结构化更新为主（dataTransfer长时任务进度更新的正规通道，
-    // 防止"10分钟无进度更新被系统取消任务"），普通多行通知仅作为实况窗不可用时的回退
-    if (this.liveViewActive) {
-      this.updateLiveViewInternal();
-      return;
-    }
-    this.publishNotificationLegacy();
-  }
-
-  // ===================== 实况窗（Live View Kit） =====================
-
-  /**
-   * 从当前vpnData构建实况窗视图
-   *
-   * 数据源与普通通知完全一致（buildNotificationLines）：
-   * 标题=配置名+状态，正文=运行时长/各Peer流量与握手时间，胶囊=已运行计时，
-   * 点击跳转=复用长时任务wantAgent。
-   */
-  private buildLiveView(): liveViewManager.LiveView {
-    const state = getLongTaskState();
-    this.liveViewSequence++;
-    const lines: string[] = this.buildNotificationLines();
-    const stopped: boolean = this.vpnData.serviceStopped;
-    const title: string = stopped
-      ? `${this.vpnData.configName ?? 'WireGuard'} - VPN已停止`
-      : (this.vpnData.configName ? `${this.vpnData.configName} - VPN运行中` : 'WireGuard VPN 运行中');
-    const startEpoch: number | undefined =
-      state.startTime != undefined ? Math.floor(state.startTime / 1000) : undefined;
-
-    // 正文行转富文本（实况窗最多展示3行，取前3行）
-    const content: liveViewManager.RichText[] = lines.slice(0, 3).map((t: string): liveViewManager.RichText => {
-      return { text: t };
-    });
-
-    const primary: liveViewManager.PrimaryData = {
-      title: title,
-      content: content,
-      keepTime: 10,
-    };
-    if (this.taskWantAgent != undefined) {
-      primary.clickAction = this.taskWantAgent;
-    }
-
-    const view: liveViewManager.LiveView = {
-      id: VPN_LIVE_VIEW_ID,
-      event: 'vpnSession',
-      sequence: this.liveViewSequence,
-      isMute: true,
-      liveViewData: {
-        primary: primary,
-      },
-    };
-
-    // 计时器（实况窗卡片自动流逝的已运行时长）与胶囊
-    if (startEpoch != undefined) {
-      view.timer = { time: startEpoch, isCountdown: false };
-      const capsule: liveViewManager.TimerCapsule = {
-        type: liveViewManager.CapsuleType.CAPSULE_TYPE_TIMER,
-        status: 0,
-        content: stopped ? '已停止' : '已运行',
-        time: startEpoch,
-        isCountdown: false,
-        isPaused: stopped,
-      };
-      view.liveViewData.capsule = capsule;
-    }
-    return view;
-  }
-
-  /**
-   * 创建实况窗（长时任务启动成功后调用）
-   *
-   * 失败（设备不支持/未获实况窗能力/参数错误）时保持liveViewActive=false，
-   * 通知自动回退普通多行通知，不影响长时任务本身。
-   */
-  private tryStartLiveView(): void {
-    liveViewManager.isLiveViewEnabled().then((enabled: boolean) => {
-      if (!enabled) {
-        LLog.info(TAG, '实况窗能力未开启，使用普通通知');
-        return;
-      }
-      liveViewManager.startLiveView(this.buildLiveView()).then(() => {
-        this.liveViewActive = true;
-        LLog.info(TAG, '实况窗创建成功，通知更新切换为实况窗通道');
-      }).catch((err: BusinessError) => {
-        this.liveViewActive = false;
-        LLog.warn(TAG, `实况窗创建失败(${err.code})，回退普通通知: ${err.message}`);
-      });
-    }).catch((err: BusinessError) => {
-      this.liveViewActive = false;
-      LLog.warn(TAG, `实况窗能力查询失败(${err.code})，使用普通通知: ${err.message}`);
-    });
-  }
-
-  /**
-   * 更新实况窗内容（publishNotification在实况窗激活时的实际执行体）
-   *
-   * 更新失败（实况窗已被系统移除/参数被拒等）→ 关闭激活标记并回退普通通知，
-   * 后续deadline到期会以普通通知继续保活节奏。
-   */
-  private updateLiveViewInternal(): void {
-    liveViewManager.updateLiveView(this.buildLiveView()).then(() => {
-      LLog.debug(TAG, '实况窗已更新');
-    }).catch((err: BusinessError) => {
-      LLog.warn(TAG, `实况窗更新失败(${err.code})，回退普通通知: ${err.message}`);
-      this.liveViewActive = false;
-      this.publishNotificationLegacy();
-    });
-  }
-
-  /**
-   * 结束实况窗（长时任务停止时调用，尽力而为）
-   */
-  private stopLiveViewInternal(): void {
-    if (!this.liveViewActive) {
-      return;
-    }
-    this.liveViewActive = false;
-    liveViewManager.stopLiveView(this.buildLiveView()).then(() => {
-      LLog.info(TAG, '实况窗已结束');
-    }).catch((err: BusinessError) => {
-      LLog.warn(TAG, `实况窗结束失败(${err.code}): ${err.message}`);
-    });
-  }
-
-  /**
-   * 发布普通多行通知（实况窗回退路径的执行体，原publishNotification逻辑）
-   */
-  private publishNotificationLegacy(): void {
-    const state = getLongTaskState();
+    // 仅在长时任务存活时发布（notificationId是每次startBackgroundRunning系统分配的，
+    // 仅作"任务存活"信号；自定义通知本体固定使用 VPN_NOTIFY_ID，
+    // 同id发布原地更新，保证任何情况下只有一条自定义通知）
     if (state.notificationId == undefined) {
       return;
     }
@@ -581,7 +453,7 @@ export class LongTaskModel {
       const lines: string[] = this.buildNotificationLines();
 
       const request: notificationManager.NotificationRequest = {
-        id: state.notificationId,
+        id: VPN_NOTIFY_ID,
         isOngoing: true,
         isUnremovable: false,
         // 点击通知跳转App（与长时任务wantAgent一致，指向宿主UIAbility）
@@ -668,8 +540,6 @@ export class LongTaskModel {
   // 停止长时任务
   stopLongTask(currentContext: common.UIAbilityContext): void {
     const state = getLongTaskState();
-    // 先结束实况窗（无论长时任务是否在运行，尽力而为）
-    this.stopLiveViewInternal();
     if (state.continuousTaskId == undefined) {
       LLog.info(TAG, '后台长时任务未启动');
       return;
