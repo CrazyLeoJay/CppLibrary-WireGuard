@@ -542,6 +542,8 @@ export class LongTaskModel {
     const state = getLongTaskState();
     if (state.continuousTaskId == undefined) {
       LLog.info(TAG, '后台长时任务未启动');
+      // 任务无活动锚点，仅清理自定义通知残留
+      this.removeNotification();
       return;
     }
 
@@ -550,36 +552,43 @@ export class LongTaskModel {
     // 清除VPN通知数据
     this.clearVpnData();
 
-    // 主动取消通知，防止残留多个通知窗口
-    this.removeNotification();
-
+    // 注意顺序：必须先stopBackgroundRunning（系统随stop移除其锚点通知），
+    // 之后再取消通知。若先取消进行中任务的锚点，取消会被系统拒绝/无效，
+    // 失效重启循环中锚点通知会不断累积（实测弹窗十多个）。
     if (state.continuousTaskId != undefined) {
       // 使用新API签名：stopBackgroundRunning(context, continuousTaskId)
       backgroundTaskManager.stopBackgroundRunning(currentContext, state.continuousTaskId).then(() => {
         this.resetState();
+        // 任务已停止：清理自定义通知(固定id)与动态id残留
+        this.removeNotification();
         LLog.info(TAG, 'stopBackgroundRunning成功');
         LLog.info(TAG, "取消后台长时任务：成功")
       }).catch((error: BusinessError) => {
         if (error.code == 9800005) {
           LLog.info(TAG, "取消后台长时任务：后台任务并未运行")
           this.resetState();
+          this.removeNotification();
           return
         }
         LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
+        this.removeNotification();
       });
     } else {
       // 降级：使用旧API（continuousTaskId为空时走此分支）
       backgroundTaskManager.stopBackgroundRunning(currentContext).then(() => {
         this.resetState();
+        this.removeNotification();
         LLog.info(TAG, 'stopBackgroundRunning成功');
         LLog.info(TAG, "取消后台长时任务：成功")
       }).catch((error: BusinessError) => {
         if (error.code == 9800005) {
           LLog.info(TAG, "取消后台长时任务：后台任务并未运行")
           this.resetState();
+          this.removeNotification();
           return
         }
         LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
+        this.removeNotification();
       });
     }
   }
