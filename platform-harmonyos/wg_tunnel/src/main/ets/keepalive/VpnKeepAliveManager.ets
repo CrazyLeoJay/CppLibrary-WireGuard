@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { bundleManager, common } from '@kit.AbilityKit';
+import { common } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { connection, vpnExtension } from '@kit.NetworkKit';
+import { connection } from '@kit.NetworkKit';
 import { LLog } from '../tools/LLog';
 import { WireGuard } from '../model/WGHelper';
 import { VpnConfigAction } from '../model/entity/VpnConfigAction';
@@ -588,22 +588,12 @@ export class VpnKeepAliveManager {
    * 拆除陈旧启动建立的VPN
    *
    * 场景：用户快速开→关后，在途的启动指令（如API22+参数直传启动）晚到并建立了隧道。
-   * 此时用户的关闭流程已执行过（意图已关、保活已停），但当时的stopVpnExtensionAbility
-   * 未能命中尚未启动的VEA，因此这里补发STOP并关闭VEA进程，保证收敛到用户意图。
+   * 此时用户的关闭流程已执行过（意图已关、保活已停），但当时的STOP未能命中尚未
+   * 启动的VEA，因此这里补发STOP——VEA确认任务关闭后自行关闭进程，收敛到用户意图。
    */
-  private async teardownStaleStart(): Promise<void> {
-    try {
-      WireGuard.event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
-      const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-      await vpnExtension.stopVpnExtensionAbility({
-        deviceId: '',
-        bundleName: bundleInfo.name,
-        abilityName: 'WGVpnExtAbility',
-      });
-      LLog.info(TAG, '陈旧启动拆除完成');
-    } catch (e) {
-      LLog.error(TAG, `陈旧启动拆除异常: ${(e as Error).message}`);
-    }
+  private teardownStaleStart(): void {
+    WireGuard.event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
+    LLog.info(TAG, '已下发陈旧启动拆除指令，VEA确认后自行关闭');
   }
 
   /**
@@ -855,10 +845,10 @@ export class VpnKeepAliveManager {
    * 强制重启VEA进程（兜底恢复）
    *
    * 场景：VEA被系统冻结，收不到RECONNECT_REQUEST等CommonEvent，
-   * 热重连无法生效。此时通过系统API先stopVpnExtensionAbility再startVpnExtensionAbility，
+   * 热重连无法生效。此时发STOP（VEA确认后自行关闭进程），等待其退出后
    * 利用runArg缓存的配置从零重建VPN连接。
    *
-   * 依赖状态机：stop → VEA onDestroy广播STOP_VPN → 主进程停长时任务；
+   * 依赖状态机：stop → VEA广播STOP_VPN → 主进程停长时任务；
    * 随后start → VEA onCreate启动 → 广播START_VPN → 主进程重启长时任务+健康守护。
    */
   private async forceRestartVpnService(): Promise<void> {
@@ -873,8 +863,8 @@ export class VpnKeepAliveManager {
     // 状态机据此保留开关意图与保活，避免把"主动恢复"误判为"异常进程关闭"而回滚开关。
     this.isForceRestarting = true;
     try {
-      // 1. 关闭（内部会先STOP等待确认，再stopVpnExtensionAbility）。
-      //    关闭失败（如VEA已死亡、stop无目标）不阻断后续重启，故独立捕获
+      // 1. 关闭：通知式，VEA确认任务关闭后自行关闭进程。
+      //    关闭异常（如指令丢失）不阻断后续重启，故独立捕获
       try {
         await WireGuard.runWGConfig(configId, dbConf, false);
       } catch (stopErr) {

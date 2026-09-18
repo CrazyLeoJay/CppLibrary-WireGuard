@@ -145,8 +145,7 @@ export namespace WireGuard {
    *
    * - isOne=false：关闭VPN
    *   1. 清除缓存
-   *   2. 通知VEA停止VPN服务
-   *   3. 关闭VEA进程
+   *   2. 通知VEA停止VPN服务（VEA确认任务关闭后自行关闭进程，主进程不直接杀）
    *
    * @param id 配置ID
    * @param config 数据库配置
@@ -219,26 +218,13 @@ export namespace WireGuard {
       const isRunning = await WGTools.isVpnExtensionRunning();
 
       if (isRunning) {
-        // VEA运行中 → 分步关闭：先STOP等待确认，再关闭VEA进程
-        LLog.info(TAG, 'VEA运行中，分步关闭VPN');
-
-        // 1. 先发送STOP指令，等待VPN服务停止
+        // 通知服务关闭：VEA确认VPN任务停止后自行关闭进程（服务内确认清理完整后
+        // 调用stopVpnExtensionAbility自终结），主进程不直接杀进程，避免清理被打断
+        LLog.info(TAG, '通知VEA停止，服务确认后自行关闭进程');
         event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
-
-        // 2. 等待VPN_SERVICE_STOPPED事件确认（最多3秒）
-        await waitForVpnServiceStopped(3000);
-        LLog.info(TAG, 'VPN服务已停止（或等待超时），关闭VEA进程');
       } else {
-        // VEA未运行 → 直接关闭VEA进程（此时STOP无意义）
-        LLog.info(TAG, 'VEA未运行，直接调用stopVpnExtensionAbility');
+        LLog.info(TAG, 'VEA未运行，无需通知');
       }
-
-      // 3. 关闭VEA进程
-      await vpnExtension.stopVpnExtensionAbility({
-        deviceId: '',
-        bundleName: packageName,
-        abilityName: abilityName,
-      });
     }
   }
 
@@ -411,8 +397,8 @@ export namespace WireGuard {
 /**
  * 等待VPN_SERVICE_STOPPED事件确认VPN服务已停止
  *
- * 在runWGConfig关闭流程中，发送STOP指令后等待VEA确认VPN服务停止，
- * 最多等待timeout毫秒，超时则返回false。
+ * 【已废弃保留备用】当前关闭流程为"通知式"：主进程发STOP后，VEA确认任务关闭
+ * 并自行关闭进程，主进程无需等待。
  *
  * @param timeout 最大等待时间（毫秒）
  * @returns true=收到VPN_SERVICE_STOPPED确认, false=超时未收到

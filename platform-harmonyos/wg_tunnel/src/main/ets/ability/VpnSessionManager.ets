@@ -51,10 +51,10 @@ export class VpnSessionManager {
   /** VEA上下文：创建VpnConnection用 */
   private context?: vpnExtension.VpnExtensionContext;
   /** 致命错误回调：VEA自关闭进程（如启动失败terminateOnFailure路径） */
-  private onFatalError: () => void;
+  private onSelfTerminate: () => void;
 
-  constructor(onFatalError: () => void) {
-    this.onFatalError = onFatalError;
+  constructor(onSelfTerminate: () => void) {
+    this.onSelfTerminate = onSelfTerminate;
   }
 
   setContext(context: vpnExtension.VpnExtensionContext): void {
@@ -94,9 +94,14 @@ export class VpnSessionManager {
     this.resolveAndStartVpn(configId, wgDbConf);
   }
 
-  /** STOP：停止VPN服务但保留VEA进程 */
+  /**
+   * STOP：停止VPN服务
+   *
+   * 确认VPN任务已关闭（stopServer完成、状态已广播）后自行关闭VEA进程——
+   * 主进程只发STOP指令不直接杀进程，进程退出由服务自己完成，保证清理完整。
+   */
   async stop(): Promise<void> {
-    LLog.info(TAG, '停止VPN服务（保留VEA进程）');
+    LLog.info(TAG, '停止VPN服务');
 
     if (this.vpnConnection != undefined) {
       try {
@@ -119,6 +124,9 @@ export class VpnSessionManager {
     WireGuard.config.status.vpnStop();
 
     VPNChangeHelperV2.serviceStopped();
+
+    // 服务已确认关闭 → 自行关闭VEA进程
+    this.onSelfTerminate();
   }
 
   /** SWITCH：切换到新配置（先准备新配置，成功后才停旧连接） */
@@ -271,7 +279,7 @@ export class VpnSessionManager {
       LLog.error(TAG, `DNS解析或VPN启动失败: ${JSON.stringify(e)}`);
       VPNChangeHelperV2.startVpnThrow(`${e instanceof Error ? e.message : String(e)}`);
       if (terminateOnFailure) {
-        this.onFatalError();
+        this.onSelfTerminate();
       }
       return false;
     }
@@ -309,7 +317,7 @@ export class VpnSessionManager {
         VPNChangeHelperV2.startVpnThrow(err.message);
       }
       if (terminateOnFailure) {
-        this.onFatalError();
+        this.onSelfTerminate();
       }
       return false;
     }
