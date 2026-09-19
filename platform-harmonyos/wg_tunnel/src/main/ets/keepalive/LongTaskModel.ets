@@ -132,18 +132,32 @@ function formatTime(timestamp: number): string {
 
 /**
  * 计算运行时长描述
+ *
+ * 格式规则：最小粒度到秒，最大单位到天——
+ * `X天X时X分X秒`（高位为0的单位省略，如 `5分10秒`、`2天3时5分10秒`）
+ *
  * @param startTime 开始时间戳（毫秒）
- * @returns 可读时长字符串，如 "1时23分"
+ * @returns 可读时长字符串
  */
 function formatDuration(startTime: number): string {
-  const elapsed: number = Date.now() - startTime;
-  const totalMinutes: number = Math.floor(elapsed / (60 * 1000));
-  const hours: number = Math.floor(totalMinutes / 60);
-  const minutes: number = totalMinutes % 60;
-  if (hours > 0) {
-    return `${hours}时${minutes}分`;
+  const elapsed: number = Math.max(0, Date.now() - startTime);
+  const totalSeconds: number = Math.floor(elapsed / 1000);
+  const days: number = Math.floor(totalSeconds / 86400);
+  const hours: number = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes: number = Math.floor((totalSeconds % 3600) / 60);
+  const seconds: number = totalSeconds % 60;
+  let text: string = '';
+  if (days > 0) {
+    text += `${days}天`;
   }
-  return `${minutes}分`;
+  if (hours > 0) {
+    text += `${hours}时`;
+  }
+  if (minutes > 0 || text.length > 0) {
+    text += `${minutes}分`;
+  }
+  text += `${seconds}秒`;
+  return text;
 }
 
 /**
@@ -404,7 +418,7 @@ export class LongTaskModel {
         const ip = this.vpnData.connectedIps[peerIndex];
         const endpoint = this.vpnData.targetEndpoints[peerIndex];
         const label = endpoint ? `→${endpoint}` : '';
-        lines.push(`Peer[${peerIndex}]: ${ip}${label}`);
+        lines.push(`P${peerIndex}: ${ip}${label}`);
       }
     }
 
@@ -422,7 +436,7 @@ export class LongTaskModel {
 
       const endpoint = this.vpnData.targetEndpoints[peerIndex];
       const label = endpoint ? `→${endpoint}` : '';
-      lines.push(`Peer[${peerIndex}]: ↓${rx} ↑${tx} 握手:${handshakeStr}`);
+      lines.push(`P${peerIndex}: ↓${rx} ↑${tx} 握手:${handshakeStr}`);
     }
 
     // 无数据时的占位提示

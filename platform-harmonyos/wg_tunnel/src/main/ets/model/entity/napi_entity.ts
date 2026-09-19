@@ -114,6 +114,19 @@ export enum DnsResolveMode {
 }
 
 /**
+ * DNS解析范围（互斥单选）
+ *
+ * 部分路由器DNS会对自家DDNS域名返回NAT硬回流的内网IP，系统解析器随之拿到
+ * 本地地址；公网DNS则返回广域网地址。此选项决定两种结果的取舍：
+ * - PREFER_WAN：系统结果为私网地址时，向公网DNS直查广域网地址（默认）
+ * - PREFER_LOCAL：保留本地DNS解析结果（适用于本地内网有对应服务的场景）
+ */
+export enum DnsScope {
+  PREFER_WAN = 0,   // 优先广域网地址（默认）
+  PREFER_LOCAL = 1, // 优先本地解析地址
+}
+
+/**
  * 站点：域名或者ip地址 和 端口
  * 域名和ip地址都可
  */
@@ -123,6 +136,7 @@ export interface WebSitePoint {
   type: SiteUrlType;
   forceIpv6?: boolean; // 兼容旧字段（废弃，但保留读取）
   dnsMode?: DnsResolveMode; // 新的互斥解析偏好
+  dnsScope?: DnsScope; // 解析范围：优先广域网/优先本地（缺省=优先广域网）
 }
 
 /**

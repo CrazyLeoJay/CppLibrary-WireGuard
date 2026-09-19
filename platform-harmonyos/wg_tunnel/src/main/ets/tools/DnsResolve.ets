@@ -16,7 +16,7 @@
 
 import native from 'libwg_tunnel.so';
 import { connection } from '@kit.NetworkKit';
-import { DnsResolveMode, WebSitePoint } from '../model/entity/napi_entity';
+import { DnsResolveMode, DnsScope, WebSitePoint } from '../model/entity/napi_entity';
 import { LLog } from './LLog';
 
 const TAG = "DNS解析"
@@ -49,12 +49,16 @@ async function systemDnsResolve(domain: string, wantIpv6: boolean): Promise<stri
  * 系统 connection API 能正确解析 IPv6
  *
  * @param domain 域名
- * @param mode 解析偏好
+ * @param mode 解析偏好（IP版本四选一）
+ * @param scope 解析范围：优先广域网/优先本地（缺省=优先广域网）。
+ *              本地DNS可能对自家DDNS域名返回NAT硬回流内网IP：
+ *              WAN=私网结果时向公网DNS直查广域网地址；LOCAL=保留本地解析结果
  * @returns 解析后的IP字符串
  * @throws 解析失败抛出异常
  */
-export async function dnsResolveByMode(domain: string, mode: DnsResolveMode): Promise<string> {
-  LLog.info(TAG, `dnsResolveByMode: domain=${domain}, mode=${mode}`)
+export async function dnsResolveByMode(domain: string, mode: DnsResolveMode,
+  scope: DnsScope = DnsScope.PREFER_WAN): Promise<string> {
+  LLog.info(TAG, `dnsResolveByMode: domain=${domain}, mode=${mode}, scope=${scope}`)
   try {
     let result: string;
     let isIpv6Result = false;
@@ -85,9 +89,9 @@ export async function dnsResolveByMode(domain: string, mode: DnsResolveMode): Pr
         }
         break;
     }
-    // IPv4结果若为私网地址，走公网DNS直查兜底（详见 resolvePrivateViaPublicDns）
+    // 解析范围处理（详见 applyDnsScope）：WAN=私网结果公网DNS直查；LOCAL=保留本地结果
     if (!isIpv6Result) {
-      result = await resolvePrivateViaPublicDns(domain, result);
+      result = await applyDnsScope(domain, result, scope);
     }
     LLog.info(TAG, `dnsResolveByMode: domain=${domain}, resolved=${result}`)
     return result;
@@ -111,14 +115,18 @@ function isPrivateIpv4(ip: string): boolean {
 }
 
 /**
- * 私网解析结果公网DNS兜底
+ * 解析范围处理
  *
  * 部分路由器DNS会对自家DDNS域名返回NAT硬回流的内网IP（实测华为路由器返回
  * leojay.synology.me → 10.3.3.6），若该内网地址恰无服务端会导致隧道永远无法建立。
- * 策略：系统解析结果为私网IPv4时，向公网DNS（阿里/腾讯）直查公网A记录；
- * 公网DNS失败（纯内网域名场景）则保留系统结果，行为向后兼容。
+ * - PREFER_WAN（默认）：系统解析结果为私网IPv4时，向公网DNS（阿里/腾讯）直查
+ *   公网A记录；公网DNS失败（纯内网域名场景）则保留系统结果，行为向后兼容。
+ * - PREFER_LOCAL：保留本地DNS解析结果（本地内网有对应服务的场景）。
  */
-async function resolvePrivateViaPublicDns(domain: string, ip: string): Promise<string> {
+async function applyDnsScope(domain: string, ip: string, scope: DnsScope): Promise<string> {
+  if (scope === DnsScope.PREFER_LOCAL) {
+    return ip;
+  }
   if (!isPrivateIpv4(ip)) {
     return ip;
   }
@@ -181,6 +189,15 @@ export function getDnsMode(sitePoint: WebSitePoint): DnsResolveMode {
     return sitePoint.dnsMode;
   }
   return sitePoint.forceIpv6 ? DnsResolveMode.FORCE_IPV6 : DnsResolveMode.PREFER_IPV4;
+}
+
+/**
+ * 从 WebSitePoint 读取有效解析范围（缺省=优先广域网）
+ * @param sitePoint 站点点
+ * @returns 解析范围
+ */
+export function getDnsScope(sitePoint: WebSitePoint): DnsScope {
+  return sitePoint.dnsScope ?? DnsScope.PREFER_WAN;
 }
 
 /**

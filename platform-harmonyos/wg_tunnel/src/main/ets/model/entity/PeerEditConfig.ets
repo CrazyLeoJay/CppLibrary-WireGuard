@@ -14,8 +14,8 @@
  * limitations under the License.
  *
  */
-import { LLog, DnsResolveMode, SiteUrlType, WebSitePoint, WireGuard } from '../../../../../Index';
-import { dnsResolveByMode, formatDnsError, getDnsMode } from '../../tools/DnsResolve';
+import { LLog, DnsResolveMode, DnsScope, SiteUrlType, WebSitePoint, WireGuard } from '../../../../../Index';
+import { dnsResolveByMode, formatDnsError, getDnsMode, getDnsScope } from '../../tools/DnsResolve';
 import { AddressType } from '../ParamsRegex';
 import { UIContext } from '@kit.ArkUI';
 
@@ -24,6 +24,11 @@ const TAG = "Peer编辑配置"
 /**
  * @author leojay`fu
  */
+/** 从 AllSettled 解析结果取值：fulfilled 取 value，否则取 fallback */
+function settledValue(r: PromiseSettledResult<string>, fallback: string): string {
+  return r.status === 'fulfilled' ? r.value : fallback;
+}
+
 @ObservedV2
 export default class PeerEditConfig {
   @Trace publicKey?: string; // 对等节点的PublicKey
@@ -36,6 +41,7 @@ export default class PeerEditConfig {
   @Trace addressVerify: boolean = true;
 
   @Trace dnsMode: DnsResolveMode = DnsResolveMode.PREFER_IPV4; // 解析偏好（四选一）
+  @Trace dnsScope: DnsScope = DnsScope.PREFER_WAN; // 解析范围：优先广域网/优先本地
   @Trace dnsTestResult: string = ""; // DNS解析测试结果
 
   // 允许访问的IP规则
@@ -71,6 +77,7 @@ export default class PeerEditConfig {
       LLog.info(TAG, `异常地址类型：${sitePoint.type} value=${sitePoint.ipStrOrDomain}}`)
     }
     this.dnsMode = getDnsMode(sitePoint);
+    this.dnsScope = getDnsScope(sitePoint);
   }
 
   @Monitor("address")
@@ -126,8 +133,15 @@ export default class PeerEditConfig {
       return false;
     }
     try {
-      this.dnsTestResult = await dnsResolveByMode(host, this.dnsMode);
-      return true;
+      // 本地（系统DNS）与广域网（公网DNS）两路并行解析，双双标记展示
+      const settled = await Promise.allSettled([
+        dnsResolveByMode(host, this.dnsMode, DnsScope.PREFER_LOCAL),
+        dnsResolveByMode(host, this.dnsMode, DnsScope.PREFER_WAN),
+      ]);
+      const local: string = settledValue(settled[0], '解析失败');
+      const wan: string = settledValue(settled[1], '解析失败');
+      this.dnsTestResult = `本地: ${local}\n广域网: ${wan}`;
+      return settled[0].status === 'fulfilled' || settled[1].status === 'fulfilled';
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
       this.dnsTestResult = formatDnsError(err);

@@ -21,7 +21,7 @@ import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
 import { IPAddressArea, PeerConfig, StreamLogMessage } from './entity/napi_entity';
 import { WireGuard } from './WGHelper';
-import { dnsResolveByMode, getDnsMode } from '../tools/DnsResolve';
+import { dnsResolveByMode, getDnsMode, getDnsScope } from '../tools/DnsResolve';
 
 const TAG = "WG连接"
 
@@ -245,7 +245,8 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
     } else {
       // DNS解析策略：根据 dnsMode 互斥选项解析
       const mode = getDnsMode(item.endpoint);
-      ip = await dnsResolveByMode(item.endpoint.ipStrOrDomain, mode);
+      const scope = getDnsScope(item.endpoint);
+      ip = await dnsResolveByMode(item.endpoint.ipStrOrDomain, mode, scope);
       ip = ip.trim();
       if (!ip) {
         throw new WGAppException(`域名解析失败: ${item.endpoint.ipStrOrDomain}`);

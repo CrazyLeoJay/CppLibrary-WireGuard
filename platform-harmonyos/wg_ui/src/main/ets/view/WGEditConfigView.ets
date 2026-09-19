@@ -20,7 +20,7 @@ import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
-import { LLog, DnsResolveMode, AppFilterMode, WGSettingsPrefs, AppFilterItem } from 'wg_tunnel';
+import { LLog, DnsResolveMode, DnsScope, AppFilterMode, WGSettingsPrefs, AppFilterItem } from 'wg_tunnel';
 import { pasteboard } from '@kit.BasicServicesKit';
 
 const TAG = "编辑界面";
@@ -505,7 +505,7 @@ struct PeerEditCardView {
       .layoutWeight(0)
       .width("100%")
 
-      // 仅域名时显示解析偏好四选一与解析测试
+      // 仅域名时显示解析偏好四选一、解析范围二选一与解析测试
       if (this.data.isDomain) {
         Column({ space: '8vp' }) {
           Text("DNS解析偏好")
@@ -518,6 +518,18 @@ struct PeerEditCardView {
             this.buildDnsModeTab(DnsResolveMode.PREFER_IPV6, "优先IPv6")
             this.buildDnsModeTab(DnsResolveMode.FORCE_IPV6, "强制IPv6")
             this.buildDnsModeTab(DnsResolveMode.FORCE_IPV4, "强制IPv4")
+          }
+          .width('100%')
+
+          Text("解析范围")
+            .fontSize('14fp')
+            .width('100%')
+            .layoutGravity(LocalizedAlignment.START)
+          // 单行横排两个选项卡：本地DNS可能对自家DDNS域名返回NAT硬回流内网IP，
+          // 优先广域网时私网结果自动改用公网DNS解析的广域网地址
+          Row({ space: '8vp' }) {
+            this.buildDnsScopeTab(DnsScope.PREFER_WAN, "优先广域网")
+            this.buildDnsScopeTab(DnsScope.PREFER_LOCAL, "优先本地")
           }
           .width('100%')
         }
@@ -579,6 +591,28 @@ struct PeerEditCardView {
       .layoutWeight(1)
       .onClick(() => {
         this.data.dnsMode = mode;
+      })
+  }
+
+  @Builder
+  buildDnsScopeTab(scope: DnsScope, desc: string) {
+    Text(desc)
+      .fontSize('12fp')
+      .fontColor(this.data.dnsScope == scope ? Color.White : Color.Gray)
+      .backgroundColor(this.data.dnsScope == scope
+        ? $r('app.color.wg_new_card_item_select_color')
+        : Color.Transparent)
+      .borderRadius('8vp')
+      .padding({
+        top: '6vp',
+        bottom: '6vp',
+        left: '4vp',
+        right: '4vp'
+      })
+      .textAlign(TextAlign.Center)
+      .layoutWeight(1)
+      .onClick(() => {
+        this.data.dnsScope = scope;
       })
   }
 }

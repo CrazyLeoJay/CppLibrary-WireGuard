@@ -24,9 +24,11 @@ import {
   WGDBConf,
   WireGuard,
   getDnsMode,
+  getDnsScope,
   dnsResolveByMode,
   formatDnsError,
-  SiteUrlType
+  SiteUrlType,
+  DnsScope
 } from 'wg_tunnel';
 import { vpnToggleService } from './VpnToggleService';
 import { JSON } from '@kit.ArkTS';
@@ -34,6 +36,11 @@ import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
+
+/** 从 AllSettled 解析结果取值：fulfilled 取 value，否则取 fallback */
+function settledValue(r: PromiseSettledResult<string>, fallback: string): string {
+  return r.status === 'fulfilled' ? r.value : fallback;
+}
 
 @ObservedV2
 export default class WGConfigPreViewModel {
@@ -197,10 +204,16 @@ export default class WGConfigPreViewModel {
     }
     const mode = getDnsMode(peer.endpoint);
     try {
-      const ip = await dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode);
+      // 本地（系统DNS）与广域网（公网DNS）两路并行解析，双双标记展示
+      const settled = await Promise.allSettled([
+        dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode, DnsScope.PREFER_LOCAL),
+        dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode, DnsScope.PREFER_WAN),
+      ]);
+      const local: string = settledValue(settled[0], '解析失败');
+      const wan: string = settledValue(settled[1], '解析失败');
       // @Trace 数组需整体重建才触发 UI 刷新
       const newResult: string[] = this.peerDnsTestResult.slice();
-      newResult[index] = ip;
+      newResult[index] = `本地: ${local}\n广域网: ${wan}`;
       this.peerDnsTestResult = newResult;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
