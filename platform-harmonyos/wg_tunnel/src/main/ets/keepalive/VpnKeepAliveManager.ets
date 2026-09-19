@@ -100,6 +100,10 @@ export class VpnKeepAliveManager {
   private lastReapplyTime: number = 0;
   /** 重新申请保活连续失败次数（申请后长时任务仍未运行则+1，成功归零），用于指数退避 */
   private reapplyFailures: number = 0;
+  /** 线性闸门：保活检查+激活进行中标志（await空窗期间多次触发会排队） */
+  private keepAliveChecking: boolean = false;
+  /** 合并标记：检查进行中到达的新请求，合并为结束后至多一次补跑 */
+  private keepAliveCheckPending: boolean = false;
   /** 开关宽限窗：刚开启后的时间内，VEA中间态关闭广播不视为进程死亡（切换/启动进行中） */
   private readonly SWITCH_GRACE_INTERVAL: number = 8000;
   /** 启动确认看门狗定时器 */
@@ -156,8 +160,9 @@ export class VpnKeepAliveManager {
       LLog.info(TAG, 'onSwitchOn时开关意图已关闭，跳过启动保活');
       return;
     }
-    LLog.info(TAG, '用户开启开关，直接启动长时任务');
-    this.startVpnKeepAlive(VpnEventTag.START_VPN);
+    LLog.info(TAG, '用户开启开关，启动保活检查');
+    // 线性闸门：检查+激活串行化，防止多触发源并发注册多个长时任务
+    this.requestKeepAliveCheck('switchOn');
     // 启动确认看门狗：若指令丢失/VEA卡死导致迟迟无START_VPN确认，则升级恢复
     this.armSwitchAckWatchdog();
   }
@@ -258,7 +263,109 @@ export class VpnKeepAliveManager {
     if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
-    this.startVpnKeepAlive(VpnEventTag.START_VPN, connectedIps);
+    // 线性闸门：检查+激活串行化
+    this.requestKeepAliveCheck('broadcast', connectedIps);
+  }
+
+  // ===================== 保活检查与激活（线性化） =====================
+
+  /**
+   * 保活检查与激活统一入口（线性化）
+   *
+   * 五个触发源（switchOn / 系统取消挂起回调 / 60s定时器 / 退后台 / 广播）全部汇聚于此。
+   * 原生运行循环单线程，但检查与激活含多个await点（probeSystemState、
+   * startBackgroundRunning）：事件循环被卡时，N个排队触发在解锁后各自于
+   * isRunning守卫的await空窗通过校验，一次性调起N个startBackgroundRunning →
+   * 注册N个长时任务（真机实测）。
+   *
+   * 线性化：检查进行中时，后续触发仅置合并标记立即返回；当前轮结束后若
+   * 有合并标记，用最新状态补跑一轮——N个累计触发合并为至多一次真实激活。
+   *
+   * @param source 触发来源（日志定位用）
+   * @param connectedIps 广播携带的连接IP（通知展示用，可选）
+   */
+  private requestKeepAliveCheck(source: string, connectedIps?: Record<number, string>): void {
+    if (this.keepAliveChecking) {
+      this.keepAliveCheckPending = true;
+      return;
+    }
+    this.keepAliveChecking = true;
+    this.linearCheckAndActivate(source, connectedIps).finally(() => {
+      this.keepAliveChecking = false;
+      if (this.keepAliveCheckPending) {
+        this.keepAliveCheckPending = false;
+        this.requestKeepAliveCheck(`${source}/合并补跑`);
+      }
+    });
+  }
+
+  /**
+   * 一轮检查+激活（线性串行内执行）
+   *
+   * - 意图门：开关未开 → 不保活；
+   * - 系统状态RUNNING → 保持健康守护 + 对账多余长时任务（孤儿清理）后返回；
+   * - 非有效 → 按来源语义激活：
+   *     timer = 指数退避重申请（reapplyKeepAlive，防与系统策略对抗空耗电）；
+   *     其他来源 = 重置状态后直接激活（switchOn/broadcast 不重置，直接start）。
+   * 每轮激活后对账，清理历史并发注册产生的孤儿长时任务。
+   */
+  private async linearCheckAndActivate(source: string, connectedIps?: Record<number, string>): Promise<void> {
+    try {
+      const ctx = this.context;
+      if (ctx == undefined) {
+        return;
+      }
+      if (!WireGuard.config.status.getConfig().isSwitchOpen) {
+        return;
+      }
+      const state = await longTaskModel.probeSystemState(ctx);
+      if (state === ContinuousTaskState.RUNNING) {
+        // 已真实激活：保持健康守护，并对账清理孤儿长时任务
+        this.startTunnelHealthCheck();
+        await this.reconcileExtraTasks();
+        return;
+      }
+      LLog.warn(TAG, `保活检查(${source}): 长时任务系统状态=${state}，按来源语义激活`);
+      if (source === 'timer') {
+        // 定时器探测路径：保留指数退避，防止与系统策略对抗空耗电
+        this.reapplyKeepAlive();
+      } else if (source === 'broadcast') {
+        await this.startVpnKeepAlive(VpnEventTag.START_VPN, connectedIps);
+      } else {
+        // switchOn / sysCancel / background：重置状态后直接激活
+        longTaskModel.resetTaskState();
+        await this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
+      }
+      await this.reconcileExtraTasks();
+    } catch (e) {
+      LLog.error(TAG, `保活检查异常(${source}): ${(e as Error).message}`);
+    }
+  }
+
+  /**
+   * 对账多余长时任务：历史并发注册产生的多个startBackgroundRunning会在系统中
+   * 留下孤儿长时任务（状态仅跟踪其中一条id）。此处停止所有非当前跟踪id的任务，
+   * 保证系统中本应用的长时任务恒等于当前跟踪的那一条。
+   */
+  private async reconcileExtraTasks(): Promise<void> {
+    const ctx = this.context;
+    if (ctx == undefined) {
+      return;
+    }
+    try {
+      const tasks: backgroundTaskManager.ContinuousTaskInfo[] =
+        await backgroundTaskManager.getAllContinuousTasks(ctx, true);
+      const trackedId = longTaskModel.getContinuousTaskId();
+      for (const info of tasks) {
+        if (info.continuousTaskId != trackedId) {
+          LLog.warn(TAG, `对账：停止多余长时任务 id=${info.continuousTaskId}（当前跟踪=${trackedId}）`);
+          await backgroundTaskManager.stopBackgroundRunning(ctx, info.continuousTaskId);
+        }
+      }
+    } catch (e) {
+      const err = e as BusinessError;
+      LLog.warn(TAG, `对账多余长时任务失败: code=${err.code}, message=${err.message}`);
+    }
   }
 
   /**
@@ -373,21 +480,14 @@ export class VpnKeepAliveManager {
    * 解决"内存continuousTaskId存在但系统已关闭/挂起"导致的VPN名义保活实则失效问题。
    */
   private async ensureKeepAliveActive(): Promise<void> {
-    const ctx = this.context;
-    if (ctx == undefined) {
+    if (this.context == undefined) {
       return;
     }
     if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
-    const state = await longTaskModel.probeSystemState(ctx);
-    if (state === ContinuousTaskState.RUNNING) {
-      // 已真实激活，确保健康守护在运行
-      this.startTunnelHealthCheck();
-      return;
-    }
-    LLog.warn(TAG, `开关已开但长时任务系统状态=${state}（非有效），重新申请保活`);
-    this.reapplyKeepAlive();
+    // 线性闸门：检查+激活串行化
+    this.requestKeepAliveCheck('background');
   }
 
   /**
@@ -403,7 +503,8 @@ export class VpnKeepAliveManager {
       return;
     }
     LLog.warn(TAG, '长时任务异常（取消/挂起），重新申请保活');
-    this.reapplyKeepAlive();
+    // 线性闸门：检查+激活串行化
+    this.requestKeepAliveCheck('sysCancel');
   }
 
   /**
@@ -420,12 +521,8 @@ export class VpnKeepAliveManager {
     if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
-    const state = await longTaskModel.probeSystemState(ctx);
-    if (state === ContinuousTaskState.RUNNING) {
-      return;
-    }
-    LLog.warn(TAG, `长时任务系统状态异常=${state}，重新申请保活`);
-    this.reapplyKeepAlive();
+    // 线性闸门：检查+激活串行化
+    this.requestKeepAliveCheck('timer');
   }
 
   /**
