@@ -1,30 +1,36 @@
-# ArkTS 行为单元测试（Node 移植仿真）
+# ArkTS 本地单元测试（Hypium LocalUnit）
 
-## single-flight-loop.test.mjs
+## single-flight-loop：SingleFlightLoop 行为测试
 
-`wg_tunnel/src/main/ets/keepalive/SingleFlightLoop.ets`（单飞行信号循环，保活检查与通知发布的共用调度器）的行为测试。
+被测对象为**真实源文件** `wg_tunnel/src/main/ets/keepalive/SingleFlightLoop.ets`
+（保活检查与通知发布的共用调度器，单飞行信号循环）。
 
-**⚠️ 本测试是源文件的 1:1 逻辑移植**（去 ArkTS 类型与 LLog），不是直接 import 源文件——
-ArkTS 依赖链（hilog 等）无法在 Node 中加载。因此约定：
-
-1. **修改 `SingleFlightLoop.ets` 的任何调度逻辑，必须同步更新本测试的移植类**；
-2. 修改后、提交前必须运行本测试并全部通过（pre-commit hook 会强制执行）；
-3. 测试内置"漂移哨兵"：源文件关键结构令牌缺失时直接失败，提示移植已脱节。
+- 测试用例：`wg_tunnel/src/test/SingleFlightLoop.test.ets`（注册于同目录 `List.test.ets`）
+- 依赖处理：`@ohos.hilog`（LLog 的底层）在本地测试环境不可用，经
+  `wg_tunnel/src/mock/mock-config.json5` 在测试构建期替换为 `src/mock/Hilog.mock.ets` 空实现
+- 无需设备/模拟器，本地直接运行（LocalUnit）
 
 ## 运行
 
 ```bash
-node tests/single-flight-loop.test.mjs        # 工作目录：platform-harmonyos/
+sh platform-harmonyos/tests/run-local-unit-test.sh
 ```
 
-要求：Node ≥ 18（使用了 private fields、top-level await）。
+或直接使用 hvigor 命令（工程根 = `platform-harmonyos/`，需 `DEVECO_SDK_HOME`）：
 
-## 覆盖语义（20 断言 / 11 组用例）
+```bash
+hvigorw test -p module=wg_tunnel -p coverage=false
+```
+
+⚠️ hvigor 在用例失败时退出码仍可能为 0，**以结果文件为准**：
+`wg_tunnel/.test/default/intermediates/test/coverage_data/test_result.txt`（`Tests run: ..., Failure: 0` 才算通过）。
+
+## 覆盖语义（11 用例 / 20+ 断言）
 
 | 分组 | 用例 | 语义 |
 |---|---|---|
-| 基线（未干扰） | T1 | 空闲周期触发，计时从每轮结束重新起算 |
-| | T6/T12/T13 | stop 静止 / start 幂等 / stop→start 重启 |
+| 基线（未干扰） | T1 | 空闲周期触发，计时从每轮结束重新起算，来源恒为 idle |
+| | T11/T12/T13 | stop 后迟到信号保底单轮 / start 幂等 / stop→start 重启 |
 | 干扰 | T2 | 信号即时唤醒，source 透传到执行轮 |
 | | T3 | 睡眠期 N 个信号合并为 1 轮 |
 | | T4 | 执行期信号丢弃不补跑，下一轮 = 本轮结束 + maxWait |
@@ -32,13 +38,14 @@ node tests/single-flight-loop.test.mjs        # 工作目录：platform-harmonyo
 | | T14 | 轮时长 > maxWait 不叠加轮次 |
 | | T15 | minGap 推迟睡眠窗口内的信号丢弃，推迟轮照常执行 |
 | 极限 | T10 | 未启动状态信号风暴仍单飞行（bootstrap 互斥回归） |
-| | T11 | stop 后迟到信号恰好一轮保底且不进周期 |
 
-## pre-commit hook
+本地引擎定时器精度低于 Node，T1 断言"轮数 ≥ 2"而非具体轮数；间隔断言（≥ maxWait/minGap 下限）承担"计时随轮重启"的精确校验。
 
-`pre-commit` 检测到暂存区包含 `SingleFlightLoop.ets` 或本测试时，自动运行测试，
-失败则阻止提交。hook 安装在本仓库的 git 公共目录（两个 worktree 共享），
-重新克隆后需重新安装：
+## 强制保障（pre-commit hook）
+
+`pre-commit` 检测到暂存区包含 `SingleFlightLoop.ets`、`wg_tunnel/src/test/` 或本目录变更时，
+自动调用 `run-local-unit-test.sh`，失败则阻止提交。hook 安装在本仓库 git 公共目录
+（两个 worktree 共享），重新克隆后需重新安装：
 
 ```bash
 cp platform-harmonyos/tests/pre-commit "$(git rev-parse --git-common-dir)/hooks/pre-commit"
@@ -46,3 +53,16 @@ chmod +x "$(git rev-parse --git-common-dir)/hooks/pre-commit"
 ```
 
 临时跳过（不建议）：`git commit --no-verify`。
+
+## 约定
+
+**修改 `SingleFlightLoop.ets` 的任何调度逻辑，必须先跑本测试且全绿后才能提交。**
+扩展调度行为时同步新增用例。文档检索可用 `devecocli docs search "单元测试"` /
+`devecocli docs read <documentId>`（Local Test、Mock 能力等官方文档已本地化）。
+
+## ohosTest（设备侧测试）
+
+`wg_tunnel/src/ohosTest` 与 `entry/src/ohosTest` 为设备/模拟器上的 Instrument Test
+目录（需连接设备，`hvigorw onDeviceUnitTest` 或 DevEco Studio 运行）。本调度器的
+纯逻辑语义由 LocalUnit 覆盖；涉及系统能力（backgroundTaskManager 回收、通知锚点等）
+的平台行为验证仍走真机回归清单。
