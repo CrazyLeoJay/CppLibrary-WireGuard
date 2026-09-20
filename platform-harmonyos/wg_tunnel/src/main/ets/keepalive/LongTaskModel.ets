@@ -20,12 +20,17 @@ import { notificationManager } from '@kit.NotificationKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
 import { StreamLogMessage, MessageType } from '../model/entity/napi_entity';
-import { NotificationUpdater } from './NotificationUpdater';
+import { SingleFlightLoop } from './SingleFlightLoop';
 
 const TAG: string = 'VpnKeepAlive';
 
 /** VPN自定义通知固定ID：同id发布原地更新，保证任何情况下只有一条自定义通知 */
 const VPN_NOTIFY_ID: number = 20260912;
+
+/** 通知最长等待间隔：5分钟（平台要求DATA_TRANSFER任务10分钟内须有进度更新，取半留余量） */
+const NOTIFY_MAX_WAIT_INTERVAL: number = 5 * 60 * 1000;
+/** 通知最小发布间隔：1秒（高频流日志上报节流，多次上报合并为一次发布最新数据） */
+const NOTIFY_MIN_PUBLISH_GAP: number = 1 * 1000;
 
 /**
  * 长时任务在系统侧的真实状态（用于区分"内存候选ID存在"与"系统确实在保活"）
@@ -162,22 +167,28 @@ function formatDuration(startTime: number): string {
 
 /**
  * 后台长时任务管理
- * 使用ContinuousTaskRequest新API签名，支持进度更新定时器保活
+ * 使用ContinuousTaskRequest新API签名；通知发布由SingleFlightLoop驱动：
+ * 数据上报合并节流（≤1次/秒发布最新数据），静默时等满5分钟兜底发布（满足平台进度更新约束）
  * 集成通知内容管理，在通知中展示VPN连接状态、流量和握手时间
  *
  * Created on 2026/7/27.
  * @author leojay`fu
  */
 export class LongTaskModel {
-  private updater: NotificationUpdater;
+  /** 通知发布循环：频繁上报合并节流（≤1次/秒，每次发布最新数据）；静默时等满最长间隔兜底发布 */
+  private notifyLoop: SingleFlightLoop;
   private vpnData: VpnNotificationData = new VpnNotificationData();
   /** 长时任务关联的wantAgent：通知点击跳转App，创建长时任务时构建一次复用 */
   private taskWantAgent?: WantAgent;
 
   constructor() {
-    this.updater = new NotificationUpdater(() => {
-      this.publishNotification();
-    });
+    this.notifyLoop = new SingleFlightLoop(
+      async (): Promise<void> => {
+        this.publishNotification();
+      },
+      NOTIFY_MAX_WAIT_INTERVAL,
+      NOTIFY_MIN_PUBLISH_GAP,
+    );
   }
 
   /**
@@ -284,18 +295,6 @@ export class LongTaskModel {
   }
 
   /**
-   * 长时任务是否被系统真实保活（激活）
-   *
-   * 仅当系统状态为RUNNING时才视为有效保活。
-   * @param context UIAbilityContext
-   * @returns 是否有效激活
-   */
-  async isSystemActive(context: common.UIAbilityContext): Promise<boolean> {
-    const state = await this.probeSystemState(context);
-    return state === ContinuousTaskState.RUNNING;
-  }
-
-  /**
    * 重置长时任务状态（公开版）
    *
    * 当探测到系统已取消/挂起长时任务、但内存候选仍存在时，
@@ -361,16 +360,16 @@ export class LongTaskModel {
       state.notificationId = notification.notificationId;
       state.startTime = Date.now();
 
-      // 校验continuousTaskId：官方API声明为可选类型，不保证一定有值
-      // 若为空则无法使用新API的update/stop，需依赖旧API降级
+      // 校验continuousTaskId：官方API声明为可选类型，不保证一定有值。
+      // 若为空则后续无法用新API stop/update，残留任务由保活对账(reconcileExtraTasks)兜底清理
       if (state.continuousTaskId == undefined) {
-        LLog.warn(TAG, 'startBackgroundRunning成功但continuousTaskId为空，将使用旧API降级处理');
+        LLog.warn(TAG, 'startBackgroundRunning成功但continuousTaskId为空，无法跟踪该任务');
       }
 
       LLog.info(TAG, `startBackgroundRunning成功, taskId=${state.continuousTaskId}, notificationId=${state.notificationId}`);
 
       this.publishNotification();
-      this.updater.start();
+      this.notifyLoop.start();
     } catch (error) {
       const err = error as BusinessError;
       LLog.error(TAG, `startBackgroundRunning失败. code: ${err.code}, message: ${err.message}`);
@@ -517,9 +516,7 @@ export class LongTaskModel {
     if (data.targetEndpoints != undefined) {
       this.vpnData.targetEndpoints = data.targetEndpoints;
     }
-    if (getLongTaskState().continuousTaskId != undefined) {
-      this.updater.update();
-    }
+    this.notifyLoop.signal('vpnData');
   }
 
   /**
@@ -537,9 +534,7 @@ export class LongTaskModel {
       log.messageType === MessageType.HANDSHAKE_RESPONSE) {
       this.vpnData.lastHandshakeTime.set(log.peerIndex, log.timestamp);
     }
-    if (getLongTaskState().continuousTaskId != undefined) {
-      this.updater.update();
-    }
+    this.notifyLoop.signal('streamLog');
   }
 
   setServiceStopped(stopped: boolean): void {
@@ -561,7 +556,7 @@ export class LongTaskModel {
       return;
     }
 
-    this.updater.stop();
+    this.notifyLoop.stop();
 
     // 清除VPN通知数据
     this.clearVpnData();
@@ -569,42 +564,22 @@ export class LongTaskModel {
     // 注意顺序：必须先stopBackgroundRunning（系统随stop移除其锚点通知），
     // 之后再取消通知。若先取消进行中任务的锚点，取消会被系统拒绝/无效，
     // 失效重启循环中锚点通知会不断累积（实测弹窗十多个）。
-    if (state.continuousTaskId != undefined) {
-      // 使用新API签名：stopBackgroundRunning(context, continuousTaskId)
-      backgroundTaskManager.stopBackgroundRunning(currentContext, state.continuousTaskId).then(() => {
-        this.resetState();
-        // 任务已停止：清理自定义通知(固定id)与动态id残留
-        this.removeNotification();
-        LLog.info(TAG, 'stopBackgroundRunning成功');
-        LLog.info(TAG, "取消后台长时任务：成功")
-      }).catch((error: BusinessError) => {
-        if (error.code == 9800005) {
-          LLog.info(TAG, "取消后台长时任务：后台任务并未运行")
-          this.resetState();
-          this.removeNotification();
-          return
-        }
-        LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
-        this.removeNotification();
-      });
-    } else {
-      // 降级：使用旧API（continuousTaskId为空时走此分支）
-      backgroundTaskManager.stopBackgroundRunning(currentContext).then(() => {
+    const taskId: number = state.continuousTaskId;
+    backgroundTaskManager.stopBackgroundRunning(currentContext, taskId).then(() => {
+      this.resetState();
+      // 任务已停止：清理自定义通知(固定id)与动态id残留
+      this.removeNotification();
+      LLog.info(TAG, `取消后台长时任务：成功, taskId=${taskId}`);
+    }).catch((error: BusinessError) => {
+      if (error.code == 9800005) {
+        LLog.info(TAG, '取消后台长时任务：后台任务并未运行');
         this.resetState();
         this.removeNotification();
-        LLog.info(TAG, 'stopBackgroundRunning成功');
-        LLog.info(TAG, "取消后台长时任务：成功")
-      }).catch((error: BusinessError) => {
-        if (error.code == 9800005) {
-          LLog.info(TAG, "取消后台长时任务：后台任务并未运行")
-          this.resetState();
-          this.removeNotification();
-          return
-        }
-        LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
-        this.removeNotification();
-      });
-    }
+        return;
+      }
+      LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
+      this.removeNotification();
+    });
   }
 }
 

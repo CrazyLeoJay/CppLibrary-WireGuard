@@ -25,6 +25,7 @@ import { VpnEventTag } from '../model/entity/VPNEventStatusParams';
 import { MessageType, StreamDirection, StreamLogMessage } from '../model/entity/napi_entity';
 import { SubEventCancel } from '../model/WGEvent';
 import { longTaskModel, ContinuousTaskState } from './LongTaskModel';
+import { SingleFlightLoop } from './SingleFlightLoop';
 
 const TAG = 'VpnKeepAliveMgr';
 
@@ -51,6 +52,8 @@ const TAG = 'VpnKeepAliveMgr';
  * 【设计要点】
  * - 主进程被DATA_TRANSFER长时任务保活，锁屏/息屏期间定时器持续运行
  * - VEA进程可能被系统冻结，其内部定时器停摆，无法自检 → 主进程是唯一可靠检测点
+ * - 所有保活触发源经SingleFlightLoop检查循环汇聚：单飞行串行执行检查轮，
+ *   空闲60s周期兜底，执行期信号合并/丢弃——杜绝await空窗并发注册多个长时任务
  *
  * Created on 2026/9/7.
  * @author leojay`fu
@@ -67,19 +70,19 @@ export class VpnKeepAliveManager {
     (info: backgroundTaskManager.ContinuousTaskCancelInfo): void => {
       LLog.warn(TAG, `长时任务被系统取消: taskId=${info.id}, reason=${info.reason}`);
       // 系统已回收长时任务，若VPN仍开启则重新申请保活
-      this.restartLongTaskIfVpnRunning();
+      this.checkLoop.signal('sysCancel');
     };
   private onTaskSuspendCb: (info: backgroundTaskManager.ContinuousTaskSuspendInfo) => void =
     (info: backgroundTaskManager.ContinuousTaskSuspendInfo): void => {
       LLog.warn(TAG, `长时任务被系统挂起: taskId=${info.continuousTaskId}, suspendState=${info.suspendState}, ` +
         `reason=${info.suspendReason}`);
       // 挂起期间进程冻结、VPN实际失去保活，若VPN仍开启则重新申请恢复激活
-      this.restartLongTaskIfVpnRunning();
+      this.checkLoop.signal('sysCancel');
     };
   private onTaskActiveCb: (info: backgroundTaskManager.ContinuousTaskActiveInfo) => void =
     (info: backgroundTaskManager.ContinuousTaskActiveInfo): void => {
       LLog.info(TAG, `长时任务已激活: taskId=${info.id}`);
-      this.startTunnelHealthCheck();
+      this.checkLoop.start();
     };
 
   // 最后收到流日志的时间戳（用于判断隧道是否有任何活动）
@@ -100,10 +103,6 @@ export class VpnKeepAliveManager {
   private lastReapplyTime: number = 0;
   /** 重新申请保活连续失败次数（申请后长时任务仍未运行则+1，成功归零），用于指数退避 */
   private reapplyFailures: number = 0;
-  /** 线性闸门：保活检查+激活进行中标志（await空窗期间多次触发会排队） */
-  private keepAliveChecking: boolean = false;
-  /** 合并标记：检查进行中到达的新请求，合并为结束后至多一次补跑 */
-  private keepAliveCheckPending: boolean = false;
   /** 开关宽限窗：刚开启后的时间内，VEA中间态关闭广播不视为进程死亡（切换/启动进行中） */
   private readonly SWITCH_GRACE_INTERVAL: number = 8000;
   /** 启动确认看门狗定时器 */
@@ -112,11 +111,13 @@ export class VpnKeepAliveManager {
   private readonly SWITCH_ACK_TIMEOUT: number = 15 * 1000;
   /** 查询后仍未确认的二次等待 */
   private readonly SWITCH_ACK_RECHECK_TIMEOUT: number = 7 * 1000;
-  // ===== 后台隧道健康守护（长时任务驱动，不依赖onForeground） =====
-  /** 健康检查定时器：随长时任务启动/停止 */
-  private tunnelHealthTimer?: number = undefined;
-  /** 健康检查周期：60秒 */
-  private readonly TUNNEL_HEALTH_CHECK_INTERVAL: number = 60 * 1000;
+  // ===== 保活检查循环：等待(信号|空闲60s)→checkRound 单飞行调度 =====
+  // 为什么由主进程循环驱动检测：主进程被DATA_TRANSFER长时任务保活，
+  // 锁屏/息屏期间主进程定时器持续运行；VEA进程可能被系统冻结，其内部
+  // 定时器停摆无法自检，主进程是唯一可靠检测点。
+  private checkLoop: SingleFlightLoop = new SingleFlightLoop(
+    (source: string): Promise<void> => this.checkRound(source),
+  );
   /** 热重连(RECONNECT_REQUEST)最小间隔：2分钟，防止重复轰炸 */
   private readonly RECONNECT_REQUEST_MIN_INTERVAL: number = 2 * 60 * 1000;
   /** 强重启VEA兜底阈值：流日志超10分钟无更新（热重连无效，判定VEA冻结/卡死） */
@@ -127,19 +128,14 @@ export class VpnKeepAliveManager {
   private lastForceRestartTime: number = 0;
   /** 强重启VEA进行中标志：期间VEA会短暂广播STOP_VPN，需保护开关意图与保活不被误停 */
   private isForceRestarting: boolean = false;
+  /** VEA进程消失后的二次确认等待（避开用户关闭/热切换的瞬时退出窗口） */
+  private readonly VEA_PROBE_RECHECK_DELAY: number = 3 * 1000;
 
   /**
    * 是否已绑定UIAbilityContext
    */
   isAttached(): boolean {
     return this.context != undefined;
-  }
-
-  /**
-   * 长时任务是否正在运行（代理LongTaskModel）
-   */
-  isKeepAliveRunning(): boolean {
-    return longTaskModel.isRunning();
   }
 
   /**
@@ -161,8 +157,8 @@ export class VpnKeepAliveManager {
       return;
     }
     LLog.info(TAG, '用户开启开关，启动保活检查');
-    // 线性闸门：检查+激活串行化，防止多触发源并发注册多个长时任务
-    this.requestKeepAliveCheck('switchOn');
+    // 检查循环：信号唤醒执行一轮检查+激活（单飞行，执行中重复触发自动丢弃）
+    this.checkLoop.signal('switchOn');
     // 启动确认看门狗：若指令丢失/VEA卡死导致迟迟无START_VPN确认，则升级恢复
     this.armSwitchAckWatchdog();
   }
@@ -213,7 +209,7 @@ export class VpnKeepAliveManager {
    *   并经THROW事件弹出失败原因提示——用户要求"启动失败导致进程关闭时，关闭当前配置并提示原因"
    * - 进程存活但迟迟无确认（指令丢失/卡死/冻结）：强制重启VEA兜底恢复
    */
-  private async checkSwitchAckFinal(): Promise<void> {
+  private async  checkSwitchAckFinal(): Promise<void> {
     const st = WireGuard.config.status.getConfig();
     if (!st.isSwitchOpen || this.isForceRestarting) {
       return;
@@ -263,83 +259,99 @@ export class VpnKeepAliveManager {
     if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
-    // 线性闸门：检查+激活串行化
-    this.requestKeepAliveCheck('broadcast', connectedIps);
+    if (connectedIps != undefined) {
+      // 连接IP先落通知数据缓存（发布由通知循环节流择机，内容取最新）
+      longTaskModel.updateVpnData({ connectedIps: connectedIps });
+    }
+    this.checkLoop.signal('broadcast');
   }
 
-  // ===================== 保活检查与激活（线性化） =====================
+  // ===================== 保活检查与激活 =====================
 
   /**
-   * 保活检查与激活统一入口（线性化）
+   * 一轮保活检查（检查循环的执行体，单飞行串行内执行）
    *
-   * 五个触发源（switchOn / 系统取消挂起回调 / 60s定时器 / 退后台 / 广播）全部汇聚于此。
-   * 原生运行循环单线程，但检查与激活含多个await点（probeSystemState、
-   * startBackgroundRunning）：事件循环被卡时，N个排队触发在解锁后各自于
-   * isRunning守卫的await空窗通过校验，一次性调起N个startBackgroundRunning →
-   * 注册N个长时任务（真机实测）。
+   * 所有触发源（switchOn / 系统取消挂起回调 / 空闲周期 / 退后台 / 广播 / 回前台）
+   * 经 checkLoop.signal 汇聚于此。执行顺序：
+   * 1. 意图门：开关未开 → 不保活；
+   * 2. 隧道健康检查（自门控：仅VPN运行中判定，流日志过时→热重连/强重启VEA）；
+   * 3. 长时任务系统状态探测：RUNNING → 对账孤儿后返回；否则按来源激活；
+   * 4. VEA进程存活探测（放最后：判定死亡会回滚开关，避免回滚后再拉起）。
    *
-   * 线性化：检查进行中时，后续触发仅置合并标记立即返回；当前轮结束后若
-   * 有合并标记，用最新状态补跑一轮——N个累计触发合并为至多一次真实激活。
-   *
-   * @param source 触发来源（日志定位用）
-   * @param connectedIps 广播携带的连接IP（通知展示用，可选）
+   * @param source 触发来源（日志定位；'idle'=空闲周期轮，其余为事件/用户源）
    */
-  private requestKeepAliveCheck(source: string, connectedIps?: Record<number, string>): void {
-    if (this.keepAliveChecking) {
-      this.keepAliveCheckPending = true;
+  private async checkRound(source: string): Promise<void> {
+    const ctx = this.context;
+    if (ctx == undefined) {
       return;
     }
-    this.keepAliveChecking = true;
-    this.linearCheckAndActivate(source, connectedIps).finally(() => {
-      this.keepAliveChecking = false;
-      if (this.keepAliveCheckPending) {
-        this.keepAliveCheckPending = false;
-        this.requestKeepAliveCheck(`${source}/合并补跑`);
-      }
-    });
+    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
+      return;
+    }
+    // 隧道活性检查（自门控：isOpen()为假时直接返回）
+    this.checkVpnTunnelHealth();
+    const state = await longTaskModel.probeSystemState(ctx);
+    if (state === ContinuousTaskState.RUNNING) {
+      // 已真实激活：确保循环在跑（幂等），并对账清理孤儿长时任务
+      this.checkLoop.start();
+      await this.reconcileExtraTasks();
+    } else {
+      LLog.warn(TAG, `保活检查(${source}): 长时任务系统状态=${state}，重新申请保活`);
+      // 空闲周期轮走指数退避（防与系统策略对抗空耗电），事件/用户源立即重申请
+      await this.reapplyKeepAlive(source !== 'idle');
+      await this.reconcileExtraTasks();
+    }
+    // VEA进程存活探测（最后执行，见方法注释）
+    await this.probeVeaProcess();
   }
 
   /**
-   * 一轮检查+激活（线性串行内执行）
+   * VEA进程存活探测（覆盖进程猝死无广播的检测缺口）
    *
-   * - 意图门：开关未开 → 不保活；
-   * - 系统状态RUNNING → 保持健康守护 + 对账多余长时任务（孤儿清理）后返回；
-   * - 非有效 → 按来源语义激活：
-   *     timer = 指数退避重申请（reapplyKeepAlive，防与系统策略对抗空耗电）；
-   *     其他来源 = 重置状态后直接激活（switchOn/broadcast 不重置，直接start）。
-   * 每轮激活后对账，清理历史并发注册产生的孤儿长时任务。
+   * 进程猝死（如native崩溃）来不及广播，状态机的"进程关闭"分支收不到事件，
+   * 且隧道健康检查因入站/外发同时停更会误判为空闲隧道而跳过——此处按周期
+   * 主动探测补上。判定门槛："意图开且曾确认运行"（running事实为真），
+   * 天然避开启动窗口期；强重启中间态跳过（等待自行恢复）；
+   * 查询异常保守视为存活，避免误回滚。首次发现消失后延迟二次复查，
+   * 仍消失才判定死亡：回滚开关+提示原因（与启动确认看门狗、广播回滚路径语义一致）。
    */
-  private async linearCheckAndActivate(source: string, connectedIps?: Record<number, string>): Promise<void> {
-    try {
-      const ctx = this.context;
-      if (ctx == undefined) {
-        return;
-      }
-      if (!WireGuard.config.status.getConfig().isSwitchOpen) {
-        return;
-      }
-      const state = await longTaskModel.probeSystemState(ctx);
-      if (state === ContinuousTaskState.RUNNING) {
-        // 已真实激活：保持健康守护，并对账清理孤儿长时任务
-        this.startTunnelHealthCheck();
-        await this.reconcileExtraTasks();
-        return;
-      }
-      LLog.warn(TAG, `保活检查(${source}): 长时任务系统状态=${state}，按来源语义激活`);
-      if (source === 'timer') {
-        // 定时器探测路径：保留指数退避，防止与系统策略对抗空耗电
-        this.reapplyKeepAlive();
-      } else if (source === 'broadcast') {
-        await this.startVpnKeepAlive(VpnEventTag.START_VPN, connectedIps);
-      } else {
-        // switchOn / sysCancel / background：重置状态后直接激活
-        longTaskModel.resetTaskState();
-        await this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS);
-      }
-      await this.reconcileExtraTasks();
-    } catch (e) {
-      LLog.error(TAG, `保活检查异常(${source}): ${(e as Error).message}`);
+  private async probeVeaProcess(): Promise<void> {
+    const status = WireGuard.config.status.getConfig();
+    if (!status.isSwitchOpen || !status.running || this.isForceRestarting) {
+      return;
     }
+    let veaRunning = true;
+    try {
+      veaRunning = await WireGuard.tools.isVpnExtensionRunning();
+    } catch (e) {
+      LLog.warn(TAG, `VEA进程探测异常，跳过本轮判定: ${(e as Error).message}`);
+      return;
+    }
+    if (veaRunning) {
+      return;
+    }
+    LLog.warn(TAG, `VEA进程探测：进程已消失，${this.VEA_PROBE_RECHECK_DELAY / 1000}秒后二次确认`);
+    await new Promise<void>((resolve) => setTimeout(resolve, this.VEA_PROBE_RECHECK_DELAY));
+    const recheck = WireGuard.config.status.getConfig();
+    if (!recheck.isSwitchOpen || !recheck.running || this.isForceRestarting) {
+      return;
+    }
+    try {
+      if (await WireGuard.tools.isVpnExtensionRunning()) {
+        LLog.info(TAG, 'VEA进程探测：二次确认仍存活（瞬时窗口），跳过');
+        return;
+      }
+    } catch (e) {
+      LLog.warn(TAG, `VEA进程二次确认异常，保守跳过: ${(e as Error).message}`);
+      return;
+    }
+    LLog.error(TAG, 'VEA进程已消失且开关仍开，回滚开关并提示失败原因');
+    // 1. 弹出失败原因（EntryAbility订阅THROW事件展示Toast）
+    WireGuard.event.publishVpnThrow('VPN运行异常：VPN进程已退出');
+    // 2. 回滚开关为关并停止保活（内部会解除看门狗）
+    WireGuard.config.status.switchOffIntent();
+    this.stopLongTaskIfNeeded();
+    WireGuard.event.publishVpnNoOpen();
   }
 
   /**
@@ -451,7 +463,8 @@ export class VpnKeepAliveManager {
     }
     if (WireGuard.config.status.getConfig().isOpen()) {
       WireGuard.event.publishVpnStatusQuery();
-      this.checkVpnTunnelHealth();
+      // 立即触发一轮检查（信号唤醒；若恰有轮次在执行则合并丢弃，该轮已覆盖）
+      this.checkLoop.signal('foreground');
     }
   }
 
@@ -465,90 +478,33 @@ export class VpnKeepAliveManager {
     if (this.context == undefined) {
       return;
     }
-    this.ensureKeepAliveActive();
-  }
-
-  // ===================== 长时任务有效性保障 =====================
-
-  /**
-   * 确保VPN运行期间长时任务真实有效（激活）
-   *
-   * 通过 probeSystemState 探测系统侧真实状态：
-   * - RUNNING：已激活，确保后台隧道健康守护在运行
-   * - 其他（NONE/SUSPENDED/CANCELLED）：内存ID存在但系统已失效 → 重置并重新申请
-   *
-   * 解决"内存continuousTaskId存在但系统已关闭/挂起"导致的VPN名义保活实则失效问题。
-   */
-  private async ensureKeepAliveActive(): Promise<void> {
-    if (this.context == undefined) {
-      return;
-    }
-    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
-      return;
-    }
-    // 线性闸门：检查+激活串行化
-    this.requestKeepAliveCheck('background');
+    this.checkLoop.signal('background');
   }
 
   /**
-   * 系统取消/挂起长时任务时，若开关仍开启则重新申请保活
-   *
-   * 由 continuousTaskCancel / continuousTaskSuspend 事件回调触发。
-   */
-  private restartLongTaskIfVpnRunning(): void {
-    if (this.context == undefined) {
-      return;
-    }
-    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
-      return;
-    }
-    LLog.warn(TAG, '长时任务异常（取消/挂起），重新申请保活');
-    // 线性闸门：检查+激活串行化
-    this.requestKeepAliveCheck('sysCancel');
-  }
-
-  /**
-   * 周期探测长时任务系统状态（后台隧道健康守护兜底）
-   *
-   * 事件监听可能偶发丢失；周期性探测确保即使错过事件，
-   * 长时任务被系统取消/挂起后也能及时重新申请保活。
-   */
-  private async probeKeepAliveSystemState(): Promise<void> {
-    const ctx = this.context;
-    if (ctx == undefined) {
-      return;
-    }
-    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
-      return;
-    }
-    // 线性闸门：检查+激活串行化
-    this.requestKeepAliveCheck('timer');
-  }
-
-  /**
-   * 重新申请保活（带指数退避）
+   * 重新申请保活（空闲周期轮带指数退避）
    *
    * 系统取消/挂起长时任务后立即重新申请是VPN刚需，但若申请被系统持续拒绝
    * （如策略不允许、参数异常），高频重试会与系统策略形成对抗空耗电。
-   * 连续失败时按 30s→60s→120s…指数退避（上限10分钟），成功后归零。
+   * 空闲周期轮（force=false）连续失败时按 30s→60s→120s…指数退避（上限10分钟）；
+   * 事件/用户源（force=true）绕过退避立即申请。
+   * 申请后按实际结果更新失败计数，成功归零。
    */
-  private reapplyKeepAlive(): void {
+  private async reapplyKeepAlive(force: boolean): Promise<void> {
     const now = Date.now();
     const backoff = Math.min(this.REAPPLY_MIN_INTERVAL * Math.max(1, this.reapplyFailures),
       this.REAPPLY_MAX_INTERVAL);
-    if (this.lastReapplyTime > 0 && (now - this.lastReapplyTime) < backoff) {
+    if (!force && this.lastReapplyTime > 0 && (now - this.lastReapplyTime) < backoff) {
       LLog.info(TAG, `重新申请保活被退避抑制(连续失败${this.reapplyFailures}次, 退避${backoff / 1000}s)`);
       return;
     }
     this.lastReapplyTime = now;
-    longTaskModel.resetTaskState();
-    this.startVpnKeepAlive(VpnEventTag.QUERY_STATUS).then(() => {
-      if (longTaskModel.isRunning()) {
-        this.reapplyFailures = 0;
-      } else {
-        this.reapplyFailures++;
-      }
-    });
+    await this.startVpnKeepAlive();
+    if (longTaskModel.isRunning()) {
+      this.reapplyFailures = 0;
+    } else {
+      this.reapplyFailures++;
+    }
   }
 
   // ===================== VPN事件订阅 =====================
@@ -745,21 +701,15 @@ export class VpnKeepAliveManager {
   // ===================== 保活状态机 =====================
 
   /**
-   * 启动VPN保活（长时任务 + 通知 + 后台隧道健康守护）
+   * 启动VPN保活（长时任务 + 通知 + 检查循环）
    *
-   * VPN线程运行中时调用。流程：
-   *   1. 防重复：长时任务已启动则跳过，仅更新通知数据
-   *   2. 启动长时任务（先启动，不等通知权限）
-   *   3. 缓存连接IP（如果有）
-   *   4. 处理通知权限
-   *      - 已授权 → 刷新通知数据（缓存的数据一次性刷出）
-   *      - 未授权 → 请求授权 → 授权后刷新通知数据
-   *      - 授权失败 → 不刷新（长时任务仍在运行，后续定时器会持续尝试）
+   * 由保活检查轮（reapplyKeepAlive）调用：调用前已在本轮probe确认
+   * 长时任务系统状态非RUNNING，此处只需清掉内存残留候选后重新申请。
+   * 流程：复位通知数据 → 确保候选无残留 → 启动长时任务 → 启动检查循环 → 通知权限。
    *
-   * @param tag 事件标签（VpnEventTag枚举）
    * @param connectedIps 连接IP数据（可选，来自VPN状态广播）
    */
-  private async startVpnKeepAlive(tag: VpnEventTag, connectedIps?: Record<number, string>): Promise<void> {
+  private async startVpnKeepAlive(connectedIps?: Record<number, string>): Promise<void> {
     const ctx = this.context;
     if (ctx == undefined) {
       LLog.warn(TAG, '启动保活失败：context未绑定');
@@ -785,18 +735,8 @@ export class VpnKeepAliveManager {
         targetEndpoints: endpoints,
       });
     }
-    // 1. 防重复启动：内存候选ID存在时仍需确认系统真实状态
-    //    若系统已取消/挂起长时任务（内存ID空转），需放弃候选重新申请，而非错误跳过
+    // 内存候选残留但系统侧已失效（本轮probe已确认非RUNNING）→ 重置后重新申请
     if (longTaskModel.isRunning()) {
-      const sysState = await longTaskModel.probeSystemState(ctx);
-      if (sysState === ContinuousTaskState.RUNNING) {
-        LLog.info(TAG, `长时任务已有效运行，仅更新通知数据: tag=${tag}`);
-        longTaskModel.publishNotification();
-        // 确保后台隧道健康守护已启动（幂等，锁屏期间持续检测隧道）
-        this.startTunnelHealthCheck();
-        return;
-      }
-      LLog.warn(TAG, `长时任务候选存在但系统状态=${sysState}，重新申请保活: tag=${tag}`);
       longTaskModel.resetTaskState();
     }
 
@@ -807,8 +747,8 @@ export class VpnKeepAliveManager {
       LLog.error(TAG, `启动长时任务失败: ${(e as Error).message}`);
       return;
     }
-    // 长时任务启动成功 → 同步启动后台隧道健康守护
-    this.startTunnelHealthCheck();
+    // 长时任务启动成功 → 检查循环进入空闲周期（幂等）
+    this.checkLoop.start();
 
     // 3. 处理通知权限
     try {
@@ -830,8 +770,8 @@ export class VpnKeepAliveManager {
    */
   private onVpnServiceStopped(): void {
     LLog.info(TAG, 'VPN服务已停止（VEA进程存活），更新通知');
-    // VPN服务已停止（isOpen=false），无需再检测隧道健康（下次START会自动重启守护）
-    this.stopTunnelHealthCheck();
+    // VPN服务已停止（isOpen=false）：检查循环停止（下次激活自动重启），通知循环保活锚点
+    this.checkLoop.stop();
     longTaskModel.setServiceStopped(true);
     longTaskModel.publishNotification();
   }
@@ -843,51 +783,15 @@ export class VpnKeepAliveManager {
     if (ctx == undefined) {
       return;
     }
-    // 长时任务停止 → 同步停止后台隧道健康守护
-    this.stopTunnelHealthCheck();
+    // 长时任务停止 → 检查循环同步停止
+    this.checkLoop.stop();
     longTaskModel.stopLongTask(ctx);
   }
 
   // ===================== 后台隧道健康守护 =====================
 
   /**
-   * 启动后台隧道健康检查定时器（幂等）
-   *
-   * 必须由长时任务驱动：主进程被DATA_TRANSFER长时任务保活，
-   * 锁屏/息屏期间主进程的定时器仍持续运行，从而实现"无需打开App，
-   * 只要长时任务在，就持续检测VPN隧道是否失效并自动重连"。
-   *
-   * 为什么不在VEA内部做唯一检测源：
-   * VEA进程可能被系统冻结，其内部定时器同样停摆，无法自检。
-   */
-  private startTunnelHealthCheck(): void {
-    if (this.tunnelHealthTimer != undefined) {
-      return;
-    }
-    // 立即执行一次，然后周期检查
-    this.checkVpnTunnelHealth();
-    this.tunnelHealthTimer = setInterval(() => {
-      // 1. 隧道活性检查（流日志过时 → 热重连/强重启VEA）
-      this.checkVpnTunnelHealth();
-      // 2. 长时任务系统状态兜底探测（系统取消/挂起长时任务时重新申请保活）
-      this.probeKeepAliveSystemState();
-    }, this.TUNNEL_HEALTH_CHECK_INTERVAL);
-    LLog.info(TAG, `后台隧道健康守护已启动，检查周期=${this.TUNNEL_HEALTH_CHECK_INTERVAL / 1000}s`);
-  }
-
-  /**
-   * 停止后台隧道健康检查定时器
-   */
-  private stopTunnelHealthCheck(): void {
-    if (this.tunnelHealthTimer != undefined) {
-      clearInterval(this.tunnelHealthTimer);
-      this.tunnelHealthTimer = undefined;
-      LLog.info(TAG, '后台隧道健康守护已停止');
-    }
-  }
-
-  /**
-   * 隧道健康检查（周期性执行）
+   * 隧道健康检查（检查循环每轮顺带执行，自门控）
    *
    * 【定位】最外层兜底，非隧道内判定的重复：隧道内的失效判定与自愈由C层
    * 心跳线程完成（握手失联判死→SOCKET_ERROR→VEA重建）。本检查覆盖的是
