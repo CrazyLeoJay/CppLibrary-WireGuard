@@ -105,8 +105,12 @@ export class VpnKeepAliveManager {
   private reapplyFailures: number = 0;
   /** 开关宽限窗：刚开启后的时间内，VEA中间态关闭广播不视为进程死亡（切换/启动进行中） */
   private readonly SWITCH_GRACE_INTERVAL: number = 8000;
-  /** 启动确认看门狗定时器 */
+  /** 启动确认延迟信号定时器（15s首查/7s复查的一次性快速路径；判定状态由switchAckArmTime驱动） */
   private switchAckTimer?: number;
+  /** 启动确认武装时刻（0=未武装）：onSwitchOn记录，确认/解除/终裁后清零；deadline由此推导 */
+  private switchAckArmTime: number = 0;
+  /** 启动确认首查（状态查询广播）是否已发送 */
+  private switchAckQueryDone: boolean = false;
   /** 开关开启后等待VPN实际运行确认的超时 */
   private readonly SWITCH_ACK_TIMEOUT: number = 15 * 1000;
   /** 查询后仍未确认的二次等待 */
@@ -159,82 +163,108 @@ export class VpnKeepAliveManager {
     LLog.info(TAG, '用户开启开关，启动保活检查');
     // 检查循环：信号唤醒执行一轮检查+激活（单飞行，执行中重复触发自动丢弃）
     this.checkLoop.signal('switchOn');
-    // 启动确认看门狗：若指令丢失/VEA卡死导致迟迟无START_VPN确认，则升级恢复
-    this.armSwitchAckWatchdog();
+    // 武装启动确认：SWITCH_ACK_TIMEOUT后经检查循环signal('ack')触发启动确认检查
+    // （指令丢失/VEA卡死导致迟迟无START_VPN确认时升级恢复）
+    this.armSwitchAckSignal();
   }
 
   /**
-   * 启动确认看门狗：开关开启后若超过阈值仍未确认"实际运行的配置==意图配置"，
-   * 先广播状态查询（VEA若卡而未死会回复），再未确认则强制重启VEA兜底恢复。
-   * 覆盖场景：SWITCH指令丢失（VEA冻结收不到广播）、启动流程静默卡死。
+   * 武装启动确认：记录武装时刻并安排一次性延迟信号（快速路径）。
+   * 判定状态（switchAckArmTime）由每轮 checkStartupAck 评估——信号只是提前
+   * 唤醒检查的手段，被丢弃时由任意来源的后续轮按 deadline 兜底，检测不丢失。
    */
-  private armSwitchAckWatchdog(): void {
-    this.disarmSwitchAckWatchdog();
+  private armSwitchAckSignal(): void {
+    this.disarmSwitchAckSignal();
+    this.switchAckArmTime = Date.now();
+    this.switchAckQueryDone = false;
     this.switchAckTimer = setTimeout(() => {
       this.switchAckTimer = undefined;
-      this.checkSwitchAck();
+      this.checkLoop.signal('ack');
     }, this.SWITCH_ACK_TIMEOUT);
+    LLog.info(TAG, `启动确认检查已武装: ${this.SWITCH_ACK_TIMEOUT / 1000}s后触发`);
   }
 
-  private disarmSwitchAckWatchdog(): void {
+  /**
+   * 解除启动确认（确认到达/开关关闭/回滚完成/终裁完成后调用）
+   */
+  private disarmSwitchAckSignal(): void {
+    this.switchAckArmTime = 0;
+    this.switchAckQueryDone = false;
     if (this.switchAckTimer != undefined) {
       clearTimeout(this.switchAckTimer);
       this.switchAckTimer = undefined;
-      LLog.info(TAG, '启动确认看门狗已解除');
+      LLog.info(TAG, '启动确认检查已解除');
     }
-  }
-
-  private checkSwitchAck(): void {
-    const status = WireGuard.config.status.getConfig();
-    if (!status.isSwitchOpen || this.isForceRestarting) {
-      return;
-    }
-    if (status.running && status.runningConfigId == status.switchConfigId) {
-      return; // 已确认实际运行
-    }
-    LLog.warn(TAG,
-      `启动确认看门狗：开关开启但未确认VPN运行(intent=${status.switchConfigId}, running=${status.running}/${status.runningConfigId})，查询VEA状态`);
-    WireGuard.event.publishVpnStatusQuery();
-    this.switchAckTimer = setTimeout(async () => {
-      this.switchAckTimer = undefined;
-      await this.checkSwitchAckFinal();
-    }, this.SWITCH_ACK_RECHECK_TIMEOUT);
   }
 
   /**
-   * 看门狗二次检查（最终裁决）
+   * 启动确认检查（每轮评估，状态驱动；替代原独立看门狗定时器链）
    *
-   * 直接探测VEA进程是否存活，区分两类故障：
-   * - 进程已死亡（如native崩溃SIGABRT，来不及广播THROW）：回滚开关为关、停止保活，
-   *   并经THROW事件弹出失败原因提示——用户要求"启动失败导致进程关闭时，关闭当前配置并提示原因"
+   * 覆盖场景与裁决语义与原看门狗一致：开关开启后若超过阈值仍未确认
+   * "实际运行的配置==意图配置"，先广播状态查询（VEA若卡而未死会回复），
+   * 再未确认则探测VEA进程终裁：
+   * - 进程已死亡（如native崩溃SIGABRT，来不及广播THROW）：回滚开关为关、
+   *   停止保活，并经THROW事件弹出失败原因提示——"启动失败导致进程关闭时，
+   *   关闭当前配置并提示原因"
    * - 进程存活但迟迟无确认（指令丢失/卡死/冻结）：强制重启VEA兜底恢复
+   *
+   * 时序：武装后 SWITCH_ACK_TIMEOUT 首查 → 再等 SWITCH_ACK_RECHECK_TIMEOUT
+   * 终裁。15s/7s 的一次性延迟信号是快速路径；被丢弃时由任意来源的后续轮
+   * 按 deadline 状态兜底评估（最坏退化为空闲周期60s），检测不会丢失。
    */
-  private async  checkSwitchAckFinal(): Promise<void> {
+  private async checkStartupAck(): Promise<void> {
+    if (this.switchAckArmTime === 0 || this.isForceRestarting) {
+      return;
+    }
     const st = WireGuard.config.status.getConfig();
-    if (!st.isSwitchOpen || this.isForceRestarting) {
+    if (!st.isSwitchOpen) {
+      this.disarmSwitchAckSignal();   // 开关已关（用户关闭/其他路径回滚），确认失去意义
       return;
     }
     if (st.running && st.runningConfigId == st.switchConfigId) {
+      this.disarmSwitchAckSignal();   // 已确认实际运行
       return;
     }
+    const now: number = Date.now();
+    if (now < this.switchAckArmTime + this.SWITCH_ACK_TIMEOUT) {
+      return;   // 未到首查时间
+    }
+    if (!this.switchAckQueryDone) {
+      this.switchAckQueryDone = true;
+      LLog.warn(TAG,
+        `启动确认：开关开启${Math.floor((now - this.switchAckArmTime) / 1000)}s未确认VPN运行` +
+        `(intent=${st.switchConfigId}, running=${st.running}/${st.runningConfigId})，查询VEA状态`);
+      WireGuard.event.publishVpnStatusQuery();
+      this.switchAckTimer = setTimeout(() => {
+        this.switchAckTimer = undefined;
+        this.checkLoop.signal('ack');
+      }, this.SWITCH_ACK_RECHECK_TIMEOUT);
+      return;   // 给VEA回复窗口，复查信号/后续轮做终裁
+    }
+    if (now < this.switchAckArmTime + this.SWITCH_ACK_TIMEOUT + this.SWITCH_ACK_RECHECK_TIMEOUT) {
+      return;   // 查询后等待回复窗口未结束
+    }
+    // 终裁：直接探测VEA进程是否存活，区分两类故障
     let veaRunning = false;
     try {
       veaRunning = await WireGuard.tools.isVpnExtensionRunning();
     } catch (e) {
-      LLog.warn(TAG, `看门狗探测VEA进程状态异常: ${(e as Error).message}`);
+      LLog.warn(TAG, `启动确认终裁探测VEA进程异常，下轮再裁: ${(e as Error).message}`);
+      return;   // 查询异常保守跳过（不解除武装，下一轮重试终裁）
     }
     if (!veaRunning) {
-      LLog.error(TAG, '启动确认看门狗：VEA进程已死亡（疑似崩溃），回滚开关并提示失败原因');
+      LLog.error(TAG, '启动确认：VEA进程已死亡（疑似崩溃），回滚开关并提示失败原因');
       // 1. 弹出失败原因（EntryAbility订阅THROW事件展示Toast）
       WireGuard.event.publishVpnThrow('VPN启动失败：VPN进程异常退出');
-      // 2. 回滚开关为关并停止保活（内部会解除看门狗）
+      // 2. 回滚开关为关并停止保活（内部会解除启动确认）
       WireGuard.config.status.switchOffIntent();
       this.stopLongTaskIfNeeded();
       WireGuard.event.publishVpnNoOpen();
-      return;
+    } else {
+      LLog.warn(TAG, '启动确认：VEA存活但无运行确认，强制重启VEA恢复');
+      this.forceRestartVpnService();
     }
-    LLog.warn(TAG, '启动确认看门狗：VEA存活但无运行确认，强制重启VEA恢复');
-    this.forceRestartVpnService();
+    this.disarmSwitchAckSignal();
   }
 
   /**
@@ -271,12 +301,13 @@ export class VpnKeepAliveManager {
   /**
    * 一轮保活检查（检查循环的执行体，单飞行串行内执行）
    *
-   * 所有触发源（switchOn / 系统取消挂起回调 / 空闲周期 / 退后台 / 广播 / 回前台）
-   * 经 checkLoop.signal 汇聚于此。执行顺序：
+   * 所有触发源（switchOn / 系统取消挂起回调 / 空闲周期 / 退后台 / 广播 / 回前台 /
+   * ack启动确认）经 checkLoop.signal 汇聚于此。执行顺序：
    * 1. 意图门：开关未开 → 不保活；
-   * 2. 隧道健康检查（自门控：仅VPN运行中判定，流日志过时→热重连/强重启VEA）；
-   * 3. 长时任务系统状态探测：RUNNING → 对账孤儿后返回；否则按来源激活；
-   * 4. VEA进程存活探测（放最后：判定死亡会回滚开关，避免回滚后再拉起）。
+   * 2. 启动确认检查（状态驱动，每轮评估；'ack'为15s/7s延迟信号的快速路径来源）；
+   * 3. 隧道健康检查（自门控：仅VPN运行中判定，流日志过时→热重连/强重启VEA）；
+   * 4. 长时任务系统状态探测：RUNNING → 对账孤儿后返回；否则按来源激活；
+   * 5. VEA进程存活探测（放最后：判定死亡会回滚开关，避免回滚后再拉起）。
    *
    * @param source 触发来源（日志定位；'idle'=空闲周期轮，其余为事件/用户源）
    */
@@ -287,6 +318,11 @@ export class VpnKeepAliveManager {
     }
     if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
+    }
+    // 启动确认检查（状态驱动，覆盖启动卡死/启动期崩溃两个场景）
+    await this.checkStartupAck();
+    if (!WireGuard.config.status.getConfig().isSwitchOpen) {
+      return;   // 终裁可能已回滚开关，不再继续本轮稳态检查
     }
     // 隧道活性检查（自门控：isOpen()为假时直接返回）
     this.checkVpnTunnelHealth();
@@ -579,9 +615,9 @@ export class VpnKeepAliveManager {
         }
         // START_VPN / QUERY_STATUS / ON_CREATE
         if (status.running === true) {
-          // 启动确认：实际运行的配置与意图配置一致 → 解除启动确认看门狗
+          // 启动确认：实际运行的配置与意图配置一致 → 解除启动确认检查
           if (status.runningConfigId == status.switchConfigId) {
-            this.disarmSwitchAckWatchdog();
+            this.disarmSwitchAckSignal();
           }
           // VPN实际运行中
           if (!status.isSwitchOpen && status.runningConfigId != undefined) {
@@ -777,8 +813,8 @@ export class VpnKeepAliveManager {
   }
 
   private stopLongTaskIfNeeded(): void {
-    // 保活停止意味着启动确认已无意义（用户关闭/异常回滚），解除看门狗防止误触发
-    this.disarmSwitchAckWatchdog();
+    // 保活停止意味着启动确认已无意义（用户关闭/异常回滚），解除启动确认防止误触发
+    this.disarmSwitchAckSignal();
     const ctx = this.context;
     if (ctx == undefined) {
       return;
