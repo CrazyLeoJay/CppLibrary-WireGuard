@@ -58,6 +58,17 @@ hvigorw test -p module=wg_tunnel -p coverage=false
   （IDE 中可直接打开该文件），或运行 `run-local-unit-test.sh` 在终端查看提取后的
   行为明细（各用例结果表 + 行为明细 + 汇总，失败时单独打印失败原因块）。
 
+### 官方文档依据（devecocli docs 可检索）
+
+- `unittest-guidelines`（单元测试框架使用指导）→ 常见问题 →
+  **"用例中增加的打印日志在用例结果之后才打印"**：官方支持用例内日志打印，
+  但异步用例（调异步接口）的日志可能延迟到用例结果之后才显示——本套件全部
+  为异步时序用例，正属此场景；官方建议异步调用封装为 Promise（已遵循）。
+- 同文档"框架日志输出字段"：面板解析的是 `OHOS_REPORT_STATUS` 协议，其中
+  `stream` 字段官方语义 = "当前用例发生错误时记录错误信息"——即面板协议通道
+  只承载用例名与错误信息，普通 console 文本不在协议内。因此本套件将行为
+  编码进用例名、失败原因编码进 `Assert.message`，是与框架设计一致的可见性方案。
+
 ## 输出结构（每个用例自解释）
 
 `run-local-unit-test.sh` 在测试结束后从 runner 日志（`coverage.log`）提取行为明细：
