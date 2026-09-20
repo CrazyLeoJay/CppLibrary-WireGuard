@@ -41,6 +41,23 @@ hvigorw test -p module=wg_tunnel -p coverage=false
 
 本地引擎定时器精度低于 Node，T1 断言"轮数 ≥ 2"而非具体轮数；间隔断言（≥ maxWait/minGap 下限）承担"计时随轮重启"的精确校验。
 
+## 输出结构（每个用例自解释）
+
+`run-local-unit-test.sh` 在测试结束后从 runner 日志（`coverage.log`）提取行为明细：
+
+```
+[T4] ===== 干扰-执行期信号：丢弃不补跑，下一轮=本轮结束+maxWait =====   ← 测什么
+[T4] 参数: maxWait=200ms, minGap=10ms                                  ← 参数
+[T4] 流程: start → 30ms后signal(switchOn，轮内人为挂起) → …            ← 步骤
+[T4] 实测(执行中): 来源=["switchOn"]（switchOn轮挂起中）               ← 阶段性实测值
+[T4] 实测(计时后): 来源=["switchOn","idle"]（下一轮应为idle，…）
+[T4] ✓ 通过: 执行期丢弃 + 下一轮从本轮结束重新计时                     ← 行为级通过标记
+```
+
+断言全部失败即用例失败，`Assert.message()` 携带具体原因（期望/实际/语义），
+结果文件失败块格式：`message: <原因>, Error in <用例>, expect X equals Y` + 堆栈；
+脚本失败时单独打印"失败原因"块并以非零码退出。
+
 ## 强制保障（pre-commit hook）
 
 `pre-commit` 检测到暂存区包含 `SingleFlightLoop.ets`、`wg_tunnel/src/test/` 或本目录变更时，
