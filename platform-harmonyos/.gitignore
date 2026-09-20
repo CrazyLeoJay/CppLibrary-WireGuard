@@ -11,3 +11,4 @@
 /.appanalyzer
 .idea/*
 !/.idea/fileTemplates/
+.cache

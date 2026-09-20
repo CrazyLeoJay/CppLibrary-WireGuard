@@ -35,6 +35,7 @@ const TAG = 'VpnKeepAliveMgr';
 export interface LoopParams {
   /** 空闲最长等待：超过触发周期检查轮 */
   maxWaitMs: number;
+
   /** 最小轮间隔：两轮之间的硬性下限 */
   minGapMs: number;
 }
@@ -43,8 +44,10 @@ export interface LoopParams {
 export interface FreshnessParams {
   /** 通知新鲜度阈值：超过视为控制面失联 */
   staleMs: number;
+
   /** 状态查询回复的临时监听超时 */
   replyTimeoutMs: number;
+
   /** 存活确认后的探测抑制窗口 */
   probeSuppressMs: number;
 }
@@ -53,10 +56,13 @@ export interface FreshnessParams {
 export interface TunnelParams {
   /** 入站失联阈值（外发武装下判死） */
   inboundStaleMs: number;
+
   /** 外发武装窗口 */
   outboundWindowMs: number;
+
   /** 热重连最小间隔 */
   reconnectMinIntervalMs: number;
+
   /** 强重启兜底阈值（热重连无效后） */
   forceRestartStaleMs: number;
 }
@@ -65,6 +71,7 @@ export interface TunnelParams {
 export interface ReapplyParams {
   /** 指数退避基础间隔 */
   baseIntervalMs: number;
+
   /** 指数退避上限 */
   maxIntervalMs: number;
 }
@@ -79,14 +86,19 @@ export interface RepairParams {
 export interface KeepAliveParams {
   /** 检查循环节拍 */
   loop: LoopParams;
+
   /** 控制面新鲜度 */
   freshness: FreshnessParams;
+
   /** 隧道数据面 */
   tunnel: TunnelParams;
+
   /** 长时任务重建 */
   reapply: ReapplyParams;
+
   /** 修复策略 */
   repair: RepairParams;
+
   /** 开关宽限窗：刚开启后VEA中间态关闭广播不视为进程死亡 */
   switchGraceMs: number;
 }
@@ -184,13 +196,13 @@ class RepairModule {
 
 /** VPN控制面/数据面观察结果（observeVpn，只读观测，修复由checkRound串行执行） */
 interface ObservedVpn {
-  needRestartProcess: boolean;   // 进程死/冻结 → 重启进程
-  needRestartService: boolean;   // 进程活、服务挂起 → 重启服务
+  needRestartProcess: boolean; // 进程死/冻结 → 重启进程
+  needRestartService: boolean; // 进程活、服务挂起 → 重启服务
 }
 
 /** 长时任务观察结果（observeLongTask） */
 interface ObservedLongTask {
-  needRecreate: boolean;         // 被系统关闭/挂起 → 重建
+  needRecreate: boolean; // 被系统关闭/挂起 → 重建
 }
 
 /**
@@ -248,7 +260,6 @@ export class VpnKeepAliveManager {
       LLog.info(TAG, `长时任务已激活: taskId=${info.id}`);
       this.checkLoop.start();
     };
-
   // ==================== 模块化调参与状态（按模块分组） ====================
   /** 注入的原始调参（loop重建与switchGraceMs等根级参数来源） */
   private readonly params: KeepAliveParams;
@@ -264,11 +275,7 @@ export class VpnKeepAliveManager {
   // 为什么由主进程循环驱动检测：主进程被DATA_TRANSFER长时任务保活，
   // 锁屏/息屏期间主进程定时器持续运行；VEA进程可能被系统冻结，其内部
   // 定时器停摆无法自检，主进程是唯一可靠检测点。
-  private checkLoop: SingleFlightLoop = new SingleFlightLoop(
-    (source: string): Promise<void> => this.checkRound(source),
-    DEFAULT_KEEP_ALIVE_PARAMS.loop.maxWaitMs,
-    DEFAULT_KEEP_ALIVE_PARAMS.loop.minGapMs
-  );
+  private readonly checkLoop: SingleFlightLoop;
 
   constructor(params: KeepAliveParams = DEFAULT_KEEP_ALIVE_PARAMS) {
     this.params = params;
@@ -276,14 +283,12 @@ export class VpnKeepAliveManager {
     this.tunnel = new TunnelModule(params.tunnel);
     this.reapply = new ReapplyModule(params.reapply);
     this.repair = new RepairModule(params.repair);
-    if (params !== DEFAULT_KEEP_ALIVE_PARAMS) {
-      // 注入自定义调参：重建循环以应用自定义节拍
-      this.checkLoop = new SingleFlightLoop(
-        (source: string): Promise<void> => this.checkRound(source),
-        params.loop.maxWaitMs,
-        params.loop.minGapMs
-      );
-    }
+    // 注入自定义调参：重建循环以应用自定义节拍
+    this.checkLoop = new SingleFlightLoop(
+      (source: string): Promise<void> => this.checkRound(source),
+      params.loop.maxWaitMs,
+      params.loop.minGapMs
+    );
   }
 
   // ==================== 其他状态 ====================
@@ -449,17 +454,19 @@ export class VpnKeepAliveManager {
     const o: ObservedVpn = { needRestartProcess: false, needRestartService: false };
     const now: number = Date.now();
     if (now - this.freshness.lastNotifyTime <= this.freshness.staleMs) {
-      return o;   // 通知新鲜：控制面健康
+      return o; // 通知新鲜：控制面健康
     }
     if (this.isForceRestarting) {
-      return o;   // 强重启进行中，等待自行恢复
+      return o; // 强重启进行中，等待自行恢复
     }
-    if (this.freshness.lastAliveConfirmTime > 0 && now - this.freshness.lastAliveConfirmTime < this.freshness.probeSuppressMs) {
+    if (this.freshness.lastAliveConfirmTime > 0 &&
+      now - this.freshness.lastAliveConfirmTime < this.freshness.probeSuppressMs) {
       LLog.info(TAG, `控制面检查: 已${Math.floor((now - this.freshness.lastNotifyTime) / 1000)}s无通知，` +
         `${Math.floor((now - this.freshness.lastAliveConfirmTime) / 1000)}s前刚确认存活（抑制窗口内），跳过`);
       return o;
     }
-    LLog.warn(TAG, `控制面检查: ${Math.floor((now - this.freshness.lastNotifyTime) / 1000)}s未收到任何VEA通知，查询消歧`);
+    LLog.warn(TAG,
+      `控制面检查: ${Math.floor((now - this.freshness.lastNotifyTime) / 1000)}s未收到任何VEA通知，查询消歧`);
     const reply = await this.queryVeaStatusWithReply();
     if (reply == null) {
       // 超时无回复：VEA运行中但不应答=冻结（未运行会本地自答回复QUERY_NO_RUNNING）
@@ -748,7 +755,7 @@ export class VpnKeepAliveManager {
       const status = WireGuard.config.status.getConfig();
       LLog.info(TAG,
         `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}, ` +
-        `switchIntent=${status.isSwitchOpen}/${status.switchConfigId}`);
+          `switchIntent=${status.isSwitchOpen}/${status.switchConfigId}`);
 
       if (tag === VpnEventTag.QUERY_NO_RUNNING) {
         // 仅表示"查询时VEA未运行"的信息事件（发布时不带vpnThreadRunning），
@@ -1014,7 +1021,8 @@ export class VpnKeepAliveManager {
     }
     if ((now - this.tunnel.lastOutboundTime) > this.tunnel.outboundWindowMs) {
       // 无入站且无外发：keepalive=0的空闲隧道，无法区分空闲与失效，跳过
-      LLog.info(TAG, `隧道健康检查: ${Math.floor(inboundIdleMs / 1000)}s无入站且近${this.tunnel.outboundWindowMs / 1000}s无外发（空闲隧道），跳过判定`);
+      LLog.info(TAG, `隧道健康检查: ${Math.floor(inboundIdleMs / 1000)}s无入站且近${this.tunnel.outboundWindowMs /
+        1000}s无外发（空闲隧道），跳过判定`);
       return;
     }
     LLog.warn(TAG, `隧道健康检查: ${Math.floor(inboundIdleMs / 1000)}s无成功入站且外发活跃，判定隧道疑似失效`);
