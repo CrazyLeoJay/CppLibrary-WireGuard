@@ -78,6 +78,8 @@ export class SingleFlightLoop {
   private pendingSource: string = '';
   /** 未启动保底单轮的互斥标志：与主循环同等单飞行语义，防信号风暴并发多轮 */
   private bootstrapRunning: boolean = false;
+  /** 循环代际：start/stop各自自增；旧代循环据此退出，防stop→start快速重启时旧循环被running翻转复活成双循环 */
+  private epoch: number = 0;
 
   constructor(round: (source: string) => Promise<void>,
     maxWaitInterval: number = DEFAULT_MAX_WAIT_INTERVAL,
@@ -94,9 +96,10 @@ export class SingleFlightLoop {
     }
     this.started = true;
     this.running = true;
+    const gen: number = ++this.epoch;
     LLog.info(TAG,
-      `循环启动: 最长等待=${this.maxWaitInterval / 1000}s, 最小间隔=${this.minRoundGap / 1000}s`);
-    this.runLoop();
+      `循环启动: gen=${gen}, 最长等待=${this.maxWaitInterval / 1000}s, 最小间隔=${this.minRoundGap / 1000}s`);
+    this.runLoop(gen);
   }
 
   /** 停止循环：置停并唤醒挂起的睡眠，在途一轮跑完自然退出 */
@@ -106,6 +109,7 @@ export class SingleFlightLoop {
     }
     this.started = false;
     this.running = false;
+    this.epoch++;             // 旧代循环即使被快速start翻转running，代际不匹配也会退出
     this.pendingSource = '';
     this.wakeWaiter(WakeReason.TIMEOUT);
     LLog.info(TAG, '循环已停止');
@@ -128,7 +132,7 @@ export class SingleFlightLoop {
         return;
       }
       this.bootstrapRunning = true;
-      this.runOnce(source).finally(() => {
+      this.runOnce(source, this.epoch).finally(() => {
         this.bootstrapRunning = false;
       });
       return;
@@ -144,28 +148,28 @@ export class SingleFlightLoop {
 
   // ===================== 主循环 =====================
 
-  private async runLoop(): Promise<void> {
-    while (this.running) {
+  private async runLoop(gen: number): Promise<void> {
+    while (this.running && gen === this.epoch) {
       // 睡眠：从上一轮结束起算；信号随时唤醒，空闲超时兜底
       await this.awaitSignalOrTimeout(this.maxWaitInterval);
-      if (!this.running) {
+      if (!this.running || gen !== this.epoch) {
         break;
       }
       // 执行：单协程串行——执行期 slot 为空，signal() 自动丢弃。
       // 来源：信号唤醒轮用落账的 source，超时唤醒轮为 'idle'
       const source: string = this.pendingSource != '' ? this.pendingSource : 'idle';
       this.pendingSource = '';
-      await this.runOnce(source);
+      await this.runOnce(source, gen);
     }
   }
 
   /** 执行一轮（含最小执行间隔推迟与异常隔离：一轮失败不能中断循环） */
-  private async runOnce(source: string): Promise<void> {
+  private async runOnce(source: string, gen: number): Promise<void> {
     const sinceLast: number = Date.now() - this.lastRoundEnd;
     if (this.lastRoundEnd > 0 && sinceLast < this.minRoundGap) {
       LLog.info(TAG, `信号(${source})距上一轮结束仅${sinceLast}ms，推迟${this.minRoundGap - sinceLast}ms`);
       await this.sleep(this.minRoundGap - sinceLast);
-      if (!this.running) {
+      if (!this.running || gen !== this.epoch) {
         return;
       }
     }

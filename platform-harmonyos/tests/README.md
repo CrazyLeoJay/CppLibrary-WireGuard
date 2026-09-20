@@ -45,6 +45,7 @@ hvigorw test -p module=wg_tunnel -p coverage=false
 | T13 | a/b | stop后完全静止 / 重新start周期恢复 |
 | T14 长轮次 | a/b | 轮时长>maxWait不叠加 / 下一轮=轮结束+maxWait |
 | T15 defer窗口 | a/b | 窗口内信号丢弃、推迟轮照常执行 / 间隔≥minGap下限 |
+| T16 快速重启 | — | stop→立即start不产生双循环（epoch代际校验：旧代循环强制退场；start幂等保留首循环，stop后start可重启） |
 
 本地引擎定时器精度低于 Node，T1 轮数断言写"≥2"；间隔断言（≥ maxWait/minGap 下限）承担"计时随轮重启"的精确校验。
 

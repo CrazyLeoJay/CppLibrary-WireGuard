@@ -290,6 +290,22 @@ async function scenarioT15(): Promise<ObservedSourcesTimes> {
   return { sources: sources, times: times };
 }
 
+/** T16场景：循环建立后 stop → 同步立即 start（不给旧循环微任务退出的机会，复活竞态） */
+async function scenarioT16(): Promise<ObservedCount> {
+  let rounds: number = 0;
+  const loop = new SingleFlightLoop(async (): Promise<void> => {
+    rounds++;
+  }, 100, 10);
+  loop.start();
+  await sleep(150);   // 建立循环并跑出基线轮次
+  loop.stop();
+  loop.start();       // 同步紧接：旧循环被唤醒检查时running已翻回true
+  await sleep(450);
+  loop.stop();
+  log('T16', `参数: maxWait=100ms, minGap=10ms; 实测: stop→立即start后450ms内${rounds}轮`);
+  return { count: rounds };
+}
+
 // ==================== 行为级用例（用例名=被验证的行为） ====================
 export default function singleFlightLoopTest(): void {
   describe('SingleFlightLoopTest', () => {
@@ -407,6 +423,14 @@ export default function singleFlightLoopTest(): void {
       const o = await scenarioT13();
       expect(o.afterRestart >= o.afterQuiet + 2)
         .message(`T13b: 重启后周期应恢复（${o.afterQuiet}→${o.afterRestart}，应≥+2）`)
+        .assertTrue();
+    });
+
+    // ---------- T16 极限-stop立即start快速重启 ----------
+    it('T16_stop后立即start快速重启_不产生双循环', 0, async () => {
+      const o = await scenarioT16();
+      expect(o.count >= 3 && o.count <= 6)
+        .message(`T16: stop→立即start应仍为单循环（实际${o.count}轮，≈8-10轮说明旧循环被running翻转复活成双循环，epoch校验失效）`)
         .assertTrue();
     });
 
