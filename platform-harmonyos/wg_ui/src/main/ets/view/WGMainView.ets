@@ -369,6 +369,12 @@ struct MainItemView {
       .alignItems(HorizontalAlign.Start)
 
       Blank().layoutWeight(1)
+      if (this.data.busyLabel != undefined) {
+        Text(this.data.busyLabel)
+          .fontSize('12fp')
+          .fontColor('#666666')
+          .margin({ right: '8vp' })
+      }
       Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
         .size({
           width: '50vp',

@@ -235,6 +235,18 @@ export class MainItemData {
     return this.data.id!;
   }
 
+  /**
+   * 事务进行中的状态文案（开启中/关闭中/切换中）：
+   * 仅本行是当前事务目标时显示；idle或非目标行返回undefined不渲染
+   */
+  get busyLabel(): string | undefined {
+    const s = vpnToggleService;
+    if (s.phase === 'idle' || s.targetId !== this.id) {
+      return undefined;
+    }
+    return s.phase === 'starting' ? '开启中' : s.phase === 'stopping' ? '关闭中' : '切换中';
+  }
+
   onClick() {
     this.isClick = true
   }

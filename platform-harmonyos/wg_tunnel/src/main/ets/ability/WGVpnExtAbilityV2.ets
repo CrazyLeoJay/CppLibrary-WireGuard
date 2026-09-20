@@ -41,7 +41,7 @@
  * Created on 2026/8/27.
  * @author leojay`fu
  */
-import { bundleManager, errorManager, Want } from '@kit.AbilityKit';
+import { errorManager, Want } from '@kit.AbilityKit';
 import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { LLog } from '../tools/LLog';
@@ -65,8 +65,9 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   // 未捕获异常监听句柄：进程死亡前尽力上报（满足"所有失败必须有报错"）
   private errorObserver?: errorManager.GlobalObserver;
   // VPN会话管理器：连接生命周期/流日志消费/网络监听调整
+  // 进程关闭权在主进程：会话收尾后广播serviceStopped（明确回复），主进程收到后stopVpnExtensionAbility
   private session: VpnSessionManager = new VpnSessionManager(() => {
-    this.selfTerminate();
+    VPNChangeHelperV2.serviceStopped();
   });
 
   override onCreate(want: Want): void {
@@ -77,10 +78,13 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       this.errorObserver = (err: errorManager.GlobalError) => {
         LLog.error(TAG, `VEA未捕获异常: ${err.message ?? '未知'}`);
         try {
+          // 尽力清理（进程即将死亡）：注销监听+销毁VPN连接（含destroy重试），减少系统DNS/路由残留
+          this.unlistenEvents();
+          this.session.shutdown();
           VPNChangeHelperV2.startVpnThrow(`VPN进程内部异常: ${err.message ?? '未知'}`);
         } catch (e) {
           // 上报失败只能留日志（进程即将死亡）
-          LLog.error(TAG, `未捕获异常上报失败: ${JSON.stringify(e)}`);
+          LLog.error(TAG, `未捕获异常清理/上报失败: ${JSON.stringify(e)}`);
         }
       };
       errorManager.on('globalErrorOccurred', this.errorObserver);
@@ -119,7 +123,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       const t = e as BusinessError;
       LLog.error(TAG, e);
       VPNChangeHelperV2.startVpnThrow(`${t.message}\n${t.stack}`);
-      this.selfTerminate();
+      // 进程关闭权在主进程：广播serviceStopped（明确回复），主进程收到后关闭进程
+      VPNChangeHelperV2.serviceStopped();
     }
   }
 
@@ -183,19 +188,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     // 停止配置请求轮询
     this.stopConfigQueryPolling();
 
-    // 取消事件订阅
-    if (this.configRequestCancel != undefined) {
-      this.configRequestCancel.cancel();
-      this.configRequestCancel = undefined;
-    }
-    if (this.vpnStatusQueryCancel != undefined) {
-      this.vpnStatusQueryCancel.cancel();
-      this.vpnStatusQueryCancel = undefined;
-    }
-    if (this.reconnectRequestCancel != undefined) {
-      this.reconnectRequestCancel.cancel();
-      this.reconnectRequestCancel = undefined;
-    }
+    // 注销事件订阅
+    this.unlistenEvents();
 
     // 注销未捕获异常监听
     if (this.errorObserver != undefined) {
@@ -211,6 +205,25 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
     // 通知主进程VEA关闭
     VPNChangeHelperV2.stopVpn();
+  }
+
+  /**
+   * 注销CommonEvent订阅（shutdown路径第一步：状态机"聋掉"后，
+   * destroy/close 过程中的系统事件不再触发任何指令处理，消灭关闭竞态）
+   */
+  private unlistenEvents(): void {
+    if (this.configRequestCancel != undefined) {
+      this.configRequestCancel.cancel();
+      this.configRequestCancel = undefined;
+    }
+    if (this.vpnStatusQueryCancel != undefined) {
+      this.vpnStatusQueryCancel.cancel();
+      this.vpnStatusQueryCancel = undefined;
+    }
+    if (this.reconnectRequestCancel != undefined) {
+      this.reconnectRequestCancel.cancel();
+      this.reconnectRequestCancel = undefined;
+    }
   }
 
   // ===== 配置请求轮询 =====
@@ -229,9 +242,9 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
         return;
       }
       if (this.configQueryRetries >= 30) {
-        LLog.error(TAG, '配置请求超时(30次)，关闭VEA');
+        LLog.error(TAG, '配置请求超时(30次)，广播serviceStopped交由主进程关闭VEA');
         this.stopConfigQueryPolling();
-        this.selfTerminate();
+        VPNChangeHelperV2.serviceStopped();
         return;
       }
       this.doConfigQuery();
@@ -251,19 +264,6 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     LLog.info(TAG, `配置请求已发送, 第${this.configQueryRetries}次`);
   }
 
-  private selfTerminate(): void {
-    bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT)
-      .then((bundleInfo) => {
-        vpnExtension.stopVpnExtensionAbility({
-          deviceId: '',
-          bundleName: bundleInfo.name,
-          abilityName: 'WGVpnExtAbility',
-        }).catch((e: BusinessError) => {
-          LLog.error(TAG, `自关闭VEA失败: ${e.message}`);
-        });
-      });
-  }
-
   // ===== 配置指令分发 =====
 
   private onConfigRequest(params: VpnConfigRequestParams): void {
@@ -280,6 +280,9 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
         }
         break;
       case VpnConfigAction.STOP:
+        // shutdown路径：先注销指令订阅（状态机"聋掉"，销毁过程零竞态），
+        // 会话按序收尾（destroy→close）后广播serviceStopped，进程由主进程关闭
+        this.unlistenEvents();
         this.session.stop();
         break;
       case VpnConfigAction.SWITCH:

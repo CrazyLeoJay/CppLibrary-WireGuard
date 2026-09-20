@@ -26,6 +26,7 @@ import { MessageType, StreamDirection, StreamLogMessage } from '../model/entity/
 import { SubEventCancel } from '../model/WGEvent';
 import { longTaskModel, ContinuousTaskState } from './LongTaskModel';
 import { SingleFlightLoop } from './SingleFlightLoop';
+import { WGSettingsPrefs } from '../model/WGSettingsPrefs';
 
 const TAG = 'VpnKeepAliveMgr';
 
@@ -203,6 +204,12 @@ interface ObservedVpn {
 /** 长时任务观察结果（observeLongTask） */
 interface ObservedLongTask {
   needRecreate: boolean; // 被系统关闭/挂起 → 重建
+}
+
+/** DNS残留诊断结果 */
+interface DnsDiagnosis {
+  residue: boolean;   // true=检测到残留
+  detail: string;     // 观测明细（系统DNS/VPN DNS/bearer）
 }
 
 /**
@@ -973,6 +980,8 @@ export class VpnKeepAliveManager {
     this.checkLoop.stop();
     longTaskModel.setServiceStopped(true);
     longTaskModel.publishNotification();
+    // 明确回复到达（网络已拆干净）：确认系统DNS/网络已恢复
+    this.confirmVpnNetworkCleanup();
   }
 
   private stopLongTaskIfNeeded(): void {
@@ -1105,6 +1114,7 @@ export class VpnKeepAliveManager {
   private async confirmVpnNetworkCleanup(): Promise<void> {
     const maxRetries: number = 3;
     const retryInterval: number = 2000;
+    const vpnDns: string[] = await WGSettingsPrefs.getLastVpnDns();
     for (let i = 0; i < maxRetries; i++) {
       try {
         const netHandle = connection.getDefaultNetSync();
@@ -1114,11 +1124,16 @@ export class VpnKeepAliveManager {
         }
         const capInfo = await connection.getNetCapabilities(netHandle);
         const hasVpnBearer = capInfo.bearerTypes.includes(connection.NetBearType.BEARER_VPN);
-        if (!hasVpnBearer) {
-          LLog.info(TAG, `VPN网络清理确认: VPN bearer已移除(${i + 1}/${maxRetries})`);
+        // DNS残留检测：默认网络解析配置中是否仍含VPN的DNS服务器
+        const props = await connection.getConnectionProperties(netHandle);
+        const dnses: string[] = props.dnses.map((d: connection.NetAddress): string => d.address);
+        const dnsHit: string[] = dnses.filter((d: string): boolean => vpnDns.includes(d));
+        if (!hasVpnBearer && dnsHit.length === 0) {
+          LLog.info(TAG, `VPN网络清理确认: bearer已移除且DNS无残留(${i + 1}/${maxRetries})`);
           return;
         }
-        LLog.warn(TAG, `VPN网络清理确认: VPN bearer仍存在(${i + 1}/${maxRetries})，等待重试`);
+        LLog.warn(TAG, `VPN网络清理确认: vpnBearer=${hasVpnBearer}, DNS残留=[${dnsHit.join(',')}]` +
+          `(${i + 1}/${maxRetries})，等待重试`);
       } catch (e) {
         LLog.warn(TAG, `VPN网络清理确认: 检查异常(${i + 1}/${maxRetries}): ${(e as BusinessError).message}`);
       }
@@ -1126,7 +1141,87 @@ export class VpnKeepAliveManager {
         await new Promise<void>((resolve) => setTimeout(resolve, retryInterval));
       }
     }
-    LLog.warn(TAG, 'VPN网络清理确认: 重试耗尽，VPN bearer可能未清理');
+    LLog.error(TAG, 'VPN网络清理确认: 重试耗尽，系统DNS/网络可能未恢复');
+    WireGuard.event.publishVpnThrow('VPN已关闭但系统DNS可能未恢复，建议开关一次WiFi/飞行模式');
+  }
+
+  // ===================== DNS残留诊断与修复（设置页「修复DNS」按钮） =====================
+
+  /**
+   * 诊断系统DNS残留（只读）
+   *
+   * 默认网络的解析配置（dnses）与最近一次VPN的DNS求交集 + VPN bearer检查。
+   * 参照来源：WGSettingsPrefs.last_vpn_dns（runWGConfig启动时记录）。
+   */
+  async diagnoseDnsResidue(): Promise<DnsDiagnosis> {
+    const vpnDns: string[] = await WGSettingsPrefs.getLastVpnDns();
+    const result: DnsDiagnosis = { residue: false, detail: '' };
+    const netHandle = connection.getDefaultNetSync();
+    if (netHandle.netId === 0) {
+      result.residue = false;
+      result.detail = '无默认网络';
+      return result;
+    }
+    const props = await connection.getConnectionProperties(netHandle);
+    const dnses: string[] = props.dnses.map((d: connection.NetAddress): string => d.address);
+    const caps = await connection.getNetCapabilities(netHandle);
+    const vpnBearer = caps.bearerTypes.includes(connection.NetBearType.BEARER_VPN);
+    const hit: string[] = dnses.filter((d: string): boolean => vpnDns.includes(d));
+    result.residue = hit.length > 0 || vpnBearer;
+    result.detail = `系统DNS=[${dnses.join(', ')}], VPN DNS=[${vpnDns.join(', ')}], VPN bearer=${vpnBearer}`;
+    return result;
+  }
+
+  /**
+   * 修复DNS残留（设置页「修复DNS」按钮）：诊断 → 尽力修复 → 复检 → 指引
+   *
+   * 主进程无写系统DNS的API，能做的修复动作：
+   * 1. VEA存活 → 重发STOP触发destroy重试（shutdown序列与重试预算见VpnSessionManager）；
+   * 2. reportNetConnected(物理网络)——系统提供的唯一"通知网络刷新"入口；
+   * 3. 复检×2，仍残留返回'manual'（UI指引开关WiFi/飞行模式，替代重启手机）。
+   *
+   * @returns 'clean'=无残留 | 'vpn-on'=VPN运行中无需修复 | 'repaired'=已修复 | 'manual'=需手动干预
+   */
+  async repairDnsResidue(): Promise<string> {
+    if (WireGuard.config.status.getConfig().isSwitchOpen) {
+      LLog.info(TAG, 'DNS修复: VPN运行中，DNS经隧道转发属正常，无需修复');
+      return 'vpn-on';
+    }
+    let d = await this.diagnoseDnsResidue();
+    if (!d.residue) {
+      return 'clean';
+    }
+    LLog.warn(TAG, `DNS修复: 检测到残留(${d.detail})，尝试修复`);
+    // 1. VEA存活 → 重发STOP触发destroy重试
+    try {
+      if (await WireGuard.tools.isVpnExtensionRunning()) {
+        WireGuard.event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
+      }
+    } catch (e) {
+      LLog.warn(TAG, `DNS修复: 触发VEA销毁失败: ${(e as Error).message}`);
+    }
+    // 2. 通知系统物理网络可用，促使刷新默认网/解析配置
+    try {
+      const netHandle = connection.getDefaultNetSync();
+      if (netHandle.netId !== 0) {
+        await connection.reportNetConnected(netHandle);
+      }
+    } catch (e) {
+      LLog.warn(TAG, `DNS修复: reportNetConnected失败: ${(e as Error).message}`);
+    }
+    // 3. 复检×2（2s/3s间隔，给系统刷新时间）
+    await new Promise<void>((resolve) => setTimeout(resolve, 2000));
+    d = await this.diagnoseDnsResidue();
+    if (!d.residue) {
+      return 'repaired';
+    }
+    await new Promise<void>((resolve) => setTimeout(resolve, 3000));
+    d = await this.diagnoseDnsResidue();
+    if (!d.residue) {
+      return 'repaired';
+    }
+    LLog.error(TAG, `DNS修复: 复检仍残留(${d.detail})`);
+    return 'manual';
   }
 }
 

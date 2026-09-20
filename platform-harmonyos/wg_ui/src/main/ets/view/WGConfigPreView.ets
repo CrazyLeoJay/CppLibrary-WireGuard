@@ -383,6 +383,16 @@ struct InterfaceCardView {
       }
       .cardBackgroundStyle()
 
+      if (this.vm.busyText != undefined) {
+        Text(this.vm.busyText)
+          .fontSize('12fp')
+          .fontColor('#666666')
+          .layoutGravity(LocalizedAlignment.TOP_END)
+          .margin({
+            top: '30vp',
+            right: '100vp',
+          })
+      }
       Toggle({
         type: ToggleType.Switch,
         isOn: this.vm.isVpnOpen!!,

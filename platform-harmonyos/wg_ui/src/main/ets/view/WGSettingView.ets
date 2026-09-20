@@ -211,6 +211,22 @@ struct WGSettingView {
       .layoutWeight(1)
       .itemRowStyle()
     }
+    ListItem() {
+      Column({ space: '4vp' }) {
+        Text("修复DNS")
+          .defaultTagTitleStyle()
+        Text("检测并尝试修复关闭VPN后残留的系统DNS")
+          .width('100%')
+          .fontSize('12fp')
+      }
+      .onClick(() => {
+        this.vm.repairDns(this.getUIContext()).catch((e: BusinessError) => {
+          LLog.error(TAG, e)
+        })
+      })
+      .layoutWeight(1)
+      .itemRowStyle()
+    }
   }
 
   /**

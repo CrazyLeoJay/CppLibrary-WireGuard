@@ -50,11 +50,11 @@ export class VpnSessionManager {
   private netConnection?: connection.NetConnection;
   /** VEA上下文：创建VpnConnection用 */
   private context?: vpnExtension.VpnExtensionContext;
-  /** 致命错误回调：VEA自关闭进程（如启动失败terminateOnFailure路径） */
-  private onSelfTerminate: () => void;
+  /** 进程关闭请求回调：VEA广播serviceStopped（明确回复），主进程收到后关闭进程（进程关闭权在主进程） */
+  private onRequestProcessClose: () => void;
 
-  constructor(onSelfTerminate: () => void) {
-    this.onSelfTerminate = onSelfTerminate;
+  constructor(onRequestProcessClose: () => void) {
+    this.onRequestProcessClose = onRequestProcessClose;
   }
 
   setContext(context: vpnExtension.VpnExtensionContext): void {
@@ -95,27 +95,35 @@ export class VpnSessionManager {
   }
 
   /**
-   * STOP：停止VPN服务
+   * STOP：停止VPN服务（用户关闭 → shutdown路径，进程由主进程关闭）
    *
-   * 确认VPN任务已关闭（stopServer完成、状态已广播）后自行关闭VEA进程——
-   * 主进程只发STOP指令不直接杀进程，进程退出由服务自己完成，保证清理完整。
+   * 严格按序（ability层已先行注销CommonEvent指令订阅，状态机"聋掉"）：
+   * 1. 注销网络监听（本层）；
+   * 2. stopServer：destroy注销系统VPN配置（路由+DNS，重试预算内完成，耗尽广播残留提示）
+   *    → 停止VPN服务（client.close）；
+   * 3. 广播 VPN_SERVICE_STOPPED（明确回复：网络已拆干净）。
+   * 本进程不再自我关闭——进程关闭权在主进程（收到VPN_SERVICE_STOPPED后
+   * stopVpnExtensionAbility）。
    */
   async stop(): Promise<void> {
-    LLog.info(TAG, '停止VPN服务');
+    LLog.info(TAG, '停止VPN服务(shutdown路径)');
 
+    // 1. 注销本层网络监听
+    this.unregisterNetConnection();
+
+    // 2. destroy（重试预算，耗尽广播残留提示）→ 停止VPN服务
     if (this.vpnConnection != undefined) {
       try {
         await this.vpnConnection.stopServer();
-        LLog.info(TAG, 'stop: stopServer成功');
+        LLog.info(TAG, 'stop: VPN网络已注销、VPN服务已停止');
       } catch (e) {
-        LLog.error(TAG, `stop: stopServer异常，继续清理: ${JSON.stringify(e)}`);
+        LLog.error(TAG, `stop: destroy预算耗尽，VPN网络/DNS可能残留: ${JSON.stringify(e)}`);
+        VPNChangeHelperV2.startVpnThrow('VPN已关闭但系统DNS可能残留，建议开关一次WiFi/飞行模式');
       }
+      this.vpnConnection = undefined;
     } else {
       LLog.info(TAG, 'stop: vpnConnection已为空，跳过stopServer');
     }
-    this.vpnConnection = undefined;
-
-    this.unregisterNetConnection();
 
     this.currentConfig = undefined;
     this.hasDomainEndpoint = false;
@@ -123,10 +131,8 @@ export class VpnSessionManager {
 
     WireGuard.config.status.vpnStop();
 
+    // 3. 广播明确回复（主进程收到后 stopVpnExtensionAbility 关闭VEA进程）
     VPNChangeHelperV2.serviceStopped();
-
-    // 服务已确认关闭 → 自行关闭VEA进程
-    this.onSelfTerminate();
   }
 
   /** SWITCH：切换到新配置（先准备新配置，成功后才停旧连接） */
@@ -279,7 +285,7 @@ export class VpnSessionManager {
       LLog.error(TAG, `DNS解析或VPN启动失败: ${JSON.stringify(e)}`);
       VPNChangeHelperV2.startVpnThrow(`${e instanceof Error ? e.message : String(e)}`);
       if (terminateOnFailure) {
-        this.onSelfTerminate();
+        this.onRequestProcessClose();
       }
       return false;
     }
@@ -317,7 +323,7 @@ export class VpnSessionManager {
         VPNChangeHelperV2.startVpnThrow(err.message);
       }
       if (terminateOnFailure) {
-        this.onSelfTerminate();
+        this.onRequestProcessClose();
       }
       return false;
     }

@@ -137,6 +137,15 @@ export default class WGConfigPreViewModel {
   isSwitchClick: boolean = false;
   @Trace isSwitchEnable: boolean = true;
 
+  /** 事务进行中的状态文案（开启中/关闭中/切换中），idle时undefined */
+  get busyText(): string | undefined {
+    const p = vpnToggleService.phase;
+    if (p === 'idle') {
+      return undefined;
+    }
+    return p === 'starting' ? '开启中' : p === 'stopping' ? '关闭中' : '切换中';
+  }
+
   /**
    * 预览页开关点击处理（第一道闸门：isSwitchClick 手势守卫——仅真实点击进入，
    * 程序性赋值引发的 onChange 因标记 false 空跑返回；主界面被动刷新亦不触发本方法）
