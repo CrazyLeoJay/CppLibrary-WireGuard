@@ -25,21 +25,38 @@ hvigorw test -p module=wg_tunnel -p coverage=false
 ⚠️ hvigor 在用例失败时退出码仍可能为 0，**以结果文件为准**：
 `wg_tunnel/.test/default/intermediates/test/coverage_data/test_result.txt`（`Tests run: ..., Failure: 0` 才算通过）。
 
-## 覆盖语义（11 用例 / 20+ 断言）
+## 用例组织（21 个行为级用例）
 
-| 分组 | 用例 | 语义 |
+**同一场景的多条行为断言拆分为独立 `it`，用例名 = 被验证的行为**——DevEco Studio
+测试面板的用例树本身就是"验证了哪些行为"的清单（每个 ✓ 对应一条被验证的行为），
+失败时面板直接显示该行为用例的 `Assert.message` 原因（期望/实际/语义）。
+同组 it 复用同一场景函数（确定性时序，各 it 独立重跑场景，总耗时约 15s）。
+
+| 分组 | 用例（树中可见） | 验证的行为 |
 |---|---|---|
-| 基线（未干扰） | T1 | 空闲周期触发，计时从每轮结束重新起算，来源恒为 idle |
-| | T11/T12/T13 | stop 后迟到信号保底单轮 / start 幂等 / stop→start 重启 |
-| 干扰 | T2 | 信号即时唤醒，source 透传到执行轮 |
-| | T3 | 睡眠期 N 个信号合并为 1 轮 |
-| | T4 | 执行期信号丢弃不补跑，下一轮 = 本轮结束 + maxWait |
-| | T5 | 距上轮结束不足 minGap 的唤醒推迟到满间隔 |
-| | T14 | 轮时长 > maxWait 不叠加轮次 |
-| | T15 | minGap 推迟睡眠窗口内的信号丢弃，推迟轮照常执行 |
-| 极限 | T10 | 未启动状态信号风暴仍单飞行（bootstrap 互斥回归） |
+| T1 基线 | a/b/c | 空闲周期持续触发≥2轮 / 来源恒为idle / 相邻轮间隔从上一轮结束重新起算 |
+| T2 睡眠期信号 | a/b | 恰执行一轮 / 来源透传switchOn |
+| T3 | — | 睡眠期10个信号合并为1轮 |
+| T4 执行期信号 | a/b/c | 执行期仅挂起轮在跑 / mid信号丢弃不补跑 / 下一轮idle于轮结束+maxWait触发 |
+| T5 不足minGap | a/b | 恰两轮 / 推迟轮间隔≥minGap下限 |
+| T10 未启动风暴 | — | 10连发仍单飞行（bootstrap互斥回归） |
+| T11 stop后迟到信号 | a/b | 保底恰一轮且来源late / 不进入周期轮询 |
+| T12 | — | start三重调用仍单循环节奏 |
+| T13 | a/b | stop后完全静止 / 重新start周期恢复 |
+| T14 长轮次 | a/b | 轮时长>maxWait不叠加 / 下一轮=轮结束+maxWait |
+| T15 defer窗口 | a/b | 窗口内信号丢弃、推迟轮照常执行 / 间隔≥minGap下限 |
 
-本地引擎定时器精度低于 Node，T1 断言"轮数 ≥ 2"而非具体轮数；间隔断言（≥ maxWait/minGap 下限）承担"计时随轮重启"的精确校验。
+本地引擎定时器精度低于 Node，T1 轮数断言写"≥2"；间隔断言（≥ maxWait/minGap 下限）承担"计时随轮重启"的精确校验。
+
+### 输出去向（重要）
+
+- **DevEco Studio 测试面板**：显示用例树（21 项行为 ✓/✗）+ 失败时的 message 原因。
+  **用例内的 console 输出不会显示在面板上**——LocalUnit runner 将其重定向至
+  coverage.log，属框架行为。
+- **阶段性流程输出**（每场景的参数/实测值）：位于
+  `wg_tunnel/.test/default/intermediates/test/coverage_data/coverage.log`
+  （IDE 中可直接打开该文件），或运行 `run-local-unit-test.sh` 在终端查看提取后的
+  行为明细（各用例结果表 + 行为明细 + 汇总，失败时单独打印失败原因块）。
 
 ## 输出结构（每个用例自解释）
 
