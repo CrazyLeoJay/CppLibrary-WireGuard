@@ -1,0 +1,16 @@
+#!/bin/sh
+# pre-commit: SingleFlightLoop（保活/通知调度核心）变更时强制运行为为单元测试
+# 安装方式见 platform-harmonyos/tests/README.md
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "SingleFlightLoop\.ets$|single-flight-loop\.test\.mjs$")
+if [ -n "$STAGED" ]; then
+  echo "pre-commit: 检测到 SingleFlightLoop 变更，运行行为单元测试..."
+  ( cd "$(git rev-parse --show-toplevel)/platform-harmonyos" && node tests/single-flight-loop.test.mjs )
+  if [ $? -ne 0 ]; then
+    echo ""
+    echo "pre-commit: 单元测试未通过，提交已阻止。"
+    echo "  修复后重试；确需跳过: git commit --no-verify（不建议）"
+    exit 1
+  fi
+fi
+exit 0
