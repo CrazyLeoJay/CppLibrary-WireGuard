@@ -219,8 +219,8 @@ export class VpnKeepAliveManager {
    * 一轮保活检查（检查循环的执行体，单飞行串行内执行）
    *
    * 所有触发源（switchOn / 系统取消挂起回调 / 空闲周期 / 退后台 / 广播 / 回前台）
-   * 经 checkLoop.signal 汇聚于此。结构：意图门 → 双观察并行（Promise.all）→
-   * 修复串行执行（先保活锚点，后VPN恢复，避免修复动作交错）→ 隧道数据面恢复。
+   * 经 checkLoop.signal 汇聚于此。结构：意图门 → Promise.all 并行双任务——
+   * "VPN检查+结果处理"与"长时任务检查+结果处理"各自在任务内闭环完成。
    *
    * @param source 触发来源（日志定位；'idle'=空闲周期轮，其余为事件/用户源）
    */
@@ -232,15 +232,35 @@ export class VpnKeepAliveManager {
     if (!WireGuard.config.status.getConfig().isSwitchOpen) {
       return;
     }
-    // 双观察并行（只读观测）：VPN控制面/数据面健康 + 长时任务系统状态
-    const vpnPromise: Promise<ObservedVpn> = this.observeVpn();
-    const taskPromise: Promise<ObservedLongTask> = this.observeLongTask(ctx);
-    const vpn: ObservedVpn = await vpnPromise;
-    const task: ObservedLongTask = await taskPromise;
+    await Promise.all([
+      this.checkAndRepairVpn().catch((e: Error): void => {
+        LLog.error(TAG, `VPN检查/修复任务异常: ${e.message}`);
+      }),
+      this.checkAndRepairLongTask(source, ctx).catch((e: Error): void => {
+        LLog.error(TAG, `长时任务检查/修复任务异常: ${e.message}`);
+      }),
+    ]);
+  }
 
-    // 修复串行执行
+  /** VPN任务闭环：观察控制面 → 修复（重启进程/重启服务） → 数据面隧道恢复 */
+  private async checkAndRepairVpn(): Promise<void> {
+    const vpn: ObservedVpn = await this.observeVpn();
+    if (vpn.needRestartProcess) {
+      await this.repairVpnProcess();
+      return;
+    }
+    if (vpn.needRestartService) {
+      await this.repairVpnService();
+      return;
+    }
+    // 数据面隧道失效（有通知但入站死+外发武装）：既有热重连→强重启两级恢复
+    this.checkVpnTunnelHealth();
+  }
+
+  /** 长时任务闭环：观察系统状态 → 被系统关闭/挂起则重建（空闲轮退避，事件源立即） */
+  private async checkAndRepairLongTask(source: string, ctx: common.UIAbilityContext): Promise<void> {
+    const task: ObservedLongTask = await this.observeLongTask(ctx);
     if (task.needRecreate) {
-      // 长时任务被系统关闭/挂起 → 重建（空闲周期轮走指数退避，事件/用户源立即）
       await this.reapplyKeepAlive(source !== 'idle');
       await this.reconcileExtraTasks();
     } else {
@@ -248,13 +268,6 @@ export class VpnKeepAliveManager {
       this.checkLoop.start();
       await this.reconcileExtraTasks();
     }
-    if (vpn.needRestartProcess) {
-      await this.repairVpnProcess();
-    } else if (vpn.needRestartService) {
-      await this.repairVpnService();
-    }
-    // 数据面隧道失效（有通知但入站死+外发武装）：既有热重连→强重启两级恢复
-    this.checkVpnTunnelHealth();
   }
 
   /**
