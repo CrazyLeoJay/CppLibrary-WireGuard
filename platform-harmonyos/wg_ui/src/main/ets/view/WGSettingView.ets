@@ -64,7 +64,7 @@ struct WGSettingView {
     this.vm.refreshNetworkStatus();
   }
 
-  /** 「修复网络」小字：当前网络状态实时摘要 */
+  /** 「修复网络」小字：当前网络状态实时摘要（当前网络/VPN挂载/残留/是否正常） */
   get networkStatusText(): string {
     const s = networkResidueState;
     if (s.checking) {
@@ -77,9 +77,9 @@ struct WGSettingView {
       return '当前无可用网络，建议检查网络连接';
     }
     if (s.residue) {
-      return `检测到VPN网络残留，建议修复（${s.detail}）`;
+      return `当前网络=${s.netType}，VPN网络仍挂载，存在残留，建议修复`;
     }
-    return `网络正常（${s.detail}），无VPN残留`;
+    return `当前网络=${s.netType}，VPN网络未挂载，无残留，网络正常`;
   }
 
   @Styles

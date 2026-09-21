@@ -208,9 +208,10 @@ interface ObservedLongTask {
 
 /** 网络/VPN残留诊断结果 */
 interface NetworkDiagnosis {
-  residue: boolean;     // true=检测到残留
+  residue: boolean;     // true=VPN网络仍挂载（残留）
   hasNetwork: boolean;  // false=无默认网络（可能正是残留坏状态）
-  detail: string;       // 观测明细（当前网络/系统DNS/VPN bearer）
+  netType: string;      // 当前网络类型（WiFi/移动数据/以太网）
+  detail: string;       // 简明状态摘要
 }
 
 // ==================== 网络残留全局状态（AppStorageV2，设置页/诊断UI共享） ====================
@@ -229,7 +230,9 @@ export class NetworkResidueState {
   @Trace residue: boolean = false;
   /** 设备当前是否有可用网络 */
   @Trace hasNetwork: boolean = true;
-  /** 状态明细（当前网络/系统DNS/VPN bearer） */
+  /** 当前网络类型（WiFi/移动数据/以太网） */
+  @Trace netType: string = '';
+  /** 简明状态摘要 */
   @Trace detail: string = '';
   /** 最近诊断时间戳（0=未诊断） */
   @Trace checkedAt: number = 0;
@@ -1225,24 +1228,25 @@ export class VpnKeepAliveManager {
    * 交集命中不代表残留——系统DNS列表仅进detail供人工核对。
    */
   private async diagnoseNetworkResidue(): Promise<NetworkDiagnosis> {
-    const result: NetworkDiagnosis = { residue: false, hasNetwork: true, detail: '' };
+    const result: NetworkDiagnosis = { residue: false, hasNetwork: true, netType: '', detail: '' };
     const netHandle = connection.getDefaultNetSync();
     if (netHandle.netId === 0) {
       // 无默认网络：可能正是关闭VPN后的残留坏状态
       result.residue = true;
       result.hasNetwork = false;
+      result.netType = '无';
       result.detail = '无可用网络';
       return result;
     }
     const caps = await connection.getNetCapabilities(netHandle);
     const vpnBearer = caps.bearerTypes.includes(connection.NetBearType.BEARER_VPN);
-    const netType = caps.bearerTypes.includes(connection.NetBearType.BEARER_WIFI) ? 'WiFi'
+    result.netType = caps.bearerTypes.includes(connection.NetBearType.BEARER_WIFI) ? 'WiFi'
       : caps.bearerTypes.includes(connection.NetBearType.BEARER_CELLULAR) ? '移动数据'
         : caps.bearerTypes.includes(connection.NetBearType.BEARER_ETHERNET) ? '以太网' : '其他网络';
-    const props = await connection.getConnectionProperties(netHandle);
-    const dnses: string[] = props.dnses.map((d: connection.NetAddress): string => d.address);
     result.residue = vpnBearer;
-    result.detail = `当前网络=${netType}, 系统DNS=[${dnses.join(', ')}], VPN bearer=${vpnBearer}`;
+    result.detail = vpnBearer
+      ? `当前网络=${result.netType}，VPN网络仍挂载，存在残留`
+      : `当前网络=${result.netType}，VPN网络未挂载，无残留`;
     return result;
   }
 
@@ -1259,6 +1263,7 @@ export class VpnKeepAliveManager {
       const d = await this.diagnoseNetworkResidue();
       networkResidueState.residue = d.residue;
       networkResidueState.hasNetwork = d.hasNetwork;
+      networkResidueState.netType = d.netType;
       networkResidueState.detail = d.detail;
     } catch (e) {
       networkResidueState.detail = `诊断异常: ${(e as Error).message}`;
