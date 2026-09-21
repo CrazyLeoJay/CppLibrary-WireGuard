@@ -24,6 +24,41 @@ import { WGConf, WireGuard, vpnRunStatusState, StreamLogMessage, VpnEventTag } f
 
 const TAG = "WG主页";
 
+/** 删除粒子消散覆盖层的定位（vp，相对主页根Stack） */
+interface WgDeleteFx {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 删除消散粒子：一次性爆发——count为总量、高emitRate在约0.2s内全部射出，
+ * lifetime 500±200ms 自然消亡；颜色在删除红与中性灰间随机插值，深浅色均可读
+ */
+function buildDeleteDissolveParticle(): ParticleOptions<ParticleType, ParticleUpdater,
+  ParticleUpdater, ParticleUpdater, ParticleUpdater, ParticleUpdater, ParticleUpdater>[] {
+  return [{
+    emitter: {
+      particle: {
+        type: ParticleType.POINT,
+        config: { radius: 4 },
+        count: 72,
+        lifetime: 500,
+        lifetimeRange: 200
+      },
+      emitRate: 360,
+      shape: ParticleEmitterShape.RECTANGLE,
+      position: ['50%', '50%'],
+      size: ['100%', '100%']
+    },
+    velocity: { speed: [40, 140], angle: [-180, 180] },
+    color: { range: ['#FFE84026', '#FFBBBBBB'] },
+    opacity: { range: [0.5, 1.0] },
+    scale: { range: [0.5, 1.2] }
+  }];
+}
+
 @Builder
 export function NavWGMainPage() {
   WGMainViewNavDest();
@@ -143,8 +178,10 @@ export struct WGMainView {
   @Local isShow: boolean = true;
   @Local isSwipeActionDelete: boolean = false;
   @Local nowTick: number = Date.now();
+  @Local deleteFx: WgDeleteFx | undefined = undefined;
   listScroller: ListScroller = new ListScroller();
   private tickTimer?: number;
+  private deleteFxTimer?: number;
   funcBtn: MenuElement[] = [
     {
       value: "选择conf或者zip文件导入配置",
@@ -241,6 +278,46 @@ export struct WGMainView {
       clearInterval(this.tickTimer);
       this.tickTimer = undefined;
     }
+    if (this.deleteFxTimer != undefined) {
+      clearTimeout(this.deleteFxTimer);
+      this.deleteFxTimer = undefined;
+    }
+  }
+
+  /**
+   * 删除配置并播放粒子消散动效：
+   * 取被删行相对主页根Stack的坐标，在原位播放一次粒子爆发（约0.9s），
+   * 数据在粒子起飞后延迟120ms移除并伴随列表收拢动画；
+   * 坐标取不到（页面瞬时重建等）时退化为直接删除。
+   */
+  private deleteWithFx(item: MainItemData): void {
+    const ui = this.getUIContext();
+    try {
+      const row = ui.getComponentUtils().getRectangleById(`wg_cfg_row_${item.id}`);
+      const root = ui.getComponentUtils().getRectangleById('wg_main_root');
+      this.deleteFx = {
+        left: ui.px2vp(row.windowOffset.x - root.windowOffset.x),
+        top: ui.px2vp(row.windowOffset.y - root.windowOffset.y),
+        width: ui.px2vp(row.size.width),
+        height: ui.px2vp(row.size.height),
+      };
+    } catch (e) {
+      LLog.warn(TAG, `删除动效取行坐标失败，直接删除: ${e}`);
+    }
+    if (this.deleteFxTimer != undefined) {
+      clearTimeout(this.deleteFxTimer);
+    }
+    this.deleteFxTimer = setTimeout(() => {
+      this.deleteFx = undefined;
+      this.deleteFxTimer = undefined;
+    }, 900);
+    const idx = this.vm.wgList.findIndex(it => it.id === item.id);
+    if (idx < 0) {
+      return;
+    }
+    ui.animateTo({ duration: 260, curve: Curve.EaseOut, delay: 120 }, () => {
+      this.vm.deleteConfig(idx, item);
+    });
   }
 
   /** 状态条文案（nowTick驱动"收/发X前"响应式滚动） */
@@ -297,6 +374,14 @@ export struct WGMainView {
         .width('100%')
         .height('100%')
       }
+      // 删除粒子消散覆盖层（定位到被删行原位置，粒子播完自动移除）
+      if (this.deleteFx != undefined) {
+        Particle({ particles: buildDeleteDissolveParticle() })
+          .width(this.deleteFx.width)
+          .height(this.deleteFx.height)
+          .position({ x: this.deleteFx.left, y: this.deleteFx.top })
+          .hitTestBehavior(HitTestMode.None)
+      }
       Button() {
         SymbolGlyph($r('sys.symbol.plus'))
           .fontColor([$r('app.color.wg_float_button_svg_color')])
@@ -318,6 +403,7 @@ export struct WGMainView {
         placement: Placement.Top,
       })
     }
+    .id('wg_main_root')
     .width('100%')
     .height('100%')
   }
@@ -329,6 +415,7 @@ export struct WGMainView {
         .each((it) => {
           ListItem() {
             MainItemView({ vm: this.vm, data: it.item, index: it.index })
+              .id(`wg_cfg_row_${it.item.id}`)
               .onClick(() => {
                 WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id }, () => {
                   LLog.info(TAG, "onPop 从预览页返回，刷新列表")
@@ -343,7 +430,7 @@ export struct WGMainView {
               },
               onAction: () => {
                 this.listScroller.closeAllSwipeActions();
-                this.vm.deleteConfig(it.index, it.item);
+                this.deleteWithFx(it.item);
               },
               onEnterActionArea: () => {
                 this.isSwipeActionDelete = true;
@@ -396,7 +483,7 @@ export struct WGMainView {
           .deleteStyle()
           .onClick(() => {
             this.listScroller.closeAllSwipeActions();
-            this.vm.deleteConfig(it.index, it.item);
+            this.deleteWithFx(it.item);
           })
       }
     }.backgroundColor($r('app.color.swipe_delete_bg_color'))
