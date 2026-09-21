@@ -62,6 +62,11 @@ struct WGSettingView {
   aboutToAppear(): void {
     this.vm.loadData(this.getUIContext());
     this.vm.refreshNetworkStatus();
+    this.vm.startNetworkStatusWatch();
+  }
+
+  aboutToDisappear(): void {
+    this.vm.stopNetworkStatusWatch();
   }
 
   /** 「修复网络」小字：当前网络状态实时摘要（当前网络/VPN挂载/残留/是否正常） */

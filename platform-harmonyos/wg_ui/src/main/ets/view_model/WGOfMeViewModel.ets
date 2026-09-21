@@ -16,7 +16,7 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { UIContext } from '@ohos.arkui.UIContext';
 import pasteboard from '@ohos.pasteboard';
-import { LLog, networkResidueState, vpnKeepAliveManager, WireGuard, WGSettingsPrefs, AppFilterMode } from 'wg_tunnel';
+import { LLog, networkResidueState, vpnKeepAliveManager, WireGuard, WGSettingsPrefs, AppFilterMode, VpnEventTag, SubEventCancel } from 'wg_tunnel';
 import fs from '@ohos.file.fs';
 import { zlib } from '@kit.BasicServicesKit';
 import { fileUri, picker } from '@kit.CoreFileKit';
@@ -42,6 +42,8 @@ const USER_GUIDE = "http://www.leojay.site/CppLibrary-WireGuard/wg-vpn/docs/#/%E
 @ObservedV2
 export default class WGSettingViewModel {
   nav: NavPathStack;
+  /** VPN状态广播监听句柄（设置页可见期间刷新网络状态小字） */
+  private statusChangeCancel?: SubEventCancel;
   @Trace appName: string = ""
   @Trace appVersion: string = ""
   @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
@@ -50,6 +52,31 @@ export default class WGSettingViewModel {
 
   constructor(nav: NavPathStack) {
     this.nav = nav;
+  }
+
+  /**
+   * 开始监听VPN状态广播（设置页可见期间）：
+   * 开启/关闭/切换后自动刷新网络状态小字（VPN开关不触发物理网络事件，
+   * 不订阅则小字停留在上次诊断结果）
+   */
+  startNetworkStatusWatch(): void {
+    if (this.statusChangeCancel != undefined) {
+      return;
+    }
+    this.statusChangeCancel = WireGuard.event.subscribeVpnChange((params) => {
+      const tag = params.tag as VpnEventTag;
+      if (tag === VpnEventTag.START_VPN || tag === VpnEventTag.VPN_SERVICE_STOPPED
+        || tag === VpnEventTag.STOP_VPN) {
+        this.refreshNetworkStatus();
+      }
+    });
+  }
+
+  stopNetworkStatusWatch(): void {
+    if (this.statusChangeCancel != undefined) {
+      this.statusChangeCancel.cancel();
+      this.statusChangeCancel = undefined;
+    }
   }
 
   async loadData(context: UIContext) {
