@@ -18,6 +18,7 @@ import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { connection } from '@kit.NetworkKit';
+import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
 import { WireGuard } from '../model/WGHelper';
 import { VpnConfigAction } from '../model/entity/VpnConfigAction';
@@ -205,11 +206,38 @@ interface ObservedLongTask {
   needRecreate: boolean; // 被系统关闭/挂起 → 重建
 }
 
-/** DNS残留诊断结果 */
-interface DnsDiagnosis {
-  residue: boolean;   // true=检测到残留
-  detail: string;     // 观测明细（系统DNS/VPN DNS/bearer）
+/** 网络/VPN残留诊断结果 */
+interface NetworkDiagnosis {
+  residue: boolean;     // true=检测到残留
+  hasNetwork: boolean;  // false=无默认网络（可能正是残留坏状态）
+  detail: string;       // 观测明细（当前网络/系统DNS/VPN bearer）
 }
+
+// ==================== 网络残留全局状态（AppStorageV2，设置页/诊断UI共享） ====================
+
+/**
+ * 网络残留诊断的全局状态（AppStorageV2全局缓存）
+ *
+ * 由 refreshNetworkDiagnosis 写入（网络开启/关闭/变化事件与设置页触发），
+ * 设置页「修复网络」小字实时展示。
+ */
+@ObservedV2
+export class NetworkResidueState {
+  /** 诊断进行中 */
+  @Trace checking: boolean = false;
+  /** 检测到VPN网络残留（默认网络仍挂VPN bearer 或 无默认网络） */
+  @Trace residue: boolean = false;
+  /** 设备当前是否有可用网络 */
+  @Trace hasNetwork: boolean = true;
+  /** 状态明细（当前网络/系统DNS/VPN bearer） */
+  @Trace detail: string = '';
+  /** 最近诊断时间戳（0=未诊断） */
+  @Trace checkedAt: number = 0;
+}
+
+/** 全局单例（AppStorageV2连接，UI直读响应式） */
+export const networkResidueState: NetworkResidueState =
+  AppStorageV2.connect(NetworkResidueState, () => UIUtils.makeObserved(new NetworkResidueState()))!;
 
 /**
  * VPN保活管理器 - 可复用的后台保活门面（wg_tunnel模块）
@@ -300,6 +328,8 @@ export class VpnKeepAliveManager {
   // ==================== 其他状态 ====================
   /** 强重启VEA进行中标志：期间VEA会短暂广播STOP_VPN，需保护开关意图与保活不被误停 */
   private isForceRestarting: boolean = false;
+  /** 网络开启/关闭/变化监听（刷新网络残留诊断全局状态） */
+  private netStateConnection?: connection.NetConnection;
 
   /**
    * 是否已绑定UIAbilityContext
@@ -618,8 +648,52 @@ export class VpnKeepAliveManager {
     this.subscribeVpnChange();
     this.subscribeVpnStreamLogs();
 
-    // 3. 主动查询VPN状态
+    // 3. 网络开启/关闭/变化 → 刷新网络残留诊断全局状态（设置页「修复网络」小字展示）
+    this.registerNetStateObserver();
+
+    // 4. 主动查询VPN状态
     this.queryVpnStatus();
+  }
+
+  /**
+   * 注册网络状态监听（网络开启/关闭/变化时刷新网络残留诊断全局状态）
+   */
+  private registerNetStateObserver(): void {
+    if (this.netStateConnection != undefined) {
+      return;   // 防重复注册
+    }
+    try {
+      this.netStateConnection = connection.createNetConnection();
+      this.netStateConnection.on('netAvailable', () => {
+        LLog.info(TAG, '网络可用，刷新网络残留诊断');
+        this.refreshNetworkDiagnosis().catch(() => {});
+      });
+      this.netStateConnection.on('netLost', () => {
+        LLog.info(TAG, '网络丢失，刷新网络残留诊断');
+        this.refreshNetworkDiagnosis().catch(() => {});
+      });
+      this.netStateConnection.register(() => {
+        LLog.info(TAG, '网络状态监听注册成功');
+        // 首次诊断：注册即刷新一次全局状态
+        this.refreshNetworkDiagnosis().catch(() => {});
+      });
+    } catch (e) {
+      LLog.error(TAG, `注册网络状态监听失败: ${JSON.stringify(e)}`);
+    }
+  }
+
+  private unregisterNetStateObserver(): void {
+    if (this.netStateConnection == undefined) {
+      return;
+    }
+    try {
+      this.netStateConnection.unregister(() => {
+        LLog.info(TAG, '网络状态监听注销成功');
+      });
+    } catch (e) {
+      LLog.error(TAG, `注销网络状态监听失败: ${JSON.stringify(e)}`);
+    }
+    this.netStateConnection = undefined;
   }
 
   /**
@@ -637,6 +711,7 @@ export class VpnKeepAliveManager {
     LLog.info(TAG, 'VPN保活管理器detach');
     this.unsubscribeVpnChange();
     this.unsubscribeVpnStreamLogs();
+    this.unregisterNetStateObserver();
     this.stopLongTaskIfNeeded();
     try {
       backgroundTaskManager.off('continuousTaskCancel', this.onTaskCancelCb);
@@ -1140,60 +1215,85 @@ export class VpnKeepAliveManager {
     WireGuard.event.publishVpnThrow('VPN已关闭但系统网络未完全注销，建议开关一次WiFi/飞行模式');
   }
 
-  // ===================== DNS残留诊断与修复（设置页「修复DNS」按钮） =====================
+  // ===================== 网络残留诊断与修复（设置页「修复网络」按钮） =====================
 
   /**
-   * 诊断系统DNS残留（只读）
+   * 诊断VPN网络残留（只读，结果由refreshNetworkDiagnosis写入全局状态）
    *
    * 残留判定=默认网络仍挂VPN bearer（系统未注销VPN网络）。
    * 不比对DNS列表：用户配置的VPN DNS常与物理网络DNS重合（公共DNS/路由器DNS），
    * 交集命中不代表残留——系统DNS列表仅进detail供人工核对。
    */
-  async diagnoseDnsResidue(): Promise<DnsDiagnosis> {
-    const result: DnsDiagnosis = { residue: false, detail: '' };
+  private async diagnoseNetworkResidue(): Promise<NetworkDiagnosis> {
+    const result: NetworkDiagnosis = { residue: false, hasNetwork: true, detail: '' };
     const netHandle = connection.getDefaultNetSync();
     if (netHandle.netId === 0) {
       // 无默认网络：可能正是关闭VPN后的残留坏状态
       result.residue = true;
-      result.detail = '设备当前没有可用网络';
+      result.hasNetwork = false;
+      result.detail = '无可用网络';
       return result;
     }
     const caps = await connection.getNetCapabilities(netHandle);
     const vpnBearer = caps.bearerTypes.includes(connection.NetBearType.BEARER_VPN);
+    const netType = caps.bearerTypes.includes(connection.NetBearType.BEARER_WIFI) ? 'WiFi'
+      : caps.bearerTypes.includes(connection.NetBearType.BEARER_CELLULAR) ? '移动数据'
+        : caps.bearerTypes.includes(connection.NetBearType.BEARER_ETHERNET) ? '以太网' : '其他网络';
     const props = await connection.getConnectionProperties(netHandle);
     const dnses: string[] = props.dnses.map((d: connection.NetAddress): string => d.address);
     result.residue = vpnBearer;
-    result.detail = `系统DNS=[${dnses.join(', ')}], VPN bearer=${vpnBearer}`;
+    result.detail = `当前网络=${netType}, 系统DNS=[${dnses.join(', ')}], VPN bearer=${vpnBearer}`;
     return result;
   }
 
   /**
-   * 修复DNS残留（设置页「修复DNS」按钮）：诊断 → 尽力修复 → 复检 → 指引
+   * 刷新网络残留诊断并写入全局状态（AppStorageV2，设置页小字实时展示）
+   */
+  async refreshNetworkDiagnosis(): Promise<void> {
+    if (networkResidueState.checking) {
+      return;   // 防重入
+    }
+    networkResidueState.checking = true;
+    networkResidueState.checkedAt = Date.now();
+    try {
+      const d = await this.diagnoseNetworkResidue();
+      networkResidueState.residue = d.residue;
+      networkResidueState.hasNetwork = d.hasNetwork;
+      networkResidueState.detail = d.detail;
+    } catch (e) {
+      networkResidueState.detail = `诊断异常: ${(e as Error).message}`;
+    } finally {
+      networkResidueState.checking = false;
+    }
+  }
+
+  /**
+   * 修复网络残留（设置页「修复网络」按钮）：诊断 → 尽力修复 → 复检 → 指引
    *
    * 主进程无写系统DNS的API，能做的修复动作：
-   * 1. VEA存活 → 重发STOP触发destroy重试（shutdown序列与重试预算见VpnSessionManager）；
+   * 1. VEA存活 → 重发STOP触发destroy重试（shutdown序列见VpnSessionManager.stop）；
    * 2. reportNetConnected(物理网络)——系统提供的唯一"通知网络刷新"入口；
    * 3. 复检×2，仍残留返回'manual'（UI指引开关WiFi/飞行模式，替代重启手机）。
    *
    * @returns 'clean'=无残留 | 'vpn-on'=VPN运行中无需修复 | 'repaired'=已修复 | 'manual'=需手动干预
    */
-  async repairDnsResidue(): Promise<string> {
+  async repairNetworkResidue(): Promise<string> {
     if (WireGuard.config.status.getConfig().isSwitchOpen) {
-      LLog.info(TAG, 'DNS修复: VPN运行中，DNS经隧道转发属正常，无需修复');
+      LLog.info(TAG, '网络修复: VPN运行中，网络经隧道转发属正常，无需修复');
       return 'vpn-on';
     }
-    let d = await this.diagnoseDnsResidue();
-    if (!d.residue) {
+    await this.refreshNetworkDiagnosis();
+    if (!networkResidueState.residue) {
       return 'clean';
     }
-    LLog.warn(TAG, `DNS修复: 检测到残留(${d.detail})，尝试修复`);
+    LLog.warn(TAG, `网络修复: 检测到残留(${networkResidueState.detail})，尝试修复`);
     // 1. VEA存活 → 重发STOP触发destroy重试
     try {
       if (await WireGuard.tools.isVpnExtensionRunning()) {
         WireGuard.event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
       }
     } catch (e) {
-      LLog.warn(TAG, `DNS修复: 触发VEA销毁失败: ${(e as Error).message}`);
+      LLog.warn(TAG, `网络修复: 触发VEA销毁失败: ${(e as Error).message}`);
     }
     // 2. 通知系统物理网络可用，促使刷新默认网/解析配置
     try {
@@ -1202,20 +1302,20 @@ export class VpnKeepAliveManager {
         await connection.reportNetConnected(netHandle);
       }
     } catch (e) {
-      LLog.warn(TAG, `DNS修复: reportNetConnected失败: ${(e as Error).message}`);
+      LLog.warn(TAG, `网络修复: reportNetConnected失败: ${(e as Error).message}`);
     }
     // 3. 复检×2（2s/3s间隔，给系统刷新时间）
     await new Promise<void>((resolve) => setTimeout(resolve, 2000));
-    d = await this.diagnoseDnsResidue();
-    if (!d.residue) {
+    await this.refreshNetworkDiagnosis();
+    if (!networkResidueState.residue) {
       return 'repaired';
     }
     await new Promise<void>((resolve) => setTimeout(resolve, 3000));
-    d = await this.diagnoseDnsResidue();
-    if (!d.residue) {
+    await this.refreshNetworkDiagnosis();
+    if (!networkResidueState.residue) {
       return 'repaired';
     }
-    LLog.error(TAG, `DNS修复: 复检仍残留(${d.detail})`);
+    LLog.error(TAG, `网络修复: 复检仍残留(${networkResidueState.detail})`);
     return 'manual';
   }
 }

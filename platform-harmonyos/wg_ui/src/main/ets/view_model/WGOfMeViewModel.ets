@@ -16,7 +16,7 @@
 import { bundleManager, common } from '@kit.AbilityKit';
 import { UIContext } from '@ohos.arkui.UIContext';
 import pasteboard from '@ohos.pasteboard';
-import { LLog, vpnKeepAliveManager, WireGuard, WGSettingsPrefs, AppFilterMode } from 'wg_tunnel';
+import { LLog, networkResidueState, vpnKeepAliveManager, WireGuard, WGSettingsPrefs, AppFilterMode } from 'wg_tunnel';
 import fs from '@ohos.file.fs';
 import { zlib } from '@kit.BasicServicesKit';
 import { fileUri, picker } from '@kit.CoreFileKit';
@@ -132,27 +132,32 @@ export default class WGSettingViewModel {
   }
 
   /**
-   * 保存配置到zip文件
+   * 刷新网络状态（设置页「修复网络」小字实时展示）
    */
+  refreshNetworkStatus(): void {
+    vpnKeepAliveManager.refreshNetworkDiagnosis().catch((e: BusinessError) => {
+      LLog.error(TAG, e);
+    });
+  }
+
   /**
-   * 修复DNS（设置页按钮，冗余修复）：诊断系统DNS残留 → 尽力修复（VEA销毁重试
+   * 修复网络（设置页按钮，冗余修复）：诊断系统网络残留 → 尽力修复（VEA销毁重试
    * + 网络刷新通知）→ 复检 → 指引（无法自动修复时建议开关WiFi/飞行模式）
    *
    * @param context UIContext（Toast用）
-   * @throws 诊断/修复异常向上抛出（View侧catch记日志）
    */
-  async repairDns(context: UIContext): Promise<void> {
+  async repairNetwork(context: UIContext): Promise<void> {
     const toast = (m: string): void => {
       context.getPromptAction().showToast({ message: m });
     };
-    toast('正在检测DNS…');
-    const result = await vpnKeepAliveManager.repairDnsResidue();
+    toast('正在检测网络…');
+    const result = await vpnKeepAliveManager.repairNetworkResidue();
     if (result === 'clean') {
-      toast('未检测到DNS残留，网络正常');
+      toast('未检测到网络残留，网络正常');
     } else if (result === 'repaired') {
-      toast('DNS已恢复');
+      toast('网络已恢复');
     } else if (result === 'vpn-on') {
-      toast('VPN运行中，DNS经隧道转发属正常');
+      toast('VPN运行中，网络经隧道转发属正常');
     } else {
       toast('无法自动修复，请开关一次WiFi或飞行模式');
     }

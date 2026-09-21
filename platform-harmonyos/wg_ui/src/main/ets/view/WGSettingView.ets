@@ -13,7 +13,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { LLog, AppFilterMode } from 'wg_tunnel';
+import { LLog, AppFilterMode, networkResidueState } from 'wg_tunnel';
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ComponentContent, promptAction } from '@kit.ArkUI';
@@ -60,7 +60,26 @@ struct WGSettingView {
   maxClick = 10 - 1;
 
   aboutToAppear(): void {
-    this.vm.loadData(this.getUIContext())
+    this.vm.loadData(this.getUIContext());
+    this.vm.refreshNetworkStatus();
+  }
+
+  /** 「修复网络」小字：当前网络状态实时摘要 */
+  get networkStatusText(): string {
+    const s = networkResidueState;
+    if (s.checking) {
+      return '正在检测网络状态…';
+    }
+    if (s.checkedAt === 0) {
+      return '尚未检测网络状态';
+    }
+    if (!s.hasNetwork) {
+      return '当前无可用网络，建议检查网络连接';
+    }
+    if (s.residue) {
+      return `检测到VPN网络残留，建议修复（${s.detail}）`;
+    }
+    return `网络正常（${s.detail}），无VPN残留`;
   }
 
   @Styles
@@ -213,14 +232,14 @@ struct WGSettingView {
     }
     ListItem() {
       Column({ space: '4vp' }) {
-        Text("修复DNS")
+        Text("修复网络")
           .defaultTagTitleStyle()
-        Text("检测并尝试修复关闭VPN后残留的系统DNS")
+        Text(this.networkStatusText)
           .width('100%')
           .fontSize('12fp')
       }
       .onClick(() => {
-        this.vm.repairDns(this.getUIContext()).catch((e: BusinessError) => {
+        this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
           LLog.error(TAG, e)
         })
       })
