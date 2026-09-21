@@ -302,19 +302,42 @@ class VpnToggleServiceImpl {
     });
   }
 
-  /** 主进程关闭VEA进程（进程关闭权在主进程） */
+  /**
+   * 关闭VEA进程（进程关闭权在主进程）+ 关闭校验重试
+   *
+   * VEA收到STOP后已全聋（不再监听任何指令）：若进程滞留未关闭，下次开启的
+   * 参数直传会因15501001改走SWITCH打到聋壳丢失——必须校验进程确实退出，
+   * 滞留则重试关闭。
+   */
   private async stopVpnExtensionAbility(): Promise<void> {
-    try {
-      const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-      await vpnExtension.stopVpnExtensionAbility({
-        deviceId: '',
-        bundleName: bundleInfo.name,
-        abilityName: 'WGVpnExtAbility',
-      });
-      LLog.info(TAG, '已通知系统关闭VEA进程');
-    } catch (e) {
-      LLog.error(TAG, `关闭VEA进程失败: ${JSON.stringify(e)}`);
+    const maxAttempts: number = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+        await vpnExtension.stopVpnExtensionAbility({
+          deviceId: '',
+          bundleName: bundleInfo.name,
+          abilityName: 'WGVpnExtAbility',
+        });
+      } catch (e) {
+        LLog.error(TAG, `关闭VEA#${attempt}调用失败: ${JSON.stringify(e)}`);
+      }
+      // 校验进程确实退出（3s内轮询）
+      const deadline: number = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        try {
+          if (!(await WireGuard.tools.isVpnExtensionRunning())) {
+            LLog.info(TAG, `VEA进程已关闭(第${attempt}次尝试)`);
+            return;
+          }
+        } catch (e) {
+          // 查询失败继续轮询
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      }
+      LLog.warn(TAG, `关闭VEA#${attempt}后进程仍存活，重试关闭`);
     }
+    LLog.error(TAG, 'VEA进程关闭校验重试耗尽，进程可能滞留（下次开启前需确认关闭）');
   }
 }
 

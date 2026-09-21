@@ -109,21 +109,21 @@ export class VpnSessionManager {
    */
   async stop(): Promise<void> {
     LLog.info(TAG, '停止VPN服务(shutdown路径)');
-    this.isStopping = true;   // 关闭收尾开始：期间的建连/重连请求一律拒绝
+    this.isStopping = true; // 关闭收尾开始：期间的建连/重连请求一律拒绝
 
     // 1. 注销本层网络监听
     this.unregisterNetConnection();
 
     // 2. destroy（重试预算，耗尽广播残留提示）→ 停止VPN服务
     if (this.vpnConnection != undefined) {
-    try {
-      await this.vpnConnection.stopServer();
-      LLog.info(TAG, 'stop: VPN网络已注销、VPN服务已停止');
-    } catch (e) {
-      LLog.error(TAG, `stop: destroy预算耗尽，VPN网络/DNS可能残留: ${JSON.stringify(e)}`);
-      VPNChangeHelperV2.startVpnThrow('VPN已关闭但系统DNS可能残留，建议开关一次WiFi/飞行模式');
-    }
-    this.vpnConnection = undefined;
+      try {
+        await this.vpnConnection.stopServer();
+        LLog.info(TAG, 'stop: VPN网络已注销、VPN服务已停止');
+      } catch (e) {
+        LLog.error(TAG, `stop: destroy预算耗尽，VPN网络/DNS可能残留: ${JSON.stringify(e)}`);
+        VPNChangeHelperV2.startVpnThrow('VPN已关闭但系统DNS可能残留，建议开关一次WiFi/飞行模式');
+      }
+      this.vpnConnection = undefined;
     } else {
       LLog.info(TAG, 'stop: vpnConnection已为空，跳过stopServer');
     }
@@ -274,7 +274,8 @@ export class VpnSessionManager {
 
   // ===== 启动 =====
 
-  private async resolveAndStartVpn(id: number, wgDbConf: WGDBConf, terminateOnFailure: boolean = true): Promise<boolean> {
+  private async resolveAndStartVpn(id: number, wgDbConf: WGDBConf,
+    terminateOnFailure: boolean = true): Promise<boolean> {
     try {
       const config = await makeWGConf2VpnStartConfig(wgDbConf);
       this.currentConfig = config;
