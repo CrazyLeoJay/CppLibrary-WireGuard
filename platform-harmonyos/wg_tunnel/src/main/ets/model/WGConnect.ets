@@ -25,25 +25,6 @@ import { dnsResolveByMode, getDnsMode, getDnsScope } from '../tools/DnsResolve';
 
 const TAG = "WG连接"
 
-/** Promise超时包装：超时拒绝，正常完成透传结果/异常 */
-function withTimeout<T>(task: Promise<T>, ms: number, what: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${what}超时(${ms}ms)`)), ms);
-    task.then((v: T) => {
-      clearTimeout(timer);
-      resolve(v);
-    }, (e: Error) => {
-      clearTimeout(timer);
-      reject(e);
-    });
-  });
-}
-
-/** destroy 单次尝试超时 */
-const DESTROY_ATTEMPT_MS: number = 3000;
-/** destroy 重试总预算：耗尽外抛异常交调用方广播残留提示 */
-const DESTROY_BUDGET_MS: number = 15000;
-
 /**
  * 处理VPN连接
  *
@@ -136,40 +117,22 @@ export class VpnConnHelper {
   /**
    * 停止VPN服务（shutdown收尾）
    *
-   * 顺序：destroy（注销系统VPN配置：路由+DNS——唯一拆除入口，失败/超时重试，
-   * 预算耗尽抛出异常交调用方广播残留提示，绝不静默放弃）→ client.close()（停止VPN服务）。
-   * 进程退出会丢弃在途的destroy IPC造成系统DNS/路由残留（其他app断网需重启），
-   * 因此本方法必须完成后调用方才能继续后续流程。
+   * 顺序：destroy（注销系统VPN配置：路由+DNS——唯一拆除入口，等待真实完成结果，
+   * 绝不超时放弃：放弃后进程随即被主进程关闭，在途destroy被丢弃→系统DNS/路由
+   * 残留需重启手机）→ client.close()（停止VPN服务：停线程+关UDP socket）。
    *
-   * @throws WGAppException destroy 在预算内未完成
+   * 长时间无返回的处理在调用方/UI层：开关事务20s超时解锁并提示，本方法必须
+   * 等到destroy的真实结果才能广播serviceStopped（明确回复=网络已拆干净）。
+   *
+   * @throws destroy失败时原样抛出，交调用方广播残留提示
    */
   async stopServer(): Promise<void> {
-    // 1. 注销系统VPN配置（重试直至完成或预算耗尽）
-    const deadline: number = Date.now() + DESTROY_BUDGET_MS;
-    let attempt: number = 0;
-    let destroyed: boolean = false;
-    while (Date.now() < deadline) {
-      attempt++;
-      try {
-        await withTimeout(this.vpnConnection.destroy(), DESTROY_ATTEMPT_MS, `destroy#${attempt}`);
-        destroyed = true;
-        LLog.info(TAG, `vpnConnection.destroy成功(第${attempt}次尝试)：系统VPN配置已注销`);
-        break;
-      } catch (e) {
-        LLog.error(TAG, `destroy#${attempt}失败: ${JSON.stringify(e)}`);
-        await new Promise<void>((resolve) => setTimeout(resolve, 300));
-      }
-    }
-    if (!destroyed) {
-      throw new WGAppException(`vpnConnection.destroy在${DESTROY_BUDGET_MS}ms预算内未完成，系统VPN网络/DNS可能残留`);
-    }
+    // 1. 注销系统VPN配置（等待真实完成结果）
+    await this.vpnConnection.destroy();
+    LLog.info(TAG, 'vpnConnection.destroy完成：系统VPN配置已注销');
     // 2. 停止VPN服务（C层：停线程+关UDP socket）
-    try {
-      await withTimeout(this.client.close(), 3000, 'client.close');
-      LLog.info(TAG, 'VPN服务已停止');
-    } catch (e) {
-      LLog.error(TAG, `client.close失败(网络已注销，忽略): ${JSON.stringify(e)}`);
-    }
+    await this.client.close();
+    LLog.info(TAG, 'VPN服务已停止');
   }
 }
 
