@@ -21,7 +21,7 @@ import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
 import { SortColumnName, WGConf, WGDBConf } from 'wg_tunnel';
-import { vpnToggleService } from './VpnToggleService';
+import { vpnToggleService, vpnToggleState } from './VpnToggleService';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
@@ -240,7 +240,7 @@ export class MainItemData {
    * 仅本行是当前事务目标时显示；idle或非目标行返回undefined不渲染
    */
   get busyLabel(): string | undefined {
-    const s = vpnToggleService;
+    const s = vpnToggleState;
     if (s.phase === 'idle' || s.targetId !== this.id) {
       return undefined;
     }

@@ -30,7 +30,7 @@ import {
   SiteUrlType,
   DnsScope
 } from 'wg_tunnel';
-import { vpnToggleService } from './VpnToggleService';
+import { vpnToggleService, vpnToggleState } from './VpnToggleService';
 import { JSON } from '@kit.ArkTS';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
@@ -139,7 +139,7 @@ export default class WGConfigPreViewModel {
 
   /** 事务进行中的状态文案（开启中/关闭中/切换中），idle时undefined */
   get busyText(): string | undefined {
-    const p = vpnToggleService.phase;
+    const p = vpnToggleState.phase;
     if (p === 'idle') {
       return undefined;
     }

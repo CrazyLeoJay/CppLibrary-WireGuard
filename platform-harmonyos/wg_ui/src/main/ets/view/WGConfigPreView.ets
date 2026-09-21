@@ -31,6 +31,7 @@ import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import WGConfigPreViewModel, { IconSwitchBtnParam } from '../view_model/WGConfigPreViewModel';
+import { vpnToggleState } from '../view_model/VpnToggleService';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { WireGuardNav } from '../../../../Index';
 import { SubEventCancel } from 'wg_tunnel/src/main/ets/model/WGEvent';
@@ -402,7 +403,7 @@ struct InterfaceCardView {
           top: '24vp',
           right: '40vp',
         })
-        .enabled(this.vm.isSwitchEnable)
+        .enabled(this.vm.isSwitchEnable && vpnToggleState.phase === 'idle')
         .onChange((isOn) => {
           this.vm.onSwitchChange(this.getUIContext(), isOn)
         })

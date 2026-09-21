@@ -37,34 +37,50 @@
  *
  * @author leojay`fu
  */
-import { UIContext } from '@kit.ArkUI';
+import { UIContext, AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { bundleManager } from '@kit.AbilityKit';
 import { vpnExtension } from '@kit.NetworkKit';
 import { LLog, vpnKeepAliveManager, WireGuard, WGDBConf, VpnEventTag, SubEventCancel } from 'wg_tunnel';
 
 const TAG = 'VpnToggle'
 
-/** 开关事务阶段（非idle=按钮锁定并显示状态文案） */
+/** 开关事务阶段（非idle=全部开关禁用，目标开关显示状态文案） */
 export type TogglePhase = 'idle' | 'starting' | 'stopping' | 'switching';
 
-/** 明确回复超时：开启/切换15s（VEA启动+握手余量）；关闭20s（destroy预算15s+广播余量） */
+/** 明确回复超时：开启/切换15s（VEA启动+握手余量）；关闭20s（destroy+广播余量） */
 const START_REPLY_TIMEOUT_MS: number = 15 * 1000;
 const STOP_REPLY_TIMEOUT_MS: number = 20 * 1000;
+
+/**
+ * VPN开关事务全局状态（AppStorageV2全局缓存：所有开关UI共享读写）
+ *
+ * 非idle=任一事务进行中，全局所有VPN开关禁用（enabled门），仅目标开关显示状态文案。
+ */
+@ObservedV2
+export class VpnToggleState {
+  /** 事务阶段 */
+  @Trace phase: TogglePhase = 'idle';
+  /** 当前事务目标配置id（idle时为-1） */
+  @Trace targetId: number = -1;
+}
+
+/**
+ * AppStorageV2全局单例：所有组件/VM读取同一实例（UI响应式）
+ */
+export const vpnToggleState: VpnToggleState =
+  AppStorageV2.connect(VpnToggleState, () => UIUtils.makeObserved(new VpnToggleState()))!;
 
 /** pending事务回复 */
 interface PendingReply {
   phase: TogglePhase;
   targetId: number;
   resolve: (ok: boolean) => void;
+  /** 超时定时器句柄：成功落定时清除，防旧事务定时器误杀新事务 */
+  timer: number;
 }
 
-@ObservedV2
 class VpnToggleServiceImpl {
   private currentOp?: Promise<void>;
-  /** 事务阶段（UI观察）：非idle=按钮锁定+状态文案 */
-  @Trace phase: TogglePhase = 'idle';
-  /** 当前事务目标配置id（idle时为-1） */
-  @Trace targetId: number = -1;
   /** pending事务回复（同时至多一个事务） */
   private pending?: PendingReply;
   /** 明确回复监听句柄（懒注册） */
@@ -88,15 +104,19 @@ class VpnToggleServiceImpl {
   requestVpnToggle(context: UIContext, targetId: number, isOn: boolean, dbConf: WGDBConf,
     onDisplayRefresh: () => void, onSettled?: () => void): Promise<void> {
     // 0. 事务锁：非idle=上一事务未落定，竞争点击失败
-    if (this.phase !== 'idle') {
-      const tip = this.phase === 'starting' ? '开启中' : this.phase === 'stopping' ? '关闭中' : '切换中';
+    if (vpnToggleState.phase !== 'idle') {
+      const tip = vpnToggleState.phase === 'starting' ? '开启中'
+        : vpnToggleState.phase === 'stopping' ? '关闭中' : '切换中';
       context.getPromptAction().showToast({ message: `VPN${tip}，请稍候` });
+      if (onSettled != undefined) {
+        onSettled();   // 竞争点击立即恢复自身可点状态（全局禁用门仍生效）
+      }
       return Promise.resolve();
     }
 
     // 1. 事务置位（先于入队：迟到广播按targetId/phase判定，无法伪造提前解锁）
-    this.phase = isOn ? 'starting' : 'stopping';
-    this.targetId = targetId;
+    vpnToggleState.phase = isOn ? 'starting' : 'stopping';
+    vpnToggleState.targetId = targetId;
 
     // 2. 意图先行：本地状态立即置为目标态，UI开关由意图驱动
     if (isOn) {
@@ -114,8 +134,8 @@ class VpnToggleServiceImpl {
     this.currentOp = task;
     task.finally(() => {
       // 事务落定（明确回复或超时）：解锁
-      this.phase = 'idle';
-      this.targetId = -1;
+      vpnToggleState.phase = 'idle';
+      vpnToggleState.targetId = -1;
       if (onSettled != undefined) {
         onSettled();
       }
@@ -137,8 +157,8 @@ class VpnToggleServiceImpl {
         LLog.info(TAG, `热切换跳过：运行意图非本配置(target=${targetId}, current=${s.isSwitchOpen}/${s.switchConfigId})`);
         return;
       }
-      this.phase = 'switching';
-      this.targetId = targetId;
+      vpnToggleState.phase = 'switching';
+      vpnToggleState.targetId = targetId;
       try {
         await WireGuard.switchVpnConfig(targetId, dbConf);
         const ok: boolean = await this.waitForReply('switching', targetId, START_REPLY_TIMEOUT_MS);
@@ -148,8 +168,8 @@ class VpnToggleServiceImpl {
       } catch (e) {
         LLog.error(TAG, `热切换失败: ${JSON.stringify(e)}`);
       } finally {
-        this.phase = 'idle';
-        this.targetId = -1;
+        vpnToggleState.phase = 'idle';
+        vpnToggleState.targetId = -1;
       }
     });
     this.currentOp = task;
@@ -228,8 +248,6 @@ class VpnToggleServiceImpl {
         }
       }
       LLog.error(TAG, { error: e, message: `${isOn ? "开启" : "关闭"}VPN异常` });
-    } finally {
-      this.pending = undefined;   // 清理残留pending（超时后到达的回复自然忽略）
     }
   }
 
@@ -253,24 +271,33 @@ class VpnToggleServiceImpl {
         ok = params.vpnThreadRunning === true && s.runningConfigId === p.targetId;
       }
       if (ok) {
-        this.pending = undefined;
-        p.resolve(true);
+        this.settlePending(p, true);
       }
       // 未达标广播：不消费，继续等待至超时
     });
+  }
+
+  /** 结算pending事务（成功/超时互斥；清除定时器防旧事务定时器误杀新事务） */
+  private settlePending(p: PendingReply, ok: boolean): void {
+    if (this.pending !== p) {
+      return;
+    }
+    this.pending = undefined;
+    clearTimeout(p.timer);
+    p.resolve(ok);
   }
 
   /** 挂起事务回复并返回等待Promise（同时注册懒监听） */
   private waitForReply(phase: TogglePhase, targetId: number, timeoutMs: number): Promise<boolean> {
     this.ensureReplyListener();
     return new Promise<boolean>((resolve) => {
-      this.pending = { phase: phase, targetId: targetId, resolve: resolve };
-      setTimeout(() => {
-        const p = this.pending;
-        if (p != undefined && p.phase === phase && p.targetId === targetId) {
-          this.pending = undefined;
-          p.resolve(false);   // 超时=失败回复
-        }
+      const pending: PendingReply = {
+        phase: phase, targetId: targetId, timer: 0,
+        resolve: (ok: boolean): void => resolve(ok),
+      };
+      this.pending = pending;
+      pending.timer = setTimeout(() => {
+        this.settlePending(pending, false);   // 超时=失败回复
       }, timeoutMs);
     });
   }

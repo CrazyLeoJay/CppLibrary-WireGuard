@@ -48,6 +48,8 @@ export class VpnSessionManager {
   private hasDomainEndpoint: boolean = false;
   private isReconnecting: boolean = false;
   private netConnection?: connection.NetConnection;
+  /** 关闭收尾进行中：拒绝关闭期间的建连/重连（防"STOP前已在途的异步操作"恢复后幽灵建连；随进程关闭作废） */
+  private isStopping: boolean = false;
   /** VEA上下文：创建VpnConnection用 */
   private context?: vpnExtension.VpnExtensionContext;
   /** 进程关闭请求回调：VEA广播serviceStopped（明确回复），主进程收到后关闭进程（进程关闭权在主进程） */
@@ -107,20 +109,21 @@ export class VpnSessionManager {
    */
   async stop(): Promise<void> {
     LLog.info(TAG, '停止VPN服务(shutdown路径)');
+    this.isStopping = true;   // 关闭收尾开始：期间的建连/重连请求一律拒绝
 
     // 1. 注销本层网络监听
     this.unregisterNetConnection();
 
     // 2. destroy（重试预算，耗尽广播残留提示）→ 停止VPN服务
     if (this.vpnConnection != undefined) {
-      try {
-        await this.vpnConnection.stopServer();
-        LLog.info(TAG, 'stop: VPN网络已注销、VPN服务已停止');
-      } catch (e) {
-        LLog.error(TAG, `stop: destroy预算耗尽，VPN网络/DNS可能残留: ${JSON.stringify(e)}`);
-        VPNChangeHelperV2.startVpnThrow('VPN已关闭但系统DNS可能残留，建议开关一次WiFi/飞行模式');
-      }
-      this.vpnConnection = undefined;
+    try {
+      await this.vpnConnection.stopServer();
+      LLog.info(TAG, 'stop: VPN网络已注销、VPN服务已停止');
+    } catch (e) {
+      LLog.error(TAG, `stop: destroy预算耗尽，VPN网络/DNS可能残留: ${JSON.stringify(e)}`);
+      VPNChangeHelperV2.startVpnThrow('VPN已关闭但系统DNS可能残留，建议开关一次WiFi/飞行模式');
+    }
+    this.vpnConnection = undefined;
     } else {
       LLog.info(TAG, 'stop: vpnConnection已为空，跳过stopServer');
     }
@@ -254,6 +257,10 @@ export class VpnSessionManager {
   /** 主进程重连请求（健康守护判定隧道失效后触发） */
   onReconnectRequest(): void {
     LLog.info(TAG, '收到主进程重连请求');
+    if (this.isStopping) {
+      LLog.warn(TAG, '关闭收尾中，拒绝重连请求');
+      return;
+    }
     if (this.vpnConnection == undefined) {
       LLog.warn(TAG, 'vpnConnection为空，无法重连');
       return;
@@ -299,6 +306,11 @@ export class VpnSessionManager {
    */
   private async startVpnInternal(id: number, config: WGDeviceConfig, terminateOnFailure: boolean = true,
     reportFailure: boolean = true): Promise<boolean> {
+    if (this.isStopping) {
+      // 关闭收尾期间拒绝建连（防"STOP前已在途的异步操作"恢复后幽灵建连）
+      LLog.warn(TAG, '关闭收尾中，拒绝建连');
+      return false;
+    }
     LLog.debug(TAG, `开启配置:${JSON.stringify(config)}`);
     this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context), config)
       .setStreamListener((msg) => {
@@ -429,7 +441,7 @@ export class VpnSessionManager {
   }
 
   private async onNetworkChanged(): Promise<void> {
-    if (this.isReconnecting || !this.currentDbConf || this.currentConfigId == undefined) {
+    if (this.isStopping || this.isReconnecting || !this.currentDbConf || this.currentConfigId == undefined) {
       return;
     }
 

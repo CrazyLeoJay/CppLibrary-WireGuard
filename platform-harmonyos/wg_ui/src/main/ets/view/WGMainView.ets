@@ -15,6 +15,7 @@
  *
  */
 import WGMainViewModel, { MainItemData } from '../view_model/WGMainViewModel';
+import { vpnToggleState } from '../view_model/VpnToggleService';
 import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
@@ -385,7 +386,7 @@ struct MainItemView {
           this.vm.closeOther(this.data.id)
           this.data.onClick();
         })
-        .enabled(this.data.toggleEnable)
+        .enabled(this.data.toggleEnable && vpnToggleState.phase === 'idle')
         .onChange((isOn: boolean) => {
           this.data.openChange(this.getUIContext(), isOn);
         })
