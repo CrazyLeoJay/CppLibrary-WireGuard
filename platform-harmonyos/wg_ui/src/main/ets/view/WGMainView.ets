@@ -20,7 +20,7 @@ import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } 
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
-import { WGConf, WireGuard } from 'wg_tunnel';
+import { WGConf, WireGuard, vpnRunStatusState } from 'wg_tunnel';
 
 const TAG = "WG主页";
 
@@ -137,7 +137,9 @@ export struct WGMainView {
   @Param vm: WGMainViewModel = new WGMainViewModel();
   @Local isShow: boolean = true;
   @Local isSwipeActionDelete: boolean = false;
+  @Local nowTick: number = Date.now();
   listScroller: ListScroller = new ListScroller();
+  private tickTimer?: number;
   funcBtn: MenuElement[] = [
     {
       value: "选择conf或者zip文件导入配置",
@@ -211,10 +213,70 @@ export struct WGMainView {
   aboutToAppear(): void {
     this.vm.loadConfigs();
     WireGuard.event.publishVpnStatusQuery();
+    // 运行状态条"心跳Xs前"滚动刷新（仅页面可见期间计时）
+    this.tickTimer = setInterval(() => {
+      this.nowTick = Date.now();
+    }, 1000);
   }
 
   aboutToDisappear(): void {
     this.vpnEvent.cancel()
+    if (this.tickTimer != undefined) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = undefined;
+    }
+  }
+
+  /** 运行配置名（按运行id从列表解析；列表未含时兜底显示配置#id） */
+  private resolveRunningConfigName(): string {
+    const id = vpnRunStatusState.runningConfigId;
+    if (id < 0) {
+      return '';
+    }
+    const item = this.vm.wgList.find(it => it.id === id);
+    return item != undefined ? item.name : `配置#${id}`;
+  }
+
+  /** 状态条文案（nowTick驱动"心跳Xs前"响应式滚动） */
+  get runStatusText(): string {
+    return vpnRunStatusState.buildStatusText(this.nowTick, this.resolveRunningConfigName());
+  }
+
+  /** 状态条颜色：绿=已连接且心跳新鲜；橙=连接中/心跳久远；红=Socket异常 */
+  get runStatusColor(): string {
+    const s = vpnRunStatusState;
+    const socketErrorFresh = s.socketError !== '' && (this.nowTick - s.socketErrorTime) < 30 * 1000;
+    if (socketErrorFresh) {
+      return '#D83931';
+    }
+    const heartbeatStale = s.lastHeartbeatTime === 0 || (this.nowTick - s.lastHeartbeatTime) > 180 * 1000;
+    if (!s.handshakeOk || heartbeatStale) {
+      return '#B25F00';
+    }
+    return '#2A5F1E';
+  }
+
+  /**
+   * 运行状态条：标题与配置列表之间的固定单行窗体
+   * 展示当前VPN连接情况——连接是否成功/上次心跳时间/Socket异常提示
+   */
+  @LocalBuilder
+  buildRunStatusBanner() {
+    if (vpnRunStatusState.running) {
+      Row({ space: 8 }) {
+        Circle({ width: 8, height: 8 })
+          .fill(this.runStatusColor)
+        Text(this.runStatusText)
+          .fontSize(13)
+          .fontColor(this.runStatusColor)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 16, right: 16, top: 7, bottom: 7 })
+      .backgroundColor('#14000000')
+    }
   }
 
   build() {
@@ -222,7 +284,12 @@ export struct WGMainView {
       if (this.vm.isEmptyList) {
         this.buildEmptyView()
       } else {
-        this.buildConfigListView()
+        Column() {
+          this.buildRunStatusBanner()
+          this.buildConfigListView()
+        }
+        .width('100%')
+        .height('100%')
       }
       Button() {
         SymbolGlyph($r('sys.symbol.plus'))
@@ -286,7 +353,7 @@ export struct WGMainView {
         .virtualScroll({})
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .divider({
       strokeWidth: '1vp',
     })

@@ -245,6 +245,75 @@ export class NetworkResidueState {
 export const networkResidueState: NetworkResidueState =
   AppStorageV2.connect(NetworkResidueState, () => UIUtils.makeObserved(new NetworkResidueState()))!;
 
+// ==================== 主页VPN运行状态条全局状态（AppStorageV2，主页固定单行窗体） ====================
+
+/**
+ * VPN运行状态条数据源（AppStorageV2全局缓存）
+ *
+ * 由保活管理器既有的两条订阅统一写入，UI只读：
+ * - subscribeVpnStreamLogs：成功流日志=活性证据（入站成功=心跳，握手响应=连接成功），
+ *   SOCKET_ERROR=链路异常（socket连接不成功的提示来源）；
+ * - subscribeVpnChange：START_VPN=新会话开启（重置握手/心跳，等待连接确认），
+ *   进程关闭/服务停止/异常=会话结束。
+ * 时刻字段供UI换算"上次心跳Xs前"；文案由 buildStatusText 生成（可单测）。
+ */
+@ObservedV2
+export class VpnRunStatusState {
+  /** VPN服务运行中（START_VPN起，进程关闭/服务停止/异常止） */
+  @Trace running: boolean = false;
+  /** 运行中的配置id（-1=无） */
+  @Trace runningConfigId: number = -1;
+  /** 已收到成功握手响应=连接成功（新会话开启时重置为false，等待确认） */
+  @Trace handshakeOk: boolean = false;
+  /** 最近一次成功入站（握手/数据）时刻=心跳（0=尚无入站） */
+  @Trace lastHeartbeatTime: number = 0;
+  /** 最近一次成功出站时刻（0=尚无出站） */
+  @Trace lastOutboundTime: number = 0;
+  /** 最近SOCKET_ERROR描述（''=无异常） */
+  @Trace socketError: string = '';
+  /** 最近SOCKET_ERROR时刻 */
+  @Trace socketErrorTime: number = 0;
+
+  /**
+   * 生成状态条单行文案（纯逻辑，可单测）
+   *
+   * @param now 当前时刻ms（UI定时刷新驱动"Xs前"滚动）
+   * @param configName 运行配置名（UI按runningConfigId解析，解析不到传''）
+   * @param socketErrorFreshMs socket异常提示的保鲜窗口（超过且已有后续成功流日志则不再提示）
+   */
+  buildStatusText(now: number, configName: string, socketErrorFreshMs: number = 30 * 1000): string {
+    const name = configName.length > 0 ? `${configName} · ` : '';
+    // Socket异常优先：保鲜窗口内且其后无成功流日志（出站/入站成功即视为已恢复）
+    const hasSuccessAfterError =
+      this.lastOutboundTime > this.socketErrorTime || this.lastHeartbeatTime > this.socketErrorTime;
+    if (this.socketError !== '' && (now - this.socketErrorTime) < socketErrorFreshMs && !hasSuccessAfterError) {
+      return `${name}Socket异常：${this.socketError}`;
+    }
+    if (!this.handshakeOk) {
+      // 服务已启动但握手未确认：区分"完全静默"与"已出站等待响应"
+      return this.lastOutboundTime > 0
+        ? `${name}连接中（已出站，等待握手响应）…`
+        : `${name}连接中…`;
+    }
+    const heartbeatGapMs = this.lastHeartbeatTime > 0 ? now - this.lastHeartbeatTime : -1;
+    if (heartbeatGapMs < 0) {
+      return `${name}已连接（尚无入站流量）`;
+    }
+    const sec = Math.floor(heartbeatGapMs / 1000);
+    if (sec < 60) {
+      return `${name}已连接 · 心跳${sec}秒前`;
+    }
+    if (sec < 3600) {
+      return `${name}已连接 · 心跳${Math.floor(sec / 60)}分钟前`;
+    }
+    return `${name}已连接 · 心跳${Math.floor(sec / 3600)}小时前`;
+  }
+}
+
+/** 全局单例（AppStorageV2连接，UI直读响应式） */
+export const vpnRunStatusState: VpnRunStatusState =
+  AppStorageV2.connect(VpnRunStatusState, () => UIUtils.makeObserved(new VpnRunStatusState()))!;
+
 /**
  * VPN保活管理器 - 可复用的后台保活门面（wg_tunnel模块）
  *
@@ -844,6 +913,30 @@ export class VpnKeepAliveManager {
         `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}, ` +
           `switchIntent=${status.isSwitchOpen}/${status.switchConfigId}`);
 
+      // ===== 运行状态条同步（主页固定单行窗体，按广播事实驱动） =====
+      if (tag === VpnEventTag.START_VPN) {
+        // 新会话开启（含热切换到新配置）：重置连接确认与心跳，等待流日志证明链路可用
+        vpnRunStatusState.running = true;
+        vpnRunStatusState.runningConfigId =
+          status.runningConfigId != undefined ? status.runningConfigId : -1;
+        vpnRunStatusState.handshakeOk = false;
+        vpnRunStatusState.lastHeartbeatTime = 0;
+        vpnRunStatusState.lastOutboundTime = 0;
+        vpnRunStatusState.socketError = '';
+      } else if (tag === VpnEventTag.QUERY_STATUS && params.vpnThreadRunning === true && status.running === true) {
+        // 冷启动恢复（App重启而VPN运行中）：对齐运行事实，不重置心跳（由后续流日志自然刷新）
+        vpnRunStatusState.running = true;
+        vpnRunStatusState.runningConfigId =
+          status.runningConfigId != undefined ? status.runningConfigId : -1;
+      } else if (params.vpnThreadRunning === false || tag === VpnEventTag.VPN_SERVICE_STOPPED
+        || tag === VpnEventTag.THROW) {
+        // 会话结束：进程关闭 / 服务停止（V2 STOP）/ 运行异常
+        vpnRunStatusState.running = false;
+        vpnRunStatusState.runningConfigId = -1;
+        vpnRunStatusState.handshakeOk = false;
+        vpnRunStatusState.socketError = '';
+      }
+
       if (tag === VpnEventTag.QUERY_NO_RUNNING) {
         // 仅表示"查询时VEA未运行"的信息事件（发布时不带vpnThreadRunning），
         // 不能落入下方"进程关闭"分支误回滚开关意图（如启动窗口期回前台触发查询）
@@ -951,6 +1044,26 @@ export class VpnKeepAliveManager {
       // 更新最后收到流日志的时间（隧道健康守护依赖此判断是否有任何活动）
       const now = Date.now();
       this.tunnel.lastStreamLogTime = now;
+      // 运行状态条数据同步（主页固定单行窗体）
+      if (log.success) {
+        if (log.direction === StreamDirection.RECEIVE) {
+          // 成功入站=心跳；握手响应成功=连接成功确认
+          vpnRunStatusState.lastHeartbeatTime = now;
+          if (log.messageType === MessageType.HANDSHAKE_RESPONSE) {
+            vpnRunStatusState.handshakeOk = true;
+          }
+        } else {
+          vpnRunStatusState.lastOutboundTime = now;
+        }
+        // 成功流日志证明链路可用，清除socket异常提示
+        if (vpnRunStatusState.socketError !== '') {
+          vpnRunStatusState.socketError = '';
+        }
+      }
+      if (log.messageType === MessageType.SOCKET_ERROR) {
+        vpnRunStatusState.socketError = log.msg;
+        vpnRunStatusState.socketErrorTime = now;
+      }
       if (log.messageType === MessageType.SOCKET_ERROR) {
         // 链路异常事件计入外发活动：证明发送侧仍在尝试，武装失效判定
         this.tunnel.lastOutboundTime = now;
