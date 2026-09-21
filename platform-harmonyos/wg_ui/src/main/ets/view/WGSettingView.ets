@@ -81,8 +81,13 @@ struct WGSettingView {
     if (!s.hasNetwork) {
       return '当前无可用网络，建议检查网络连接';
     }
+    // vpnMounted按系统全部网络的BEARER_VPN枚举判定（分流配置下默认网络不切换为VPN，
+    // 不能以默认网络bearer为准）；residue=意图已关但VPN网络仍挂载
     if (s.residue) {
-      return `当前网络=${s.netType}，VPN网络仍挂载，存在残留，建议修复`;
+      return `当前网络=${s.netType}，VPN网络残留，建议修复`;
+    }
+    if (s.vpnMounted) {
+      return `当前网络=${s.netType}，VPN网络挂载中，网络正常`;
     }
     return `当前网络=${s.netType}，VPN网络未挂载，无残留，网络正常`;
   }

@@ -13,11 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { common } from '@kit.AbilityKit';
+import { bundleManager, common } from '@kit.AbilityKit';
 import { backgroundTaskManager } from '@kit.BackgroundTasksKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
-import { connection } from '@kit.NetworkKit';
+import { connection, vpnExtension } from '@kit.NetworkKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
 import { WireGuard } from '../model/WGHelper';
@@ -208,10 +208,11 @@ interface ObservedLongTask {
 
 /** 网络/VPN残留诊断结果 */
 interface NetworkDiagnosis {
-  residue: boolean;     // true=VPN网络仍挂载（残留）
-  hasNetwork: boolean;  // false=无默认网络（可能正是残留坏状态）
-  netType: string;      // 当前网络类型（WiFi/移动数据/以太网）
-  detail: string;       // 简明状态摘要
+  residue: boolean;       // true=VPN网络残留未清理（意图已关但VPN网络仍挂载）
+  vpnMounted: boolean;    // true=系统存在BEARER_VPN网络（挂载中）
+  hasNetwork: boolean;    // false=无默认网络（可能正是残留坏状态）
+  netType: string;        // 当前网络类型（WiFi/移动数据/以太网）
+  detail: string;         // 简明状态摘要
 }
 
 // ==================== 网络残留全局状态（AppStorageV2，设置页/诊断UI共享） ====================
@@ -228,6 +229,8 @@ export class NetworkResidueState {
   @Trace checking: boolean = false;
   /** 检测到VPN网络残留（默认网络仍挂VPN bearer 或 无默认网络） */
   @Trace residue: boolean = false;
+  /** VPN网络挂载状态（系统存在BEARER_VPN网络） */
+  @Trace vpnMounted: boolean = false;
   /** 设备当前是否有可用网络 */
   @Trace hasNetwork: boolean = true;
   /** 当前网络类型（WiFi/移动数据/以太网） */
@@ -1059,6 +1062,81 @@ export class VpnKeepAliveManager {
     longTaskModel.publishNotification();
     // 明确回复到达（网络已拆干净）：确认系统DNS/网络已恢复
     this.confirmVpnNetworkCleanup();
+    // VEA已完成拆除并广播serviceStopped=明确请求进程关闭（进程关闭权在主进程）。
+    // 该广播可能来自开关事务之外的路径（强重启发STOP、onCreate异常、配置轮询超时）——
+    // 无论来源统一在此收敛关闭，杜绝"聋壳进程滞留"（滞留后所有指令打到已聋的VEA
+    // 全部丢失，开关回执永远超时，只能重启手机恢复）。事务内关闭与此共享去重，幂等。
+    this.closeVpnExtensionProcess().then((closed: boolean) => {
+      if (!closed) {
+        LLog.error(TAG, 'VEA进程关闭校验重试耗尽，进程可能滞留（下次开启前需确认关闭）');
+      }
+    });
+  }
+
+  /** VEA进程关闭进行中：并发触发（开关事务/状态机）共享同一次在途关闭，避免重复stop */
+  private closingVea?: Promise<boolean>;
+
+  /**
+   * 关闭VEA进程（进程关闭权在主进程）+ 关闭校验重试
+   *
+   * VEA收到STOP后已全聋（不再监听任何指令）：若进程滞留未关闭，后续指令会
+   * 打到聋壳丢失——必须校验进程确实退出，滞留则重试关闭。
+   * 并发调用共享同一次在途关闭；进程已退出时走快速校验路径立即返回。
+   *
+   * @returns true=进程确认已退出
+   */
+  async closeVpnExtensionProcess(): Promise<boolean> {
+    if (this.closingVea != undefined) {
+      return this.closingVea;
+    }
+    this.closingVea = this.doCloseVpnExtensionProcess().finally(() => {
+      this.closingVea = undefined;
+    });
+    return this.closingVea;
+  }
+
+  private async doCloseVpnExtensionProcess(): Promise<boolean> {
+    // 锁定目标PID：校验只针对本次目标进程——关闭期间若强重启/用户操作拉起了新VEA，
+    // PID变化=旧目标已退出，新进程是合法新生，绝不可误杀（否则新隧道被拆、意图回滚）
+    const targetPid: number | undefined = await WireGuard.tools.getVpnExtensionPid();
+    if (targetPid == undefined) {
+      LLog.info(TAG, '关闭VEA: 目标进程不存在，无需关闭');
+      return true;
+    }
+    const maxAttempts: number = 3;
+    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+        await vpnExtension.stopVpnExtensionAbility({
+          deviceId: '',
+          bundleName: bundleInfo.name,
+          abilityName: 'WGVpnExtAbility',
+        });
+      } catch (e) {
+        LLog.warn(TAG, `关闭VEA#${attempt}调用失败(进程可能已退出): ${JSON.stringify(e)}`);
+      }
+      // 校验目标进程确实退出（3s内轮询）
+      const deadline: number = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        try {
+          const pid = await WireGuard.tools.getVpnExtensionPid();
+          if (pid == undefined) {
+            LLog.info(TAG, `VEA进程已关闭(第${attempt}次尝试)`);
+            return true;
+          }
+          if (pid !== targetPid) {
+            // 旧目标已退出，当前是新拉起的合法VEA——关闭目标已达成，立即收手
+            LLog.info(TAG, `VEA旧目标(${targetPid})已退出，新进程(${pid})为合法新生，停止关闭`);
+            return true;
+          }
+        } catch (e) {
+          // 查询失败继续轮询
+        }
+        await new Promise<void>((resolve) => setTimeout(resolve, 300));
+      }
+      LLog.warn(TAG, `关闭VEA#${attempt}后进程仍存活，重试关闭`);
+    }
+    return false;
   }
 
   private stopLongTaskIfNeeded(): void {
@@ -1148,8 +1226,8 @@ export class VpnKeepAliveManager {
     // 状态机据此保留开关意图与保活，避免把"主动恢复"误判为"异常进程关闭"而回滚开关。
     this.isForceRestarting = true;
     try {
-      // 1. 关闭：通知式，VEA确认任务关闭后自行关闭进程。
-      //    关闭异常（如指令丢失）不阻断后续重启，故独立捕获
+      // 1. 关闭：通知式，发STOP给VEA执行拆除（拆除完成VEA广播serviceStopped，
+      //    状态机收到后关闭进程）。关闭异常（如指令丢失）不阻断后续重启，故独立捕获
       try {
         await WireGuard.runWGConfig(configId, dbConf, false);
       } catch (stopErr) {
@@ -1157,11 +1235,22 @@ export class VpnKeepAliveManager {
       }
       // 2. 轮询等待VEA完全退出（避免启动竞态：start时若检测到VEA仍在运行会走SWITCH而非重启）
       const deadline = Date.now() + 6000;
+      let exited = false;
       while (Date.now() < deadline) {
         if (!(await WireGuard.tools.isVpnExtensionRunning())) {
+          exited = true;
           break;
         }
         await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      }
+      // VEA可能已冻结（收不到STOP广播）或serviceStopped关闭链路未生效——
+      // 进程仍在时主进程直接关闭（进程关闭权在主进程），否则SWITCH会打到聋壳丢失
+      if (!exited) {
+        LLog.warn(TAG, '强重启VEA-轮询超时进程仍存活，主进程直接关闭');
+        const closed = await this.closeVpnExtensionProcess();
+        if (!closed) {
+          LLog.error(TAG, '强重启VEA-进程关闭失败，SWITCH可能丢失（已聋壳），后续修复轮继续收敛');
+        }
       }
       // 3. 重启前复查用户意图：关闭流程可能在本重启期间执行（runArg已被清空），
       //    此时若继续启动，会把用户已关闭的VPN重新拉起并重新缓存runArg
@@ -1228,7 +1317,28 @@ export class VpnKeepAliveManager {
    * 交集命中不代表残留——系统DNS列表仅进detail供人工核对。
    */
   private async diagnoseNetworkResidue(): Promise<NetworkDiagnosis> {
-    const result: NetworkDiagnosis = { residue: false, hasNetwork: true, netType: '', detail: '' };
+    const result: NetworkDiagnosis = {
+      residue: false, vpnMounted: false, hasNetwork: true, netType: '', detail: ''
+    };
+    // 1. 挂载判定：枚举系统全部网络找BEARER_VPN（不依赖默认网络切换，
+    //    兼容分流配置与"VPN不接管默认网"的系统行为）
+    try {
+      const nets = connection.getAllNetsSync();
+      for (const net of nets) {
+        try {
+          const cap = await connection.getNetCapabilities(net);
+          if (cap.bearerTypes.includes(connection.NetBearType.BEARER_VPN)) {
+            result.vpnMounted = true;
+            break;
+          }
+        } catch (e) {
+          // 单个网络查询失败忽略，继续枚举
+        }
+      }
+    } catch (e) {
+      LLog.warn(TAG, `枚举系统网络失败: ${JSON.stringify(e)}`);
+    }
+    // 2. 默认网络类型
     const netHandle = connection.getDefaultNetSync();
     if (netHandle.netId === 0) {
       // 无默认网络：可能正是关闭VPN后的残留坏状态
@@ -1238,15 +1348,17 @@ export class VpnKeepAliveManager {
       result.detail = '无可用网络';
       return result;
     }
-    const caps = await connection.getNetCapabilities(netHandle);
-    const vpnBearer = caps.bearerTypes.includes(connection.NetBearType.BEARER_VPN);
-    result.netType = caps.bearerTypes.includes(connection.NetBearType.BEARER_WIFI) ? 'WiFi'
-      : caps.bearerTypes.includes(connection.NetBearType.BEARER_CELLULAR) ? '移动数据'
-        : caps.bearerTypes.includes(connection.NetBearType.BEARER_ETHERNET) ? '以太网' : '其他网络';
-    result.residue = vpnBearer;
-    result.detail = vpnBearer
-      ? `当前网络=${result.netType}，VPN网络仍挂载，存在残留`
-      : `当前网络=${result.netType}，VPN网络未挂载，无残留`;
+    try {
+      const caps = await connection.getNetCapabilities(netHandle);
+      result.netType = caps.bearerTypes.includes(connection.NetBearType.BEARER_WIFI) ? 'WiFi'
+        : caps.bearerTypes.includes(connection.NetBearType.BEARER_CELLULAR) ? '移动数据'
+          : caps.bearerTypes.includes(connection.NetBearType.BEARER_ETHERNET) ? '以太网' : '其他网络';
+    } catch (e) {
+      result.netType = '未知';
+    }
+    result.residue = result.vpnMounted
+      && !WireGuard.config.status.getConfig().isSwitchOpen;   // 意图已关仍挂载=残留
+    result.detail = `VPN网络=${result.vpnMounted ? '挂载' : '未挂载'}, 默认网络=${result.netType}`;
     return result;
   }
 
@@ -1262,6 +1374,7 @@ export class VpnKeepAliveManager {
     try {
       const d = await this.diagnoseNetworkResidue();
       networkResidueState.residue = d.residue;
+      networkResidueState.vpnMounted = d.vpnMounted;
       networkResidueState.hasNetwork = d.hasNetwork;
       networkResidueState.netType = d.netType;
       networkResidueState.detail = d.detail;

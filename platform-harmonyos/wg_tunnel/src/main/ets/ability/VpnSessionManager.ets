@@ -48,6 +48,9 @@ export class VpnSessionManager {
   private hasDomainEndpoint: boolean = false;
   private isReconnecting: boolean = false;
   private netConnection?: connection.NetConnection;
+  /** 网络监听注册时刻：register后系统会立即回调当前网络（netAvailable/propertiesChange基线回调），
+   *  非真实网络变化——窗口期内拒绝触发重建/漫游，避免刚建好的隧道立刻被拆建 */
+  private netWatchRegisteredAt: number = 0;
   /** 关闭收尾进行中：拒绝关闭期间的建连/重连（防"STOP前已在途的异步操作"恢复后幽灵建连；随进程关闭作废） */
   private isStopping: boolean = false;
   /** VEA上下文：创建VpnConnection用 */
@@ -406,6 +409,8 @@ export class VpnSessionManager {
         LLog.info(TAG, "网络连接属性变化，触发DNS重新解析");
         this.onNetworkChanged();
       });
+      // 记录注册时刻：register后系统立即回调当前网络作为基线，窗口期内不当作真实变化
+      this.netWatchRegisteredAt = Date.now();
       this.netConnection.register(() => {
         LLog.info(TAG, "网络状态监听注册成功");
       });
@@ -442,6 +447,12 @@ export class VpnSessionManager {
   }
 
   private async onNetworkChanged(): Promise<void> {
+    // 注册基线窗口：register后系统立即回调当前网络（netAvailable/propertiesChange），
+    // 并非真实网络变化——此时隧道刚建好，重建/漫游纯属拆建空转（实测swapSocket竞态握手）
+    if (this.netWatchRegisteredAt > 0 && (Date.now() - this.netWatchRegisteredAt) < 1500) {
+      LLog.info(TAG, '网络监听注册基线回调，非真实网络变化，跳过重建');
+      return;
+    }
     if (this.isStopping || this.isReconnecting || !this.currentDbConf || this.currentConfigId == undefined) {
       return;
     }

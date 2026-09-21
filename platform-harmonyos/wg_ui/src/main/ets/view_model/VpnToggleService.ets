@@ -38,8 +38,6 @@
  * @author leojay`fu
  */
 import { UIContext, AppStorageV2, UIUtils } from '@kit.ArkUI';
-import { bundleManager } from '@kit.AbilityKit';
-import { vpnExtension } from '@kit.NetworkKit';
 import { LLog, vpnKeepAliveManager, WireGuard, WGDBConf, VpnEventTag, SubEventCancel } from 'wg_tunnel';
 
 const TAG = 'VpnToggle'
@@ -210,6 +208,11 @@ class VpnToggleServiceImpl {
         // 关闭序列第一步：先停轮询/长时任务（不再保活直接关闭），再发STOP
         vpnKeepAliveManager.onSwitchOff();
         await WireGuard.runWGConfig(targetId, dbConf, false);
+        // VEA未运行：无服务可停、无进程可关——立即成功落定。
+        // （serviceStopped广播只来自运行中的VEA，此时等它只会白等20s超时）
+        if (this.pending != undefined && !(await WireGuard.tools.isVpnExtensionRunning())) {
+          this.settleNow(true);
+        }
       }
 
       // 等待明确回复（成功/超时=失败）
@@ -228,7 +231,11 @@ class VpnToggleServiceImpl {
         return;
       }
       // 关闭明确回复到达（网络已拆干净）→ 主进程关闭VEA进程
-      await this.stopVpnExtensionAbility();
+      // （共享实现：与保活状态机的serviceStopped收敛关闭去重，幂等）
+      const closed: boolean = await vpnKeepAliveManager.closeVpnExtensionProcess();
+      if (!closed) {
+        LLog.error(TAG, 'VEA进程关闭校验重试耗尽，进程可能滞留（下次开启前需确认关闭）');
+      }
     } catch (e) {
       // 回滚：仅当意图仍属本次（被后到意图覆盖时不回滚、不提示）
       const cur = WireGuard.config.status.getConfig();
@@ -287,6 +294,14 @@ class VpnToggleServiceImpl {
     p.resolve(ok);
   }
 
+  /** 立即落定当前pending事务（VEA未运行等无需等待广播的场景） */
+  private settleNow(ok: boolean): void {
+    const p = this.pending;
+    if (p != undefined) {
+      this.settlePending(p, ok);
+    }
+  }
+
   /** 挂起事务回复并返回等待Promise（同时注册懒监听） */
   private waitForReply(phase: TogglePhase, targetId: number, timeoutMs: number): Promise<boolean> {
     this.ensureReplyListener();
@@ -300,44 +315,6 @@ class VpnToggleServiceImpl {
         this.settlePending(pending, false);   // 超时=失败回复
       }, timeoutMs);
     });
-  }
-
-  /**
-   * 关闭VEA进程（进程关闭权在主进程）+ 关闭校验重试
-   *
-   * VEA收到STOP后已全聋（不再监听任何指令）：若进程滞留未关闭，下次开启的
-   * 参数直传会因15501001改走SWITCH打到聋壳丢失——必须校验进程确实退出，
-   * 滞留则重试关闭。
-   */
-  private async stopVpnExtensionAbility(): Promise<void> {
-    const maxAttempts: number = 3;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
-        await vpnExtension.stopVpnExtensionAbility({
-          deviceId: '',
-          bundleName: bundleInfo.name,
-          abilityName: 'WGVpnExtAbility',
-        });
-      } catch (e) {
-        LLog.error(TAG, `关闭VEA#${attempt}调用失败: ${JSON.stringify(e)}`);
-      }
-      // 校验进程确实退出（3s内轮询）
-      const deadline: number = Date.now() + 3000;
-      while (Date.now() < deadline) {
-        try {
-          if (!(await WireGuard.tools.isVpnExtensionRunning())) {
-            LLog.info(TAG, `VEA进程已关闭(第${attempt}次尝试)`);
-            return;
-          }
-        } catch (e) {
-          // 查询失败继续轮询
-        }
-        await new Promise<void>((resolve) => setTimeout(resolve, 300));
-      }
-      LLog.warn(TAG, `关闭VEA#${attempt}后进程仍存活，重试关闭`);
-    }
-    LLog.error(TAG, 'VEA进程关闭校验重试耗尽，进程可能滞留（下次开启前需确认关闭）');
   }
 }
 
