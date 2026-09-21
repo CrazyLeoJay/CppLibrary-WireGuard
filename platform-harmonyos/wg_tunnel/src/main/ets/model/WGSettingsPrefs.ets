@@ -103,36 +103,6 @@ class WGSettingsPrefsImpl {
     this.prefs.flushSync();
     LLog.info(TAG, `defaultFilterMode set to ${value}`);
   }
-
-  /**
-   * 获取最近一次VPN的DNS列表（供关闭后DNS残留诊断/修复比对）
-   */
-  getLastVpnDns(): string[] {
-    if (!this.prefs) {
-      return [];
-    }
-    const raw = this.prefs.getSync('last_vpn_dns', '') as string;
-    if (raw.length === 0) {
-      return [];
-    }
-    try {
-      return JSON.parse(raw) as string[];
-    } catch (e) {
-      return [];
-    }
-  }
-
-  /**
-   * 记录最近一次VPN的DNS列表（runWGConfig启动时写入）
-   */
-  setLastVpnDns(dns: string[]): void {
-    if (!this.prefs) {
-      return;
-    }
-    this.prefs.putSync('last_vpn_dns', JSON.stringify(dns));
-    this.prefs.flushSync();
-    LLog.info(TAG, `lastVpnDns set to [${dns.join(',')}]`);
-  }
 }
 
 export const WGSettingsPrefs = new WGSettingsPrefsImpl();

@@ -27,7 +27,6 @@ import { KeyPair, WGConf } from './entity/napi_entity';
 import ParamsRegex from './ParamsRegex';
 import WGConfig, { computeConfMd5 } from './WGConfig';
 import WGEvent from './WGEvent';
-import { WGSettingsPrefs } from './WGSettingsPrefs';
 import WGTools from './WGTools';
 import { VpnConfigAction, VpnConfigRequestParams } from './entity/VpnConfigAction';
 import { VpnEventTag } from './entity/VPNEventStatusParams';
@@ -163,8 +162,6 @@ export namespace WireGuard {
       // 1. 缓存配置
       WireGuard.config.runArg.set(id, config);
       WireGuard.config.runArg.setRunningMd5(computeConfMd5(config));
-      // 记录本次VPN的DNS列表（供关闭后DNS残留诊断/「修复DNS」按钮比对）
-      WGSettingsPrefs.setLastVpnDns((config.conf.inter.dns ?? []).map((it): string => it.ip));
 
       // 2. 检测VEA是否运行
       const isRunning = await WGTools.isVpnExtensionRunning();

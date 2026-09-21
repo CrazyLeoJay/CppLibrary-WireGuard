@@ -26,7 +26,6 @@ import { MessageType, StreamDirection, StreamLogMessage } from '../model/entity/
 import { SubEventCancel } from '../model/WGEvent';
 import { longTaskModel, ContinuousTaskState } from './LongTaskModel';
 import { SingleFlightLoop } from './SingleFlightLoop';
-import { WGSettingsPrefs } from '../model/WGSettingsPrefs';
 
 const TAG = 'VpnKeepAliveMgr';
 
@@ -1107,14 +1106,15 @@ export class VpnKeepAliveManager {
   /**
    * VPN关闭后确认网络清理完成
    *
-   * 检查当前网络的bearerTypes是否仍包含VPN类型(4)，
-   * 如果残留则等待2秒后重试检测，最多3次。
-   * 确保VPN路由和DNS配置已被系统完全清理。
+   * 仅检测默认网络是否仍挂VPN bearer——bearer移除即系统已完整注销VPN网络
+   * （路由+DNS随网络注销恢复）。
+   * 不比对DNS列表：用户配置的VPN DNS常与物理网络DNS重合（公共DNS/路由器DNS），
+   * 交集命中不代表残留（实测误报）。重试耗尽仍挂VPN bearer → THROW提示开关WiFi
+   * （真残留：系统未注销VPN网络）。
    */
   private async confirmVpnNetworkCleanup(): Promise<void> {
     const maxRetries: number = 3;
     const retryInterval: number = 2000;
-    const vpnDns: string[] = await WGSettingsPrefs.getLastVpnDns();
     for (let i = 0; i < maxRetries; i++) {
       try {
         const netHandle = connection.getDefaultNetSync();
@@ -1124,16 +1124,11 @@ export class VpnKeepAliveManager {
         }
         const capInfo = await connection.getNetCapabilities(netHandle);
         const hasVpnBearer = capInfo.bearerTypes.includes(connection.NetBearType.BEARER_VPN);
-        // DNS残留检测：默认网络解析配置中是否仍含VPN的DNS服务器
-        const props = await connection.getConnectionProperties(netHandle);
-        const dnses: string[] = props.dnses.map((d: connection.NetAddress): string => d.address);
-        const dnsHit: string[] = dnses.filter((d: string): boolean => vpnDns.includes(d));
-        if (!hasVpnBearer && dnsHit.length === 0) {
-          LLog.info(TAG, `VPN网络清理确认: bearer已移除且DNS无残留(${i + 1}/${maxRetries})`);
+        if (!hasVpnBearer) {
+          LLog.info(TAG, `VPN网络清理确认: VPN bearer已移除(${i + 1}/${maxRetries})`);
           return;
         }
-        LLog.warn(TAG, `VPN网络清理确认: vpnBearer=${hasVpnBearer}, DNS残留=[${dnsHit.join(',')}]` +
-          `(${i + 1}/${maxRetries})，等待重试`);
+        LLog.warn(TAG, `VPN网络清理确认: VPN bearer仍存在(${i + 1}/${maxRetries})，等待重试`);
       } catch (e) {
         LLog.warn(TAG, `VPN网络清理确认: 检查异常(${i + 1}/${maxRetries}): ${(e as BusinessError).message}`);
       }
@@ -1141,8 +1136,8 @@ export class VpnKeepAliveManager {
         await new Promise<void>((resolve) => setTimeout(resolve, retryInterval));
       }
     }
-    LLog.error(TAG, 'VPN网络清理确认: 重试耗尽，系统DNS/网络可能未恢复');
-    WireGuard.event.publishVpnThrow('VPN已关闭但系统DNS可能未恢复，建议开关一次WiFi/飞行模式');
+    LLog.error(TAG, 'VPN网络清理确认: 重试耗尽，VPN网络未注销');
+    WireGuard.event.publishVpnThrow('VPN已关闭但系统网络未完全注销，建议开关一次WiFi/飞行模式');
   }
 
   // ===================== DNS残留诊断与修复（设置页「修复DNS」按钮） =====================
@@ -1150,25 +1145,25 @@ export class VpnKeepAliveManager {
   /**
    * 诊断系统DNS残留（只读）
    *
-   * 默认网络的解析配置（dnses）与最近一次VPN的DNS求交集 + VPN bearer检查。
-   * 参照来源：WGSettingsPrefs.last_vpn_dns（runWGConfig启动时记录）。
+   * 残留判定=默认网络仍挂VPN bearer（系统未注销VPN网络）。
+   * 不比对DNS列表：用户配置的VPN DNS常与物理网络DNS重合（公共DNS/路由器DNS），
+   * 交集命中不代表残留——系统DNS列表仅进detail供人工核对。
    */
   async diagnoseDnsResidue(): Promise<DnsDiagnosis> {
-    const vpnDns: string[] = await WGSettingsPrefs.getLastVpnDns();
     const result: DnsDiagnosis = { residue: false, detail: '' };
     const netHandle = connection.getDefaultNetSync();
     if (netHandle.netId === 0) {
-      result.residue = false;
-      result.detail = '无默认网络';
+      // 无默认网络：可能正是关闭VPN后的残留坏状态
+      result.residue = true;
+      result.detail = '设备当前没有可用网络';
       return result;
     }
-    const props = await connection.getConnectionProperties(netHandle);
-    const dnses: string[] = props.dnses.map((d: connection.NetAddress): string => d.address);
     const caps = await connection.getNetCapabilities(netHandle);
     const vpnBearer = caps.bearerTypes.includes(connection.NetBearType.BEARER_VPN);
-    const hit: string[] = dnses.filter((d: string): boolean => vpnDns.includes(d));
-    result.residue = hit.length > 0 || vpnBearer;
-    result.detail = `系统DNS=[${dnses.join(', ')}], VPN DNS=[${vpnDns.join(', ')}], VPN bearer=${vpnBearer}`;
+    const props = await connection.getConnectionProperties(netHandle);
+    const dnses: string[] = props.dnses.map((d: connection.NetAddress): string => d.address);
+    result.residue = vpnBearer;
+    result.detail = `系统DNS=[${dnses.join(', ')}], VPN bearer=${vpnBearer}`;
     return result;
   }
 
