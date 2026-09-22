@@ -9,6 +9,7 @@ build_wsl
 spec
 build_*
 build-*
+!build-profile.json5
 .zcode
 .cache
 .deveco
