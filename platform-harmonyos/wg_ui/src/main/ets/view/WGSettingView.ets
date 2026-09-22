@@ -594,7 +594,7 @@ function listStyle() {
   .width('100%')
   // .height('100%')
   .divider({
-    strokeWidth: '2vp',
+    strokeWidth: '1vp',
     color: $r('app.color.wg_divider_color'),
   })
 }
@@ -604,7 +604,7 @@ function listGroupStyle() {
   .width('100%')
   // .height('100%')
   .divider({
-    strokeWidth: '2vp',
+    strokeWidth: '1vp',
     color: $r('app.color.wg_divider_color'),
   })
 }

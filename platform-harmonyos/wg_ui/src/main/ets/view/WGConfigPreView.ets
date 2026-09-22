@@ -55,26 +55,6 @@ export struct WGConfigPreViewNavDest {
   build() {
     NavDestination() {
       WGConfigPreView({ vm: this.vm })
-
-      // Swiper() {
-      //   SwiperTitleLineView({
-      //     rightTag: "左滑查看日志"
-      //   }) {
-      //     WGConfigPreView({ vm: this.vm })
-      //   }
-      //
-      //   SwiperTitleLineView({
-      //     leftTag: "右滑回到主页"
-      //   }) {
-      //     WGConfigPreViewStreamLogView({ vm: this.vm })
-      //   }
-      // }
-      // .loop(false)
-      // .width('100%')
-      // .height('100%')
-      // .onSelected((index) => {
-      //   this.subTitle = index == 0 ? "配置预览" : "VPN日志"
-      // })
     }
     // .hideTitleBar(true)
     .title(`WireGuard：${this.vm.configName}`)

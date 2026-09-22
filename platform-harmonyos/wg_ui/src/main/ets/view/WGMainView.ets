@@ -16,7 +16,7 @@
  */
 import WGMainViewModel, { MainItemData } from '../view_model/WGMainViewModel';
 import { vpnToggleState } from '../view_model/VpnToggleService';
-import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
+import { ComponentContent, promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
@@ -66,6 +66,8 @@ export struct WGMainViewNavDest {
       main: $r('app.string.app_name'),
       sub: $r('app.string.sub_title'),
     })
+    // 菜单文案用静态标签：NavDestination.menus 的动态文案在V2下不随状态刷新，
+    // 当前值改为点击后toast反馈（排序字段/方向/显示信息）
     .menus([
       {
         value: "刷新",
@@ -91,33 +93,36 @@ export struct WGMainViewNavDest {
         }
       },
       {
-        value: `排序参数:${this.vm.uiConfig.getColumnName()}`,
+        value: "排序字段",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
         action: () => {
           this.vm.uiConfig.sortColumnToNext()
+          this.getUIContext().getPromptAction().showToast({
+            message: `已按${this.vm.uiConfig.getColumnName()}排序`,
+          })
         }
       },
-
       {
-        value: `排序顺序:${this.vm.uiConfig.listSortAsc ? '正序' : '倒叙'}`,
+        value: "排序方向",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
         action: () => {
           this.vm.uiConfig.listSortAsc = !this.vm.uiConfig.listSortAsc
+          this.getUIContext().getPromptAction().showToast({
+            message: `已切换为${this.vm.uiConfig.listSortAsc ? '正序' : '倒序'}`,
+          })
         }
       },
       {
-        value: `显示信息：${this.vm.uiConfig.listShowSimple ? '简略' : '详细'}`,
+        value: "显示信息",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.message')),
         action: () => {
           this.vm.uiConfig.listShowSimple = !this.vm.uiConfig.listShowSimple
+          this.getUIContext().getPromptAction().showToast({
+            message: `已切换为${this.vm.uiConfig.listShowSimple ? '简略' : '详细'}`,
+          })
         }
       },
     ])
-  }
-
-  @LocalBuilder
-  titleView() {
-    ComposeTitleBar()
   }
 }
 
@@ -303,8 +308,7 @@ export struct WGMainView {
       .layoutGravity(LocalizedAlignment.BOTTOM_END)
       .margin({ bottom: '32vp', right: "32vp" })
       // .position({ x: '80%', y: '85%' }) // 右下角位置
-      .hitTestBehavior(HitTestMode.Transparent) // 穿透触摸事件
-      .hitTestBehavior(HitTestMode.Block) // 阻塞父组件事件
+      .hitTestBehavior(HitTestMode.Block) // 阻塞父组件事件（原Transparent被此处覆盖，属无效代码已去重）
       .onClick((event: ClickEvent) => {
         animateToImmediately({ duration: 100 }, () => {
           this.isShow = true;
@@ -473,7 +477,7 @@ struct MainItemView {
     }
     .padding({ left: '16vp', right: '16vp' })
     .width('100%')
-    .height('60vp')
+    .constraintSize({ minHeight: '60vp' })
   }
 }
 

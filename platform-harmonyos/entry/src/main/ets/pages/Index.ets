@@ -18,7 +18,6 @@ import { WGMainViewNavDest } from 'wg_ui';
 @Entry
 @Component
 struct Index {
-  @State message: string = 'Hello World';
   nav: NavPathStack = new NavPathStack();
 
   build() {
@@ -28,8 +27,6 @@ struct Index {
         .height('100%')
     }
     .hideTitleBar(true)
-    // .hideNavBar(true)
-
   }
 }
 

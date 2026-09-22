@@ -55,7 +55,7 @@ export struct QRCodeNewWGConfDialog {
   }
 
   build() {
-    Column({ space: ' 16vp' }) {
+    Column({ space: '16vp' }) {
       Text("通过二维码添加配置")
 
       DiyTextInput({
@@ -106,7 +106,7 @@ export struct QRCodeNewWGConfDialog {
     .width('80%')
     .backgroundColor($r('app.color.wg_dialog_background_color'))
     .padding('16vp')
-    .borderRadius('8vp')
+    .borderRadius($r('sys.float.corner_radius_level7'))
     .justifyContent(FlexAlign.Center)
   }
 }
