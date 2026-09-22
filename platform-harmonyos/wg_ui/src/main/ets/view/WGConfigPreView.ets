@@ -150,9 +150,9 @@ export default struct WGConfigPreView {
             "启动异常，没有读取到参数。如果您是第一次碰到这个异常，请尝试重新开启是否能解决。后续将不会有这个问题。\n这个异常是第一次启动VPN时，需要用户确认，用户确认后，系统会自动生成新的启动参数导致后台服务接收错误，此时只需要重新开启即可。\n如还有问题，可以通过设置中的指导提交问题反馈。\n点击这个消息可以关闭本消息。")
             .width('100%')
             .cardBackgroundStyle()
-            .backgroundColor('#ffff7676')
+            .backgroundColor($r('app.color.wg_error_banner_bg'))
             .margin({ left: '16vp', right: '16vp' })
-            .fontColor('#fff')
+            .fontColor($r('app.color.wg_error_banner_text'))
             .layoutWeight(1)
             .onClick(() => {
               this.vm.isVPNNoGetParamThrow = false
@@ -387,7 +387,7 @@ struct InterfaceCardView {
       if (this.vm.busyText != undefined) {
         Text(this.vm.busyText)
           .fontSize('12fp')
-          .fontColor('#666666')
+          .fontColor($r('sys.color.font_tertiary'))
           .layoutGravity(LocalizedAlignment.TOP_END)
           .margin({
             top: '30vp',
@@ -398,6 +398,7 @@ struct InterfaceCardView {
         type: ToggleType.Switch,
         isOn: this.vm.isVpnOpen!!,
       })
+        .selectedColor($r('app.color.wg_theme_primary'))
         .layoutGravity(LocalizedAlignment.TOP_END)
         .margin({
           top: '24vp',

@@ -445,7 +445,7 @@ struct MainItemView {
       if (this.data.busyLabel != undefined) {
         Text(this.data.busyLabel)
           .fontSize('12fp')
-          .fontColor('#666666')
+          .fontColor($r('sys.color.font_tertiary'))
           .margin({ right: '8vp' })
       }
       // 运行中配置：开关左侧展示本会话累计下载/上传（vm每秒节流刷新）
@@ -456,6 +456,7 @@ struct MainItemView {
           .margin({ right: '8vp' })
       }
       Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
+        .selectedColor($r('app.color.wg_theme_primary'))
         .size({
           width: '50vp',
           height: '28vp',

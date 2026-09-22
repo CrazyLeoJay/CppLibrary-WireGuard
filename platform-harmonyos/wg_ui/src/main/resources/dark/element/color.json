@@ -9,10 +9,6 @@
       "value": "#FF345FDE"
     },
     {
-      "name": "wg_dialog_background_color",
-      "value": "#FFB5A992"
-    },
-    {
       "name": "symbol_color",
       "value": "#fff"
     },
@@ -91,6 +87,58 @@
     {
       "name": "wg_divider_color",
       "value": "#47FFFFFF"
+    },
+    {
+      "name": "wg_theme_primary",
+      "value": "#FF6B87F5"
+    },
+    {
+      "name": "wg_seg_unselected_bg",
+      "value": "#1AFFFFFF"
+    },
+    {
+      "name": "wg_input_border",
+      "value": "#47FFFFFF"
+    },
+    {
+      "name": "wg_state_on",
+      "value": "#34C759"
+    },
+    {
+      "name": "wg_state_busy",
+      "value": "#FF9F0A"
+    },
+    {
+      "name": "wg_state_off",
+      "value": "#FF6F6A"
+    },
+    {
+      "name": "wg_error_banner_bg",
+      "value": "#33D83931"
+    },
+    {
+      "name": "wg_error_banner_text",
+      "value": "#FFFF8A85"
+    },
+    {
+      "name": "wg_status_ok",
+      "value": "#7FD97A"
+    },
+    {
+      "name": "wg_status_error",
+      "value": "#FF6F6A"
+    },
+    {
+      "name": "wg_float_button_backgroud_color",
+      "value": "#FF2F3136"
+    },
+    {
+      "name": "wg_float_button_svg_color",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "wg_dialog_background_color",
+      "value": "#FF2C2C2E"
     }
   ]
 }

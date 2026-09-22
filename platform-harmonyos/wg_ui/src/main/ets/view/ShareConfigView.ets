@@ -210,7 +210,7 @@ struct ShareConfigContent {
     Column({ space: '12vp' }) {
       SymbolGlyph($r('sys.symbol.exclamationmark_triangle'))
         .fontSize('32fp')
-        .fontColor([Color.Orange])
+        .fontColor([$r('app.color.wg_state_busy')])
       Text('无法解析应用包名')
         .fontSize('16fp')
         .fontWeight(FontWeight.Medium)
@@ -350,7 +350,7 @@ struct ShareConfigContent {
           } else if (this.vm.selectedIndex === index) {
             Text(`未启用过滤（将开启${this.vm.getDefaultFilterModeText()}模式）`)
               .fontSize('12fp')
-              .fontColor(Color.Orange)
+              .fontColor($r('app.color.wg_state_busy'))
           } else {
             Text('未启用过滤')
               .fontSize('12fp')

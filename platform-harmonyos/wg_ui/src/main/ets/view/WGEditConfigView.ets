@@ -274,6 +274,7 @@ struct AppFilterEditModule {
           type: ToggleType.Switch,
           isOn: this.isFilterOn,
         })
+          .selectedColor($r('app.color.wg_theme_primary'))
           .onChange((isOn: boolean) => {
             if (isOn) {
               const defaultMode = WGSettingsPrefs.getDefaultFilterMode();
@@ -299,7 +300,7 @@ struct AppFilterEditModule {
         // 提示文字
         Text(this.modeHintText)
           .fontSize('12fp')
-          .fontColor(Color.Gray)
+          .fontColor($r('sys.color.font_tertiary'))
           .width('100%')
 
         // 包名输入行列表
@@ -315,7 +316,7 @@ struct AppFilterEditModule {
               } else {
                 SymbolGlyph($r('sys.symbol.square_grid_2x2'))
                   .fontSize('24fp')
-                  .fontColor([Color.Gray])
+                  .fontColor([$r('sys.color.font_tertiary')])
               }
 
               if (it.item.isShared) {
@@ -365,17 +366,17 @@ struct AppFilterEditModule {
         Row() {
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize('16fp')
-            .fontColor([Color.Gray])
+            .fontColor([$r('sys.color.font_tertiary')])
           Text('添加应用')
             .fontSize('14fp')
-            .fontColor(Color.Gray)
+            .fontColor($r('sys.color.font_tertiary'))
         }
         .width('100%')
         .justifyContent(FlexAlign.Center)
         .padding('12vp')
         .border({
           width: 1,
-          color: Color.Gray,
+          color: $r('app.color.wg_input_border'),
           radius: 6,
           style: BorderStyle.Dashed,
         })
@@ -411,7 +412,7 @@ struct AppFilterEditModule {
         // 说明文字
         Text('因系统限制，无法获取已安装应用列表，需手动输入应用包名')
           .fontSize('12fp')
-          .fontColor(Color.Gray)
+          .fontColor($r('sys.color.font_tertiary'))
           .width('100%')
       }
     }
@@ -422,7 +423,7 @@ struct AppFilterEditModule {
   buildModeTab(mode: AppFilterMode, desc: string) {
     Text(desc)
       .fontSize('12fp')
-      .fontColor(this.vm.client.filterMode === mode ? Color.White : Color.Gray)
+      .fontColor(this.vm.client.filterMode === mode ? Color.White : $r('sys.color.font_secondary'))
       .backgroundColor(this.vm.client.filterMode === mode
         ? $r('app.color.wg_new_card_item_select_color')
         : Color.Transparent)
@@ -496,7 +497,7 @@ struct PeerEditCardView {
 
       Row() {
         Text(this.data.addressCheckMessage)
-          .fontColor(this.data.addressVerify ? Color.Green : Color.Red)
+          .fontColor(this.data.addressVerify ? $r('app.color.wg_status_ok') : $r('app.color.wg_status_error'))
           .fontSize('12fp')
           .layoutWeight(1)
           .layoutGravity(LocalizedAlignment.START)
@@ -576,7 +577,7 @@ struct PeerEditCardView {
   buildDnsModeTab(mode: DnsResolveMode, desc: string) {
     Text(desc)
       .fontSize('12fp')
-      .fontColor(this.data.dnsMode == mode ? Color.White : Color.Gray)
+      .fontColor(this.data.dnsMode == mode ? Color.White : $r('sys.color.font_secondary'))
       .backgroundColor(this.data.dnsMode == mode
         ? $r('app.color.wg_new_card_item_select_color')
         : Color.Transparent)
@@ -598,7 +599,7 @@ struct PeerEditCardView {
   buildDnsScopeTab(scope: DnsScope, desc: string) {
     Text(desc)
       .fontSize('12fp')
-      .fontColor(this.data.dnsScope == scope ? Color.White : Color.Gray)
+      .fontColor(this.data.dnsScope == scope ? Color.White : $r('sys.color.font_secondary'))
       .backgroundColor(this.data.dnsScope == scope
         ? $r('app.color.wg_new_card_item_select_color')
         : Color.Transparent)

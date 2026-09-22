@@ -259,6 +259,43 @@ struct WGSettingView {
   }
 
   /**
+   * 悬浮球开关（照开发者模式 Toggle 行范式）
+   */
+  @LocalBuilder
+  buildFloatBall() {
+    ListItem() {
+      Column({ space: '8vp' }) {
+        Text('悬浮球')
+          .defaultTagTitleStyle()
+
+        Row() {
+          Column({ space: '2vp' }) {
+            Text('桌面悬浮球')
+              .fontSize('16fp')
+            Text('在其他应用上层悬浮显示连接状态，支持快捷检查网络与回到应用')
+              .fontSize('12fp')
+              .fontColor($r('sys.color.font_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Blank()
+          Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallEnabled })
+            .selectedColor($r('app.color.wg_theme_primary'))
+        }
+        .width('100%')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      .itemRowStyle()
+      .onClick(() => {
+        // 点击整行切换悬浮球
+        this.vm.toggleFloatBall(this.getUIContext());
+      })
+    }
+  }
+
+  /**
    * 应用基础设置
    */
   @LocalBuilder
@@ -285,7 +322,7 @@ struct WGSettingView {
                 .borderRadius({ topLeft: 14, bottomLeft: 14 })
                 .backgroundColor(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED
                   ? $r('app.color.wg_new_card_item_select_color')
-                  : '#1A000000')
+                  : $r('app.color.wg_seg_unselected_bg'))
 
               // 右侧：白名单背景
               Column()
@@ -294,7 +331,7 @@ struct WGSettingView {
                 .borderRadius({ topRight: 14, bottomRight: 14 })
                 .backgroundColor(this.vm.defaultFilterMode === AppFilterMode.INCLUDED
                   ? $r('app.color.wg_new_card_item_select_color')
-                  : '#1A000000')
+                  : $r('app.color.wg_seg_unselected_bg'))
             }
             .width('100%')
             .height('100%')
@@ -304,14 +341,14 @@ struct WGSettingView {
               Text('黑名单')
                 .fontSize('12fp')
                 .fontWeight(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED ? Color.White : '#666666')
+                .fontColor(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED ? Color.White : $r('sys.color.font_secondary'))
                 .textAlign(TextAlign.Center)
                 .layoutWeight(1)
 
               Text('白名单')
                 .fontSize('12fp')
                 .fontWeight(this.vm.defaultFilterMode === AppFilterMode.INCLUDED ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.vm.defaultFilterMode === AppFilterMode.INCLUDED ? Color.White : '#666666')
+                .fontColor(this.vm.defaultFilterMode === AppFilterMode.INCLUDED ? Color.White : $r('sys.color.font_secondary'))
                 .textAlign(TextAlign.Center)
                 .layoutWeight(1)
             }
@@ -321,7 +358,7 @@ struct WGSettingView {
           .width('152vp')
           .height('28vp')
           .borderRadius(14)
-          .border({ width: 1, color: '#33999999', radius: 14 })
+          .border({ width: 1, color: $r('app.color.wg_input_border'), radius: 14 })
         }
         .width('100%')
 
@@ -329,12 +366,12 @@ struct WGSettingView {
         if (this.vm.defaultFilterMode === AppFilterMode.EXCLUDED) {
           Text('黑名单模式：列表中的应用不经过VPN通道，其余应用正常走VPN')
             .fontSize('12fp')
-            .fontColor('#ff707070')
+            .fontColor($r('sys.color.font_tertiary'))
             .width('100%')
         } else {
           Text('白名单模式：仅列表中的应用经过VPN通道，其余应用不走VPN')
             .fontSize('12fp')
-            .fontColor('#ff707070')
+            .fontColor($r('sys.color.font_tertiary'))
             .width('100%')
         }
       }
@@ -363,13 +400,14 @@ struct WGSettingView {
               .fontSize('16fp')
             Text('开启后在分享页面显示调试信息')
               .fontSize('12fp')
-              .fontColor('#ff707070')
+              .fontColor($r('sys.color.font_tertiary'))
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
 
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.developerMode })
+            .selectedColor($r('app.color.wg_theme_primary'))
         }
         .width('100%')
       }
@@ -534,7 +572,7 @@ struct WechatQRCodeDialogContent {
 
       Text('微信扫码联系')
         .fontSize('16fp')
-        .fontColor('#ff707070')
+        .fontColor($r('sys.color.font_tertiary'))
         .margin({ top: '16vp' })
     }
     .padding('24vp')
@@ -545,7 +583,7 @@ struct WechatQRCodeDialogContent {
 @Extend(Text)
 function tagStyle() {
   .fontSize('12fp')
-  .fontColor('#ff707070')
+  .fontColor($r('sys.color.font_tertiary'))
 }
 
 /**
