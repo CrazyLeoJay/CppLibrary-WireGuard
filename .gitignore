@@ -7,9 +7,6 @@ build
 build_wsl
 *.tmp.conf
 spec
-build_*
-build-*
-!build-profile.json5
 .zcode
 .cache
 .deveco
