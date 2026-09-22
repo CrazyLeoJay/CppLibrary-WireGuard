@@ -112,3 +112,20 @@ export function floatingMaterial(lightEffect: boolean = true): uiMaterial.Materi
     interactive: true,
   });
 }
+
+/**
+ * 悬浮球材质：ULTRA_THIN 玻璃感 + 半透明深色赋色（materialColor 需带透明度，
+ * 纯不透明会盖死材质）保证白色图标在浅色背景上的对比度 + 按压形变 + 光感流光。
+ * 低算力设备 materialColor 自动转为背景色（≈深色圆盘），观感平滑降级。
+ */
+export function ballMaterial(): uiMaterial.Material | undefined {
+  if (!supportsImmersiveMaterial()) {
+    return undefined;
+  }
+  return new uiMaterial.ImmersiveMaterial({
+    style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+    materialColor: '#B3303034',
+    interactive: true,
+    lightEffect: { color: undefined },
+  });
+}

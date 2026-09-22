@@ -31,6 +31,12 @@ export interface FloatBallGate {
    */
   toggle(context: UIContext, settled: (enabled: boolean) => void): void;
 
+  /** VPN关闭时是否仍显示悬浮球（false=跟随VPN，仅连接期间显示） */
+  isShowWhenVpnOff(): boolean;
+
+  /** 设置"VPN关闭时是否显示"（实现侧持久化并即时生效） */
+  setShowWhenVpnOff(on: boolean): void;
+
   /** 【debug】绕过开关直接拉起悬浮窗（无权限时 toast 回报） */
   debugShow(context: UIContext): void;
 }

@@ -50,6 +50,8 @@ export default class WGSettingViewModel {
   @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
   @Trace defaultFilterMode: number = WGSettingsPrefs.getDefaultFilterMode();
   @Trace floatBallEnabled: boolean = getFloatBallGate()?.isEnabled() ?? false;
+  /** VPN关闭时是否仍显示悬浮球（false=跟随VPN，仅连接期间显示；默认跟随） */
+  @Trace floatBallShowWhenVpnOff: boolean = getFloatBallGate()?.isShowWhenVpnOff() ?? false;
 
   /** 悬浮球入口是否可用（闭源定制已接入=true；开源构建未注册恒false，入口隐藏） */
   get floatBallAvailable(): boolean {
@@ -118,6 +120,19 @@ export default class WGSettingViewModel {
    */
   syncFloatBallEnabled(): void {
     this.floatBallEnabled = getFloatBallGate()?.isEnabled() ?? false;
+    this.floatBallShowWhenVpnOff = getFloatBallGate()?.isShowWhenVpnOff() ?? false;
+  }
+
+  /**
+   * 切换"VPN关闭时是否显示悬浮球"（实现侧持久化并即时生效，这里只同步显示）
+   */
+  toggleFloatBallShowWhenVpnOff(): void {
+    const gate = getFloatBallGate();
+    if (gate == undefined) {
+      return;
+    }
+    gate.setShowWhenVpnOff(!gate.isShowWhenVpnOff());
+    this.floatBallShowWhenVpnOff = gate.isShowWhenVpnOff();
   }
 
   /**

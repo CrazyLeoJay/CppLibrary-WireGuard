@@ -309,6 +309,34 @@ struct WGSettingView {
             })
         }
         .width('100%')
+
+        Divider()
+          .color($r('app.color.wg_divider_color'))
+          .strokeWidth(1)
+
+        Row() {
+          Column({ space: '2vp' }) {
+            Text('VPN关闭时显示')
+              .fontSize('16fp')
+            Text('关闭后悬浮球仅在VPN连接期间显示，断开即隐藏')
+              .fontSize('12fp')
+              .fontColor($r('sys.color.font_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Blank()
+          Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallShowWhenVpnOff })
+            .selectedColor($r('app.color.wg_theme_primary'))
+            .onChange((isOn: boolean) => {
+              // 点开关本体也能切换（同主开关行）
+              this.vm.toggleFloatBallShowWhenVpnOff();
+            })
+        }
+        .width('100%')
+        .onClick(() => {
+          this.vm.toggleFloatBallShowWhenVpnOff();
+        })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
