@@ -303,10 +303,9 @@ struct WGSettingView {
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallEnabled })
             .selectedColor($r('app.color.wg_theme_primary'))
-            .onChange((isOn: boolean) => {
-              // 点开关本体也能切换（此前只有整行onClick，点开关被Toggle消费无效果）
-              this.vm.toggleFloatBall(this.getUIContext());
-            })
+            // 点击统一由整行onClick处理：Toggle不拦截触摸，避免onChange与
+            // 行onClick同拍双触发（一次点击切两次等于没切）
+            .hitTestBehavior(HitTestMode.None)
         }
         .width('100%')
 
@@ -328,10 +327,8 @@ struct WGSettingView {
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallShowWhenVpnOff })
             .selectedColor($r('app.color.wg_theme_primary'))
-            .onChange((isOn: boolean) => {
-              // 点开关本体也能切换（同主开关行）
-              this.vm.toggleFloatBallShowWhenVpnOff();
-            })
+            // 点击统一由整行onClick处理（同主开关行，防双触发）
+            .hitTestBehavior(HitTestMode.None)
         }
         .width('100%')
         .onClick(() => {
@@ -501,10 +498,8 @@ struct WGSettingView {
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.developerMode })
             .selectedColor($r('app.color.wg_theme_primary'))
-            .onChange((isOn: boolean) => {
-              // 点开关本体也能切换（同悬浮球开关行）
-              this.vm.toggleDeveloperMode();
-            })
+            // 点击统一由整行onClick处理（防双触发）
+            .hitTestBehavior(HitTestMode.None)
         }
         .width('100%')
       }
