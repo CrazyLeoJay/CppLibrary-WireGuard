@@ -137,9 +137,9 @@ export function floatingMaterial(tint?: ResourceColor, lightEffect: boolean = tr
 }
 
 /**
- * 悬浮球材质：ULTRA_THIN 玻璃感 + 半透明深色赋色（materialColor 需带透明度，
- * 纯不透明会盖死材质）保证白色图标在浅色背景上的对比度 + 按压形变 + 光感流光。
- * 低算力设备 materialColor 自动转为背景色（≈深色圆盘），观感平滑降级。
+ * 悬浮球材质：ULTRA_THIN 玻璃感 + 按压形变 + 光感流光。
+ * 球盘自带85%/90%不透明底色（wg_float_ball_disc）压在材质上方保证图标可辨，
+ * 材质只提供边缘折射与流光，故无需 materialColor 赋色（会与底色双重加深）。
  */
 export function ballMaterial(): uiMaterial.Material | undefined {
   if (!supportsImmersiveMaterial()) {
@@ -147,7 +147,6 @@ export function ballMaterial(): uiMaterial.Material | undefined {
   }
   return new uiMaterial.ImmersiveMaterial({
     style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
-    materialColor: '#B3303034',
     interactive: true,
     lightEffect: { color: undefined },
   });
