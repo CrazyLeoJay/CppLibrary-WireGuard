@@ -99,6 +99,9 @@ export function cardMaterial(interactive: boolean = false, lightEffect: boolean 
  * tint：半透明赋色（如 '#A6B3F8FD'）。纯色页面上超薄材质无内容可折射会
  * 完全隐形，赋色让玻璃体/边缘可见（materialColor 需带透明度，纯不透明会
  * 盖死材质）；低算力设备自动转背景色平滑降级。
+ * 【实测坑】materialColor 传 $r 资源对象不被材质滤镜解析（赋值无效），
+ * 需要深浅色自适应的赋色请改用普通 backgroundColor 叠半透明色——材质在
+ * backgroundColor 之下，半透明背景=色调叠加不会盖死材质。
  */
 export function floatingMaterial(tint?: ResourceColor, lightEffect: boolean = true)
   : uiMaterial.Material | undefined {

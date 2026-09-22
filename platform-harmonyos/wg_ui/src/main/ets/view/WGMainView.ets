@@ -399,13 +399,15 @@ export struct WGMainView {
       }
       .width('45vp')
       .aspectRatio(1)
-      // 鸿蒙7沉浸光感：API26+改ULTRA_THIN浮动件材质（透明底+半透明赋色玻璃
-      // 体+按压形变+光感流光）——纯色页面上无赋色的超薄材质会完全隐形；
-      // 旧系统undefined忽略回落原浅青纯色
+      // 鸿蒙7沉浸光感：API26+改ULTRA_THIN浮动件材质+半透明赋色背景。
+      // 注意两点：①纯色页面上无赋色的超薄材质无内容可折射会完全隐形；
+      // ②materialColor传$r资源实测不被材质滤镜解析，改用普通backgroundColor
+      // 叠半透明色（FAQ：只有不透明背景会盖死材质，半透明=色调叠加，
+      // 且$r深浅色自适应必然生效）；旧系统回落原浅青纯色
       .backgroundColor(supportsImmersiveMaterial()
-        ? Color.Transparent : $r(`app.color.wg_float_button_backgroud_color`))
+        ? $r('app.color.wg_float_button_glass_tint') : $r(`app.color.wg_float_button_backgroud_color`))
       .borderRadius($r('sys.float.corner_radius_level5'))
-      .systemMaterial(floatingMaterial($r('app.color.wg_float_button_glass_tint')))
+      .systemMaterial(floatingMaterial())
       .layoutGravity(LocalizedAlignment.BOTTOM_END)
       .margin({ bottom: '32vp', right: "32vp" })
       // .position({ x: '80%', y: '85%' }) // 右下角位置
