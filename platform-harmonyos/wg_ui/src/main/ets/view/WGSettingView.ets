@@ -136,9 +136,9 @@ struct WGSettingView {
       // ===== 应用过滤配置 =====
       this.buildBaseSetting();
 
-      // ===== 开发者模式（仅 debug 构建显示） =====
+      // ===== 调试设置（仅 debug 构建显示）：付费功能开关+开发者模式 =====
       if (BuildProfile.DEBUG) {
-        this.buildDevModel();
+        this.buildDebugSettings();
       }
 
       // ===== 关于 =====
@@ -383,14 +383,41 @@ struct WGSettingView {
   }
 
   /**
-   * 开发者模式
+   * 调试设置（仅 debug 构建显示）：聚合调试期开关——
+   * 付费功能启用（模拟免费版验证付费隔离）与开发者模式
    */
   @LocalBuilder
-  buildDevModel() {
+  buildDebugSettings() {
     ListItem() {
       Column({ space: '8vp' }) {
-        Text('开发者选项')
+        Text('调试设置')
           .defaultTagTitleStyle()
+
+        Row() {
+          Column({ space: '2vp' }) {
+            Text('启用付费功能')
+              .fontSize('16fp')
+            Text('关闭后模拟免费版：定制区块隐藏、悬浮球等功能即时停用')
+              .fontSize('12fp')
+              .fontColor($r('sys.color.font_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Blank()
+          Toggle({ type: ToggleType.Switch, isOn: this.vm.customFeaturesEnabled })
+            .selectedColor($r('app.color.wg_theme_primary'))
+            // 点击统一由整行onClick处理（防双触发）
+            .hitTestBehavior(HitTestMode.None)
+        }
+        .width('100%')
+        .onClick(() => {
+          this.vm.toggleCustomFeatures();
+        })
+
+        Divider()
+          .color($r('app.color.wg_divider_color'))
+          .strokeWidth(1)
 
         Row() {
           Column({ space: '2vp' }) {
@@ -410,14 +437,14 @@ struct WGSettingView {
             .hitTestBehavior(HitTestMode.None)
         }
         .width('100%')
+        .onClick(() => {
+          // 点击整行切换开发者模式
+          this.vm.toggleDeveloperMode();
+        })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       .itemRowStyle()
-      .onClick(() => {
-        // 点击整行切换开发者模式
-        this.vm.toggleDeveloperMode();
-      })
     }
     .settingCardStyle()
   }

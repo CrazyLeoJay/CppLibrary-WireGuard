@@ -20,6 +20,11 @@ import { LLog, networkResidueState, vpnKeepAliveManager, WireGuard, WGSettingsPr
 import fs from '@ohos.file.fs';
 import { zlib } from '@kit.BasicServicesKit';
 import { fileUri, picker } from '@kit.CoreFileKit';
+import {
+  dispatchFeaturesEnabledChanged,
+  isCustomFeaturesEnabled,
+  setCustomFeaturesEnabled,
+} from '../custom/WGCustomGate';
 
 const TAG = "设置界面"
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -48,6 +53,8 @@ export default class WGSettingViewModel {
   @Trace appVersion: string = ""
   @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
   @Trace defaultFilterMode: number = WGSettingsPrefs.getDefaultFilterMode();
+  /** 付费（定制）功能启用开关（仅debug调试设置可关，模拟免费版） */
+  @Trace customFeaturesEnabled: boolean = isCustomFeaturesEnabled();
   email: string = email
 
   constructor(nav: NavPathStack) {
@@ -92,6 +99,16 @@ export default class WGSettingViewModel {
     this.developerMode = !this.developerMode;
     WGSettingsPrefs.setDeveloperMode(this.developerMode);
     LLog.info(TAG, `开发者模式: ${this.developerMode}`);
+  }
+
+  /**
+   * 切换付费（定制）功能启用开关（仅debug调试设置；注册表即时生效并通知定制侧）
+   */
+  toggleCustomFeatures(): void {
+    setCustomFeaturesEnabled(!isCustomFeaturesEnabled());
+    this.customFeaturesEnabled = isCustomFeaturesEnabled();
+    dispatchFeaturesEnabledChanged(this.customFeaturesEnabled);
+    LLog.info(TAG, `customFeaturesEnabled: ${this.customFeaturesEnabled}`);
   }
 
   /**
