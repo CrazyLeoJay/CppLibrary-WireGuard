@@ -9,4 +9,5 @@ build_wsl
 spec
 .zcode
 .cache
-.deveco.hvigor
+.deveco
+.hvigor
