@@ -20,6 +20,7 @@ import { notificationManager } from '@kit.NotificationKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../tools/LLog';
 import { StreamLogMessage, MessageType } from '../model/entity/napi_entity';
+import { WireGuard } from '../model/WGHelper';
 import { SingleFlightLoop } from './SingleFlightLoop';
 
 const TAG: string = 'VpnKeepAlive';
@@ -97,29 +98,6 @@ export class LongTaskState {
  */
 function getLongTaskState(): LongTaskState {
   return AppStorageV2.connect(LongTaskState, () => UIUtils.makeObserved(new LongTaskState()))!;
-}
-
-/**
- * 流量字节数转可读字符串
- * @param bits 字节数
- * @returns 格式化字符串，如 "1.23 MB"
- */
-function formatTraffic(bits: number): string {
-  if (bits < 0) {
-    return '0 B';
-  }
-  const bytes: number = bits / 8;
-  if (bytes < 1024) {
-    return `${bytes.toFixed(0)} B`;
-  }
-  const units: string[] = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let val: number = bytes;
-  let unitIndex: number = 0;
-  while (val >= 1024 && unitIndex < units.length - 1) {
-    val /= 1024;
-    unitIndex++;
-  }
-  return `${val.toFixed(2)} ${units[unitIndex]}`;
 }
 
 /**
@@ -427,8 +405,8 @@ export class LongTaskModel {
         continue;
       }
       const ip = this.vpnData.connectedIps[peerIndex] ?? '未知';
-      const rx = formatTraffic(log.sc.receiveTotal);
-      const tx = formatTraffic(log.sc.sendTotal);
+      const rx = WireGuard.Tools.bytesToString(log.sc.receiveTotal);
+      const tx = WireGuard.Tools.bytesToString(log.sc.sendTotal);
 
       const handshakeTs = this.vpnData.lastHandshakeTime.get(peerIndex);
       const handshakeStr = handshakeTs != undefined ? formatTime(handshakeTs) : '无';

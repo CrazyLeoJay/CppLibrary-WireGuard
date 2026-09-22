@@ -255,7 +255,7 @@ export const networkResidueState: NetworkResidueState =
  *   SOCKET_ERROR=链路异常（socket连接不成功的提示来源）；
  * - subscribeVpnChange：START_VPN=新会话开启（重置握手/心跳，等待连接确认），
  *   进程关闭/服务停止/异常=会话结束。
- * 时刻字段供UI换算"上次心跳Xs前"；文案由 buildStatusText 生成（可单测）。
+ * 时刻字段供UI换算"收/发X前"；文案由 buildStatusText 生成（可单测）。
  */
 @ObservedV2
 export class VpnRunStatusState {
@@ -278,35 +278,44 @@ export class VpnRunStatusState {
    * 生成状态条单行文案（纯逻辑，可单测）
    *
    * @param now 当前时刻ms（UI定时刷新驱动"Xs前"滚动）
-   * @param configName 运行配置名（UI按runningConfigId解析，解析不到传''）
    * @param socketErrorFreshMs socket异常提示的保鲜窗口（超过且已有后续成功流日志则不再提示）
    */
-  buildStatusText(now: number, configName: string, socketErrorFreshMs: number = 30 * 1000): string {
-    const name = configName.length > 0 ? `${configName} · ` : '';
+  buildStatusText(now: number, socketErrorFreshMs: number = 30 * 1000): string {
     // Socket异常优先：保鲜窗口内且其后无成功流日志（出站/入站成功即视为已恢复）
     const hasSuccessAfterError =
       this.lastOutboundTime > this.socketErrorTime || this.lastHeartbeatTime > this.socketErrorTime;
     if (this.socketError !== '' && (now - this.socketErrorTime) < socketErrorFreshMs && !hasSuccessAfterError) {
-      return `${name}Socket异常：${this.socketError}`;
+      return `Socket异常：${this.socketError}`;
     }
     if (!this.handshakeOk) {
       // 服务已启动但握手未确认：区分"完全静默"与"已出站等待响应"
       return this.lastOutboundTime > 0
-        ? `${name}连接中（已出站，等待握手响应）…`
-        : `${name}连接中…`;
+        ? '连接中（已出站，等待握手响应）…'
+        : '连接中…';
     }
-    const heartbeatGapMs = this.lastHeartbeatTime > 0 ? now - this.lastHeartbeatTime : -1;
-    if (heartbeatGapMs < 0) {
-      return `${name}已连接（尚无入站流量）`;
+    // 已连接：分列收/发两个方向——keepalive只保证发方向周期活跃，
+    // 收方向增长停滞=对端无回包/无下行业务，二者分开呈现才可判别
+    return `已连接 · 收${this.formatGapBefore(now, this.lastHeartbeatTime)} 发${this.formatGapBefore(now, this.lastOutboundTime)}`;
+  }
+
+  /**
+   * 时刻转"X前"可读间隔（纯逻辑，可单测；0/负值=尚无该方向数据）
+   *
+   * @param now 当前时刻ms
+   * @param ts 目标时刻ms
+   */
+  formatGapBefore(now: number, ts: number): string {
+    if (ts <= 0 || ts > now) {
+      return '无';
     }
-    const sec = Math.floor(heartbeatGapMs / 1000);
+    const sec = Math.floor((now - ts) / 1000);
     if (sec < 60) {
-      return `${name}已连接 · 心跳${sec}秒前`;
+      return `${sec}秒前`;
     }
     if (sec < 3600) {
-      return `${name}已连接 · 心跳${Math.floor(sec / 60)}分钟前`;
+      return `${Math.floor(sec / 60)}分钟前`;
     }
-    return `${name}已连接 · 心跳${Math.floor(sec / 3600)}小时前`;
+    return `${Math.floor(sec / 3600)}小时前`;
   }
 }
 

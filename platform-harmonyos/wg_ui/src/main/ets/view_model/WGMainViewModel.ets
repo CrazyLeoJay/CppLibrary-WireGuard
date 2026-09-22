@@ -20,7 +20,7 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
-import { SortColumnName, WGConf, WGDBConf } from 'wg_tunnel';
+import { SortColumnName, WGConf, WGDBConf, MessageType, StreamLogMessage } from 'wg_tunnel';
 import { vpnToggleService, vpnToggleState } from './VpnToggleService';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
@@ -39,6 +39,12 @@ export default class WGMainViewModel {
   @Trace wgList: MainItemData[] = [];
   @Trace qrCodePixelMap?: image.PixelMap;
   @Trace uiConfig: MainUiConfig
+  /** 运行中配置的会话累计下载（列表行开关左侧展示，1s节流刷新） */
+  @Trace runRxText: string = '0 B';
+  /** 运行中配置的会话累计上传 */
+  @Trace runTxText: string = '0 B';
+  /** 各Peer最新流日志（sc.receiveTotal/sendTotal为会话累计值，取最新一条求和即总量） */
+  private runTrafficLatest: Map<number, StreamLogMessage> = new Map();
 
   constructor(nav?: NavPathStack) {
     this.uiConfig = PersistenceV2.globalConnect({
@@ -186,6 +192,38 @@ export default class WGMainViewModel {
         item.open = false;
       }
     }
+  }
+
+  /**
+   * 流入一条流日志（主页运行行流量展示用）
+   *
+   * 只缓存最新一条/Peer（计数器为会话累计值）；Socket异常事件无统计意义，跳过。
+   * 文本刷新由UI每秒tick调用 refreshRunTrafficText 节流，避免高频日志频繁刷UI。
+   */
+  updateRunTraffic(log: StreamLogMessage) {
+    if (log.messageType === MessageType.SOCKET_ERROR) {
+      return;
+    }
+    this.runTrafficLatest.set(log.peerIndex, log);
+  }
+
+  /** 汇总各Peer最新累计值并刷新文本（1s节流） */
+  refreshRunTrafficText() {
+    let rx = 0;
+    let tx = 0;
+    this.runTrafficLatest.forEach((log) => {
+      rx += log.sc.receiveTotal;
+      tx += log.sc.sendTotal;
+    });
+    this.runRxText = WireGuard.Tools.bytesToString(rx);
+    this.runTxText = WireGuard.Tools.bytesToString(tx);
+  }
+
+  /** 会话边界（新会话开启/VPN停止）清空累计展示 */
+  resetRunTraffic() {
+    this.runTrafficLatest.clear();
+    this.runRxText = '0 B';
+    this.runTxText = '0 B';
   }
 
   /**

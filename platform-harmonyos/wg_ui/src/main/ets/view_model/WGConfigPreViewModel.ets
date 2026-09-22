@@ -189,11 +189,11 @@ export default class WGConfigPreViewModel {
   }
 
   receiveData(index: number): string {
-    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.receiveTotal ?? 0)
+    return WireGuard.Tools.bytesToString(this.logData.getLatestLogForPeer(index)?.sc.receiveTotal ?? 0)
   }
 
   sendData(index: number): string {
-    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.sendTotal ?? 0)
+    return WireGuard.Tools.bytesToString(this.logData.getLatestLogForPeer(index)?.sc.sendTotal ?? 0)
   }
 
   /**

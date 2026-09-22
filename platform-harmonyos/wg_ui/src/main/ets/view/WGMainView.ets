@@ -20,7 +20,7 @@ import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } 
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
-import { WGConf, WireGuard, vpnRunStatusState } from 'wg_tunnel';
+import { WGConf, WireGuard, vpnRunStatusState, StreamLogMessage, VpnEventTag } from 'wg_tunnel';
 
 const TAG = "WG主页";
 
@@ -207,58 +207,59 @@ export struct WGMainView {
     // 仅在VPN进程要关闭（异常/进程关闭，本地意图已被状态机置关）时同步一次显示
     if (params.vpnThreadRunning === false) {
       this.vm.refreshRowStates();
+      this.vm.resetRunTraffic();
     }
+    // 新会话开启（含热切换到新配置）：清空上一会话的累计流量展示
+    if ((params.tag as VpnEventTag) === VpnEventTag.START_VPN) {
+      this.vm.resetRunTraffic();
+    }
+  })
+  // 运行行流量展示的数据管道：只更新vm缓存，文本由每秒tick节流刷新
+  streamEvent = WireGuard.event.subscribeVpnStreamLogs((log: StreamLogMessage) => {
+    this.vm.updateRunTraffic(log);
   })
 
   aboutToAppear(): void {
     this.vm.loadConfigs();
     WireGuard.event.publishVpnStatusQuery();
-    // 运行状态条"心跳Xs前"滚动刷新（仅页面可见期间计时）
+    // 运行状态条"收/发X前"滚动刷新 + 运行行流量文本节流刷新（仅页面可见期间计时）
     this.tickTimer = setInterval(() => {
       this.nowTick = Date.now();
+      this.vm.refreshRunTrafficText();
     }, 1000);
   }
 
   aboutToDisappear(): void {
     this.vpnEvent.cancel()
+    this.streamEvent.cancel()
     if (this.tickTimer != undefined) {
       clearInterval(this.tickTimer);
       this.tickTimer = undefined;
     }
   }
 
-  /** 运行配置名（按运行id从列表解析；列表未含时兜底显示配置#id） */
-  private resolveRunningConfigName(): string {
-    const id = vpnRunStatusState.runningConfigId;
-    if (id < 0) {
-      return '';
-    }
-    const item = this.vm.wgList.find(it => it.id === id);
-    return item != undefined ? item.name : `配置#${id}`;
-  }
-
-  /** 状态条文案（nowTick驱动"心跳Xs前"响应式滚动） */
+  /** 状态条文案（nowTick驱动"收/发X前"响应式滚动） */
   get runStatusText(): string {
-    return vpnRunStatusState.buildStatusText(this.nowTick, this.resolveRunningConfigName());
+    return vpnRunStatusState.buildStatusText(this.nowTick);
   }
 
-  /** 状态条颜色：绿=已连接且心跳新鲜；橙=连接中/心跳久远；红=Socket异常 */
-  get runStatusColor(): string {
+  /** 状态条颜色（深浅色资源自适应）：绿=已连接且心跳新鲜；橙=连接中/心跳久远；红=Socket异常 */
+  get runStatusColor(): ResourceStr {
     const s = vpnRunStatusState;
     const socketErrorFresh = s.socketError !== '' && (this.nowTick - s.socketErrorTime) < 30 * 1000;
     if (socketErrorFresh) {
-      return '#D83931';
+      return $r('app.color.wg_run_status_error');
     }
     const heartbeatStale = s.lastHeartbeatTime === 0 || (this.nowTick - s.lastHeartbeatTime) > 180 * 1000;
     if (!s.handshakeOk || heartbeatStale) {
-      return '#B25F00';
+      return $r('app.color.wg_run_status_warn');
     }
-    return '#2A5F1E';
+    return $r('app.color.wg_run_status_ok');
   }
 
   /**
    * 运行状态条：标题与配置列表之间的固定单行窗体
-   * 展示当前VPN连接情况——连接是否成功/上次心跳时间/Socket异常提示
+   * 展示当前VPN连接情况——连接是否成功/上次收发数据时间/Socket异常提示
    */
   @LocalBuilder
   buildRunStatusBanner() {
@@ -275,7 +276,7 @@ export struct WGMainView {
       .width('100%')
       .alignItems(VerticalAlign.Center)
       .padding({ left: 16, right: 16, top: 7, bottom: 7 })
-      .backgroundColor('#14000000')
+      .backgroundColor($r('app.color.wg_run_status_banner_bg'))
     }
   }
 
@@ -356,6 +357,7 @@ export struct WGMainView {
     .layoutWeight(1)
     .divider({
       strokeWidth: '1vp',
+      color: $r('app.color.wg_divider_color'),
     })
 
   }
@@ -429,18 +431,28 @@ struct MainItemView {
       Column() {
         Text(`${this.data.name}`)
           .fontSize('18fp')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
         if (!this.vm.uiConfig.listShowSimple) {
           Text(`createAt: ${this.data.data.createdAt}`)
             .fontSize('12fp')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       }
       .alignItems(HorizontalAlign.Start)
-
-      Blank().layoutWeight(1)
+      .layoutWeight(1)
       if (this.data.busyLabel != undefined) {
         Text(this.data.busyLabel)
           .fontSize('12fp')
           .fontColor('#666666')
+          .margin({ right: '8vp' })
+      }
+      // 运行中配置：开关左侧展示本会话累计下载/上传（vm每秒节流刷新）
+      if (this.data.open) {
+        Text(`↓${this.vm.runRxText} ↑${this.vm.runTxText}`)
+          .fontSize('12fp')
+          .fontColor($r('app.color.share_secondary_text'))
           .margin({ right: '8vp' })
       }
       Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })

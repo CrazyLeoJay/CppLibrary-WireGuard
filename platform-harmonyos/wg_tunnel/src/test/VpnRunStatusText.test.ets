@@ -20,13 +20,14 @@ import { VpnRunStatusState } from '../main/ets/keepalive/VpnKeepAliveManager';
  * VpnRunStatusState.buildStatusText（主页运行状态条文案）单元测试
  *
  * 被测对象为真实源文件 ../main/ets/keepalive/VpnKeepAliveManager.ets 中的
- * VpnRunStatusState.buildStatusText 纯逻辑方法（@ohos.hilog 依赖经
- * src/mock/mock-config.json5 在测试构建期替换为空实现；AppStorageV2 装饰器
- * 在 LocalUnit 引擎下退化为普通字段，不影响纯文案逻辑）。
+ * VpnRunStatusState.buildStatusText / formatGapBefore 纯逻辑方法（@ohos.hilog
+ * 依赖经 src/mock/mock-config.json5 在测试构建期替换为空实现；AppStorageV2
+ * 装饰器在 LocalUnit 引擎下退化为普通字段，不影响纯文案逻辑）。
  *
  * 【用例组织】每个 it 验证一条文案行为：构造状态 + 断言完整文案。
  * 覆盖：Socket异常提示（含保鲜窗口/成功恢复清提示）、连接中两阶段、
- * 已连接心跳秒/分/小时换算、配置名拼装与缺名兜底。
+ * 已连接收/发双方向秒/分/小时换算、无收包/无发包的"无"占位、未来时刻防御。
+ * 文案不含配置名：主页开关行的选中态已表明当前配置。
  */
 
 const BASE = 1_700_000_000_000;
@@ -50,41 +51,53 @@ export default function vpnRunStatusTextTest() {
       s.running = true;
       s.handshakeOk = false;
       s.lastOutboundTime = 0;
-      const text = s.buildStatusText(BASE, '内网Ipv6');
-      expect(text).assertEqual('内网Ipv6 · 连接中…');
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('连接中…');
     });
 
     it('连接中_已出站等待握手', 0, () => {
       const s = makeState();
       s.running = true;
       s.lastOutboundTime = BASE - 3000;
-      const text = s.buildStatusText(BASE, '域名Ipv4');
-      expect(text).assertEqual('域名Ipv4 · 连接中（已出站，等待握手响应）…');
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('连接中（已出站，等待握手响应）…');
     });
 
-    it('已连接_心跳按秒展示', 0, () => {
+    it('已连接_收发按秒展示', 0, () => {
       const s = makeState();
       s.running = true;
       s.handshakeOk = true;
       s.lastHeartbeatTime = BASE - 12_000;
-      const text = s.buildStatusText(BASE, '域名Ipv4');
-      expect(text).assertEqual('域名Ipv4 · 已连接 · 心跳12秒前');
+      s.lastOutboundTime = BASE - 3_000;
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('已连接 · 收12秒前 发3秒前');
     });
 
-    it('已连接_心跳超过1分钟按分钟展示', 0, () => {
+    it('已连接_收超过1分钟按分钟展示', 0, () => {
       const s = makeState();
       s.handshakeOk = true;
       s.lastHeartbeatTime = BASE - 5 * 60 * 1000;
-      const text = s.buildStatusText(BASE, '');
-      expect(text).assertEqual('已连接 · 心跳5分钟前');
+      s.lastOutboundTime = BASE - 30 * 1000;
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('已连接 · 收5分钟前 发30秒前');
     });
 
-    it('已连接_心跳超过1小时按小时展示', 0, () => {
+    it('已连接_收超过1小时按小时展示', 0, () => {
       const s = makeState();
       s.handshakeOk = true;
       s.lastHeartbeatTime = BASE - 2 * 3600 * 1000;
-      const text = s.buildStatusText(BASE, '配置X');
-      expect(text).assertEqual('配置X · 已连接 · 心跳2小时前');
+      s.lastOutboundTime = BASE - 5 * 60 * 1000;
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('已连接 · 收2小时前 发5分钟前');
+    });
+
+    it('已连接_尚无收包但已有发包', 0, () => {
+      const s = makeState();
+      s.handshakeOk = true;
+      s.lastHeartbeatTime = 0;
+      s.lastOutboundTime = BASE - 5_000;
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('已连接 · 收无 发5秒前');
     });
 
     it('Socket异常_保鲜窗口内优先提示', 0, () => {
@@ -92,18 +105,19 @@ export default function vpnRunStatusTextTest() {
       s.running = true;
       s.socketError = '连续发送失败';
       s.socketErrorTime = BASE - 5 * 1000;
-      const text = s.buildStatusText(BASE, '内网Ipv4');
-      expect(text).assertEqual('内网Ipv4 · Socket异常：连续发送失败');
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('Socket异常：连续发送失败');
     });
 
-    it('Socket异常_超保鲜窗口回落心跳文案', 0, () => {
+    it('Socket异常_超保鲜窗口回落收发文案', 0, () => {
       const s = makeState();
       s.handshakeOk = true;
       s.lastHeartbeatTime = BASE - 10 * 1000;
+      s.lastOutboundTime = BASE - 4 * 1000;
       s.socketError = '连续发送失败';
       s.socketErrorTime = BASE - 60 * 1000;
-      const text = s.buildStatusText(BASE, '内网Ipv4');
-      expect(text).assertEqual('内网Ipv4 · 已连接 · 心跳10秒前');
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('已连接 · 收10秒前 发4秒前');
     });
 
     it('Socket异常_异常后有成功入站即视为恢复', 0, () => {
@@ -112,16 +126,25 @@ export default function vpnRunStatusTextTest() {
       s.socketError = '发送失败';
       s.socketErrorTime = BASE - 10 * 1000;
       s.lastHeartbeatTime = BASE - 2 * 1000;
-      const text = s.buildStatusText(BASE, '域名Ipv4');
-      expect(text).assertEqual('域名Ipv4 · 已连接 · 心跳2秒前');
+      s.lastOutboundTime = BASE - 8 * 1000;
+      const text = s.buildStatusText(BASE);
+      expect(text).assertEqual('已连接 · 收2秒前 发8秒前');
     });
 
-    it('已连接_无入站流量的明确提示', 0, () => {
+    it('formatGap_未来时刻防御返回无', 0, () => {
       const s = makeState();
-      s.handshakeOk = true;
-      s.lastHeartbeatTime = 0;
-      const text = s.buildStatusText(BASE, '');
-      expect(text).assertEqual('已连接（尚无入站流量）');
+      expect(s.formatGapBefore(BASE, BASE + 1000)).assertEqual('无');
+    });
+
+    it('formatGap_零值返回无', 0, () => {
+      const s = makeState();
+      expect(s.formatGapBefore(BASE, 0)).assertEqual('无');
+    });
+
+    it('formatGap_分钟小时换算', 0, () => {
+      const s = makeState();
+      expect(s.formatGapBefore(BASE, BASE - 90 * 1000)).assertEqual('1分钟前');
+      expect(s.formatGapBefore(BASE, BASE - 7300 * 1000)).assertEqual('2小时前');
     });
   });
 }

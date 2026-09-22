@@ -83,6 +83,26 @@
     {
       "name": "swipe_delete_text_color",
       "value": "#FFFFFF"
+    },
+    {
+      "name": "wg_run_status_ok",
+      "value": "#2A5F1E"
+    },
+    {
+      "name": "wg_run_status_warn",
+      "value": "#B25F00"
+    },
+    {
+      "name": "wg_run_status_error",
+      "value": "#D83931"
+    },
+    {
+      "name": "wg_run_status_banner_bg",
+      "value": "#14000000"
+    },
+    {
+      "name": "wg_divider_color",
+      "value": "#33000000"
     }
   ]
 }

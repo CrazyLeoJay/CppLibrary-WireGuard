@@ -344,20 +344,22 @@ export namespace WireGuard {
     }
 
     /**
-     * 将数据长度转换为带单位的字符串
+     * 将字节数转换为带单位的字符串
      *
-     * @param len 数据长度
+     * 流日志的 receiveTotal/sendTotal 与 Peer rx/tx 计数均为字节，
+     * 通知、预览页、悬浮球、卡片必须共用本函数保证口径一致。
+     *
+     * @param bytes 字节数
      */
-    export function bitsToString(len: number): string {
-      if (len < 0) {
-        return '0 b';
+    export function bytesToString(bytes: number): string {
+      if (bytes < 0) {
+        return '0 B';
       }
-      if (len < 1024) {
-        return `${len} b`;
+      if (bytes < 1024) {
+        return `${bytes} B`;
       }
-      let bytes: number = len / 8;
-      const units: string[] = ['B', 'KB', 'MB', 'GB', 'TB'];
-      let unitIndex: number = 0;
+      const units: string[] = ['KB', 'MB', 'GB', 'TB'];
+      let unitIndex: number = -1;
       while (bytes >= 1024 && unitIndex < units.length - 1) {
         bytes /= 1024;
         unitIndex++;
