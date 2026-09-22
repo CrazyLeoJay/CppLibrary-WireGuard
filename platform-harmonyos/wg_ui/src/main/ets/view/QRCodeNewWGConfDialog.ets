@@ -15,6 +15,7 @@
  */
 import { LLog, WGConf, WireGuard } from 'wg_tunnel';
 import { DiyTextInput } from './component/DiyTextInput';
+import { panelMaterial, supportsImmersiveMaterial } from '../ui/WGImmersiveMaterial';
 
 const TAG = "QRCodeDialog"
 
@@ -55,7 +56,7 @@ export struct QRCodeNewWGConfDialog {
   }
 
   build() {
-    Column({ space: ' 16vp' }) {
+    Column({ space: '16vp' }) {
       Text("通过二维码添加配置")
 
       DiyTextInput({
@@ -104,9 +105,13 @@ export struct QRCodeNewWGConfDialog {
       }
     }
     .width('80%')
-    .backgroundColor($r('app.color.wg_dialog_background_color'))
+    // 沉浸光感（API 26+）：材质层级在背景色之下，启用时必须透明化背景，
+    // 否则纯色盖住材质；旧系统传undefined自动忽略，回落原背景色
+    .backgroundColor(supportsImmersiveMaterial()
+      ? Color.Transparent : $r('app.color.wg_dialog_background_color'))
+    .systemMaterial(panelMaterial())
     .padding('16vp')
-    .borderRadius('8vp')
+    .borderRadius($r('sys.float.corner_radius_level7'))
     .justifyContent(FlexAlign.Center)
   }
 }

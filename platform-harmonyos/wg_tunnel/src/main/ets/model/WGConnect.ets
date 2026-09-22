@@ -21,7 +21,7 @@ import { LLog } from '../tools/LLog';
 import WGAppException from '../error/WGAppException';
 import { IPAddressArea, PeerConfig, StreamLogMessage } from './entity/napi_entity';
 import { WireGuard } from './WGHelper';
-import { dnsResolveByMode, getDnsMode } from '../tools/DnsResolve';
+import { dnsResolveByMode, getDnsMode, getDnsScope } from '../tools/DnsResolve';
 
 const TAG = "WG连接"
 
@@ -35,6 +35,8 @@ export class VpnConnHelper {
   vpnConnection: vpnExtension.VpnConnection
   private client: WireGuardDevice;
   private config: WGDeviceConfig;
+  /** 最近一次fd的protect任务：swapSocket等待其完成后才返回，密封"新fd未保护先发包"窗口 */
+  private latestProtectTask?: Promise<void>;
 
   constructor(vpnConnection: vpnExtension.VpnConnection, config: WGDeviceConfig) {
     this.vpnConnection = vpnConnection;
@@ -45,6 +47,31 @@ export class VpnConnHelper {
   setStreamListener(listener: (msg: StreamLogMessage) => void): VpnConnHelper {
     this.client.setStreamLogListener(listener)
     return this;
+  }
+
+  /**
+   * 运行时重建底层socket（保留会话与epoll），并等待新fd的protect完成。
+   * 用于网络切换后的轻量漫游：WireGuard会自动漫游到新网络源地址，无需整体重建VPN连接。
+   *
+   * C层swapSocket返回前会同步触发fd变更回调（NAPI主线程直调），此处等待回调中
+   * 发起的protect(newFd)完成后才返回，密封"新fd未保护先发包"的路由回环窗口。
+   * 剩余暴露仅为C层心跳/TUN线程在protect IPC延迟内的毫秒级发送，且只发生在
+   * 网络刚切换的瞬断期，按可接受的在途丢包处理。
+   *
+   * @returns 新的socket fd
+   * @throws WGAppException 重建失败；protect失败时随Promise拒绝抛出（调用方可转整体重建兜底）
+   */
+  async swapSocket(): Promise<number> {
+    const fd = await this.client.resetSocket()
+    if (fd < 0) {
+      throw new WGAppException(`Socket重建异常：${fd}`)
+    }
+    if (this.latestProtectTask != undefined) {
+      await this.latestProtectTask
+      this.latestProtectTask = undefined
+    }
+    LLog.info(TAG, `swapSocket完成，新fd=${fd}`)
+    return fd
   }
 
   /**
@@ -59,9 +86,12 @@ export class VpnConnHelper {
     LLog.info(TAG, "client initVpn")
     const socketFd = await this.client.initVpn(async (fd: number) => {
       LLog.info(TAG, `Socket FD更新: ${fd}`)
-      this.vpnConnection.protect(fd).catch((e: BusinessError) => {
-        LLog.error(TAG, e)
-      });
+      // 记录protect任务供swapSocket等待；单独附catch避免未处理的Promise拒绝
+      const task = this.vpnConnection.protect(fd)
+      this.latestProtectTask = task
+      task.catch((e: BusinessError) => {
+        LLog.error(TAG, `protect(fd=${fd})失败: ${JSON.stringify(e)}`)
+      })
     });
     if (socketFd < 0) {
       throw new WGAppException(`Socket 通道建立异常：${socketFd}`);
@@ -85,16 +115,24 @@ export class VpnConnHelper {
   }
 
   /**
-   * @throws
+   * 停止VPN服务（shutdown收尾）
+   *
+   * 顺序：destroy（注销系统VPN配置：路由+DNS——唯一拆除入口，等待真实完成结果，
+   * 绝不超时放弃：放弃后进程随即被主进程关闭，在途destroy被丢弃→系统DNS/路由
+   * 残留需重启手机）→ client.close()（停止VPN服务：停线程+关UDP socket）。
+   *
+   * 长时间无返回的处理在调用方/UI层：开关事务20s超时解锁并提示，本方法必须
+   * 等到destroy的真实结果才能广播serviceStopped（明确回复=网络已拆干净）。
+   *
+   * @throws destroy失败时原样抛出，交调用方广播残留提示
    */
-  async stopServer() {
-    await this.vpnConnection.destroy()
-    LLog.info(TAG, "关闭VPN")
-    // const client = WireGuard.device;
-    // 关闭并释放资源
-    await this.client.close()
-    LLog.info(TAG, "关闭通道")
-
+  async stopServer(): Promise<void> {
+    // 1. 注销系统VPN配置（等待真实完成结果）
+    await this.vpnConnection.destroy();
+    LLog.info(TAG, 'vpnConnection.destroy完成：系统VPN配置已注销');
+    // 2. 停止VPN服务（C层：停线程+关UDP socket）
+    await this.client.close();
+    LLog.info(TAG, 'VPN服务已停止');
   }
 }
 
@@ -108,7 +146,10 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
   const vpnIp = config.vpn.vpnIp!;
   const vpnAddress = vpnIp.address.ip!;
   const vpnAddressFamily = vpnIp.address.isIpv4 ? 1 : 2;
-  const vpnAddressPrefixLen = vpnIp?.cidr ?? (vpnIp.address.isIpv4 ? 32 : 128)
+  // Interface Address 支持无掩码配置（cidr=-1 表示未指定），
+  // 创建VPN时归一化为默认掩码（IPv4 /32、IPv6 /128），否则 prefixLength=-1 导致create失败
+  const vpnAddressPrefixLen = (vpnIp.cidr != undefined && vpnIp.cidr >= 0)
+    ? vpnIp.cidr : (vpnIp.address.isIpv4 ? 32 : 128);
   const dns = config.vpn.dns ?? []
   const mtu = config.vpn.mtu ?? 1400
   if (config.peers.length == 0) {
@@ -121,7 +162,8 @@ export function makeVpnConfig(config: WGDeviceConfig): vpnExtension.VpnConfig {
         interface: "vpn-tun",
         destination: {
           address: { address: allowed.address.ip, family: allowed.address.isIpv4 ? 1 : 2 },
-          prefixLength: allowed.cidr ?? (allowed.address.isIpv4 ? 32 : 128),
+          prefixLength: (allowed.cidr != undefined && allowed.cidr >= 0)
+            ? allowed.cidr : (allowed.address.isIpv4 ? 32 : 128),
         },
         gateway: {
           address: vpnAddress,
@@ -183,7 +225,8 @@ export async function makeWGConf2VpnStartConfig(conf: WGDBConf): Promise<WGDevic
     } else {
       // DNS解析策略：根据 dnsMode 互斥选项解析
       const mode = getDnsMode(item.endpoint);
-      ip = await dnsResolveByMode(item.endpoint.ipStrOrDomain, mode);
+      const scope = getDnsScope(item.endpoint);
+      ip = await dnsResolveByMode(item.endpoint.ipStrOrDomain, mode, scope);
       ip = ip.trim();
       if (!ip) {
         throw new WGAppException(`域名解析失败: ${item.endpoint.ipStrOrDomain}`);

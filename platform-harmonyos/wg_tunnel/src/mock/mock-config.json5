@@ -1,0 +1,5 @@
+{
+  "@ohos.hilog": {
+    "source": "src/mock/Hilog.mock.ets"
+  }
+}

@@ -23,7 +23,7 @@ import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import ClientEditConfig from 'wg_tunnel/src/main/ets/model/entity/ClientEditConfig';
 import Tools from 'wg_tunnel/src/main/ets/tools/tools';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
-import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf, getDnsMode, AppFilterMode, AppFilterItem, AppFilterMeta } from 'wg_tunnel';
+import { IPAddress, IPAddressArea, SiteUrlType, WGConfPeer, WGDBConf, getDnsMode, getDnsScope, AppFilterMode, AppFilterItem, AppFilterMeta } from 'wg_tunnel';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -104,6 +104,7 @@ export default class WGNewConfigViewModel {
       config.preSharedKey = it.preSharedKey;
       config.setAddress(it.endpoint);
       config.dnsMode = getDnsMode(it.endpoint);
+      config.dnsScope = getDnsScope(it.endpoint);
       config.allowedIpsInput = it.allowedIPs.map((it) => `${it.address.ip}/${it.cidr}`).join(",");
       config.keepaliveInterval = `${it.keepaliveInterval}`;
       return config;
@@ -447,6 +448,7 @@ export default class WGNewConfigViewModel {
       throw new WGAppException(`地址格式异常，必须是合法的IP+端口或者域名+端口，value=${config.address}`)
     }
     endpoint.dnsMode = config.dnsMode;
+    endpoint.dnsScope = config.dnsScope;
     endpoint.forceIpv6 = undefined;
     if (endpoint.port < 0 || endpoint.port > 65535) {
       throw new WGAppException("端口取值范围为：0-65535")
@@ -467,9 +469,22 @@ export default class WGNewConfigViewModel {
       endpoint: endpoint,
       allowedIPs: allowedIps,
       preSharedKey: config.preSharedKey,
-      keepaliveInterval: Number.parseInt(config.keepaliveInterval),
+      // 归一化：空串/非数字/负数一律按0处理（不发心跳），修复 Number.parseInt("") 产生NaN的隐患
+      keepaliveInterval: normalizeKeepaliveInterval(config.keepaliveInterval),
     } as WGConfPeer;
   }
+}
+
+/**
+ * 保活间隔归一化：空串/非数字/负数 → 0（不发心跳）
+ * 用户显式填0或清空输入框均表示关闭心跳；>0 按原值保存
+ */
+function normalizeKeepaliveInterval(value: string): number {
+  const parsed = Number.parseInt(value)
+  if (Number.isNaN(parsed) || parsed < 0) {
+    return 0
+  }
+  return parsed
 }
 
 class InputRegex {

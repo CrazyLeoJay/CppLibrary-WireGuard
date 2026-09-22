@@ -20,7 +20,8 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { UIContext } from '@ohos.arkui.UIContext';
 import { generateBarcode, scanBarcode, scanCore } from '@kit.ScanKit';
 import { image } from '@kit.ImageKit';
-import { SortColumnName, StatusConfigDTO, WGConf, WGDBConf } from 'wg_tunnel';
+import { SortColumnName, WGConf, WGDBConf, MessageType, StreamLogMessage } from 'wg_tunnel';
+import { vpnToggleService, vpnToggleState } from './VpnToggleService';
 import { picker } from '@kit.CoreFileKit';
 import { common } from '@kit.AbilityKit';
 import WGAppException from 'wg_tunnel/src/main/ets/error/WGAppException';
@@ -38,6 +39,12 @@ export default class WGMainViewModel {
   @Trace wgList: MainItemData[] = [];
   @Trace qrCodePixelMap?: image.PixelMap;
   @Trace uiConfig: MainUiConfig
+  /** 运行中配置的会话累计下载（列表行开关左侧展示，1s节流刷新） */
+  @Trace runRxText: string = '0 B';
+  /** 运行中配置的会话累计上传 */
+  @Trace runTxText: string = '0 B';
+  /** 各Peer最新流日志（sc.receiveTotal/sendTotal为会话累计值，取最新一条求和即总量） */
+  private runTrafficLatest: Map<number, StreamLogMessage> = new Map();
 
   constructor(nav?: NavPathStack) {
     this.uiConfig = PersistenceV2.globalConnect({
@@ -157,65 +164,72 @@ export default class WGMainViewModel {
   }
 
   /**
-   * 设置活跃的配置，即已经开启的配置
-   * @param dto VPN状态DTO（纯数据，从跨进程广播反序列化而来）
+   * 根据VPN状态广播刷新每行开关显示
+   *
+   * 行开关跟随"用户意图"(isSwitchOpen+switchConfigId)：
+   * - 点击开启后意图立即置true → 行开关立即为开，不受VPN启动过程中的中间广播(running=false)影响
+   * - 只有明确启动异常/VPN进程关闭/用户主动关闭(intent回false) → 行开关才为关
+   * @param dto VPN状态DTO（sync已完成，此处以本地意图为准刷新行显示）
    */
-  setActiveConfigId(dto: StatusConfigDTO) {
-    const running = dto.runningConfigId != undefined && dto.running
-    this.lastOpenConfigId = dto.runningConfigId ?? -1
-    if (running) {
-      for (let item of this.wgList) {
-        item.open = (item.id == this.lastOpenConfigId);
-      }
-    } else {
-      for (let item of this.wgList) {
-        item.open = false;
-      }
+  /**
+   * 按本地意图刷新所有行开关显示（纯显示写入，不产生任务）
+   *
+   * 行开关唯一状态源 = StatusConfig 的 isSwitchOpen + switchConfigId：
+   * 点击（switchOn/OffIntent）、异常回滚（状态机 switchOffIntent）后调用本方法同步显示。
+   */
+  refreshRowStates() {
+    const state = WireGuard.config.status.getConfig();
+    const openId = state.isSwitchOpen ? state.switchConfigId : undefined;
+    for (let item of this.wgList) {
+      item.open = openId != undefined && item.id == openId;
     }
+    LLog.info(TAG, `刷新行开关: switchIntent=${state.isSwitchOpen}/${state.switchConfigId}`);
   }
 
   closeOther(id: number) {
     for (let item of this.wgList) {
       if (item.id != id) {
-        // if (item.id == this.lastOpenConfigId) {
         item.open = false;
       }
     }
   }
 
-  lastOpenConfigId: number = +1;
-
   /**
-   * 改变Vpn配置，启动或停止
+   * 流入一条流日志（主页运行行流量展示用）
+   *
+   * 只缓存最新一条/Peer（计数器为会话累计值）；Socket异常事件无统计意义，跳过。
+   * 文本刷新由UI每秒tick调用 refreshRunTrafficText 节流，避免高频日志频繁刷UI。
    */
-  async changeVpnConfig(context: UIContext, item: MainItemData, isOn: boolean) {
-    // 如果是
-    if (isOn && this.lastOpenConfigId == item.id) {
-      // 如果是开启状态，且id一致，就不做处理
+  updateRunTraffic(log: StreamLogMessage) {
+    if (log.messageType === MessageType.SOCKET_ERROR) {
       return;
     }
-    if (isOn) {
-      this.lastOpenConfigId = item.id
-    } else {
-      // 关闭时，设置为-1
-      this.lastOpenConfigId = -1
-    }
-    try {
-      const config = JSON.parse(item.data.config!) as WGDBConf
-      // const config = WireGuard.helper.config.getConfigForId(this.id)!
-      await WireGuard.runWGConfig(item.id, config, isOn)
-    } catch (e) {
-      item.open = false;
-      WireGuard.event.publishVpnNoOpen()
-      // 开启失败展示Toast，关闭失败不展示（用户主动关闭不应提示错误）
-      if (isOn) {
-        const reason = e != undefined ? String(e) : '';
-        context.getPromptAction().showToast({ message: reason.length > 0 ? 'VPN启动失败：' + reason : 'VPN启动失败' })
-      }
-      LLog.error(TAG, { error: e, message: `${isOn ? "开启" : "关闭"}VPN异常` });
-    }
+    this.runTrafficLatest.set(log.peerIndex, log);
   }
 
+  /** 汇总各Peer最新累计值并刷新文本（1s节流） */
+  refreshRunTrafficText() {
+    let rx = 0;
+    let tx = 0;
+    this.runTrafficLatest.forEach((log) => {
+      rx += log.sc.receiveTotal;
+      tx += log.sc.sendTotal;
+    });
+    this.runRxText = WireGuard.Tools.bytesToString(rx);
+    this.runTxText = WireGuard.Tools.bytesToString(tx);
+  }
+
+  /** 会话边界（新会话开启/VPN停止）清空累计展示 */
+  resetRunTraffic() {
+    this.runTrafficLatest.clear();
+    this.runRxText = '0 B';
+    this.runTxText = '0 B';
+  }
+
+  /**
+   * 改变Vpn配置（已废弃独立实现，逻辑统一到 VpnToggleService.requestVpnToggle，
+   * 由 MainItemData.openChange 的点击守卫路径调用）
+   */
 
   preLoadDatas() {
     this.wgList = [];
@@ -242,6 +256,7 @@ export class MainItemData {
   private vm: WGMainViewModel
   name: string;
   @Trace open: boolean = false;
+  @Trace toggleEnable: boolean = true;
   data: WgConfigTable
   private isClick = false
 
@@ -249,27 +264,48 @@ export class MainItemData {
     this.vm = vm;
     this.data = data;
     this.name = data.name!;
-    this.open = WireGuard.config.status.isRunning(this.id)
+    // 行开关初始跟随用户意图：开关开且意图配置ID匹配
+    const state = WireGuard.config.status.getConfig();
+    this.open = state.isSwitchOpen && state.switchConfigId == this.id;
   }
 
   get id(): number {
     return this.data.id!;
   }
 
+  /**
+   * 事务进行中的状态文案（开启中/关闭中/切换中）：
+   * 仅本行是当前事务目标时显示；idle或非目标行返回undefined不渲染
+   */
+  get busyLabel(): string | undefined {
+    const s = vpnToggleState;
+    if (s.phase === 'idle' || s.targetId !== this.id) {
+      return undefined;
+    }
+    return s.phase === 'starting' ? '开启中' : s.phase === 'stopping' ? '关闭中' : '切换中';
+  }
+
   onClick() {
     this.isClick = true
   }
 
+  /**
+   * 行开关点击处理（第一道闸门：isClick 手势守卫——仅真实点击进入，
+   * 程序性赋值引发的 onChange 因标记 false 空跑返回）
+   */
   openChange(context: UIContext, isOn: boolean) {
     if (this.isClick) {
-      if (isOn) {
-        LLog.info(TAG, "点击开启VPN")
-        this.vm.changeVpnConfig(context, this, true)
-      } else {
-        LLog.info(TAG, "点击关闭VPN")
-        this.vm.changeVpnConfig(context, this, false)
-      }
       this.isClick = false
+      this.toggleEnable = false;
+      // 解析配置并交统一执行器：意图先行 → 联动刷新(纯显示) → id校验后执行
+      const config = JSON.parse(this.data.config!) as WGDBConf;
+      vpnToggleService.requestVpnToggle(context, this.id, isOn, config,
+        () => {
+          this.vm.refreshRowStates();
+        },
+        () => {
+          this.toggleEnable = true;
+        });
     }
   }
 }

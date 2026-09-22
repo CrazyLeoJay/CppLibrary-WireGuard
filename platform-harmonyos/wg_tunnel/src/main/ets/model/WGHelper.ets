@@ -25,10 +25,11 @@ import { LLog } from '../tools/LLog';
 import { bundleManager, common } from '@kit.AbilityKit';
 import { KeyPair, WGConf } from './entity/napi_entity';
 import ParamsRegex from './ParamsRegex';
-import WGConfig from './WGConfig';
+import WGConfig, { computeConfMd5 } from './WGConfig';
 import WGEvent from './WGEvent';
 import WGTools from './WGTools';
 import { VpnConfigAction, VpnConfigRequestParams } from './entity/VpnConfigAction';
+import { VpnEventTag } from './entity/VPNEventStatusParams';
 import { VpnConnHelper } from './WGConnect';
 import WGAppException from '../error/WGAppException';
 
@@ -144,8 +145,7 @@ export namespace WireGuard {
    *
    * - isOne=false：关闭VPN
    *   1. 清除缓存
-   *   2. 通知VEA停止VPN服务
-   *   3. 关闭VEA进程
+   *   2. 通知VEA停止VPN服务（VEA确认任务关闭后自行关闭进程，主进程不直接杀）
    *
    * @param id 配置ID
    * @param config 数据库配置
@@ -161,6 +161,7 @@ export namespace WireGuard {
     if (isOne) {
       // 1. 缓存配置
       WireGuard.config.runArg.set(id, config);
+      WireGuard.config.runArg.setRunningMd5(computeConfMd5(config));
 
       // 2. 检测VEA是否运行
       const isRunning = await WGTools.isVpnExtensionRunning();
@@ -185,13 +186,24 @@ export namespace WireGuard {
           },
         })
           .catch((e: BusinessError) => {
+            if (e.code == 15501001) {
+              // VEA已在运行（如上一次仅停了VPN服务、进程仍存活）：改走SWITCH热切换，
+              // 不作为启动失败回滚
+              LLog.warn(TAG, { error: e, message: "VEA已在运行，改走SWITCH热切换" });
+              event.publishVpnConfigRequest({
+                action: VpnConfigAction.SWITCH,
+                configId: id,
+                wgDbConf: config,
+              });
+              return;
+            }
             switch (e.code) {
-              case 15501001:
-                LLog.warn(TAG, { error: e, message: "服务正在运行中。。。" })
               case 201:
-                LLog.warn(TAG, { error: e, message: "未授权！" })
+                LLog.warn(TAG, { error: e, message: "未授权！" });
+                break;
               default:
-                LLog.warn(TAG, e)
+                LLog.warn(TAG, e);
+                break;
             }
             throw new WGAppException({ e: e, message: "VPN启动异常" });
           })
@@ -201,17 +213,17 @@ export namespace WireGuard {
       }
     } else {
       WireGuard.config.runArg.clear();
-      if (await WGTools.isVpnExtensionRunning()) {
-        // 先通知VEA停止VPN服务（优雅关闭连接）
+
+      // 检测VEA是否运行
+      const isRunning = await WGTools.isVpnExtensionRunning();
+
+      if (isRunning) {
+        // 通知服务关闭：VEA确认VPN任务停止后自行关闭进程（服务内确认清理完整后
+        // 调用stopVpnExtensionAbility自终结），主进程不直接杀进程，避免清理被打断
+        LLog.info(TAG, '通知VEA停止，服务确认后自行关闭进程');
         event.publishVpnConfigRequest({ action: VpnConfigAction.STOP });
-        // 再关闭VEA进程
-        await vpnExtension.stopVpnExtensionAbility({
-          deviceId: '',
-          bundleName: packageName,
-          abilityName: abilityName,
-        })
       } else {
-        LLog.info(TAG, "VPN未开启，不执行关闭");
+        LLog.info(TAG, 'VEA未运行，无需通知');
       }
     }
   }
@@ -230,12 +242,19 @@ export namespace WireGuard {
       LLog.warn(TAG, 'VEA未运行，无法切换配置，请先启动VPN');
       throw new WGAppException({ e: new Error("VEA未运行，无法切换配置"), message: "VEA未运行，无法切换配置" });
     }
+    const newMd5 = computeConfMd5(wgDbConf);
+    const currentMd5 = WireGuard.config.runArg.getRunningMd5();
+    if (newMd5 === currentMd5) {
+      LLog.info(TAG, `配置未变化，跳过切换: configId=${configId}, md5=${newMd5}`);
+      return;
+    }
     event.publishVpnConfigRequest({
       action: VpnConfigAction.SWITCH,
       configId: configId,
       wgDbConf: wgDbConf,
     });
-    LLog.info(TAG, `已发送切换配置指令: configId=${configId}`);
+    WireGuard.config.runArg.setRunningMd5(newMd5);
+    LLog.info(TAG, `已发送切换配置指令: configId=${configId}, md5=${newMd5}`);
   }
 
   /**
@@ -325,20 +344,22 @@ export namespace WireGuard {
     }
 
     /**
-     * 将数据长度转换为带单位的字符串
+     * 将字节数转换为带单位的字符串
      *
-     * @param len 数据长度
+     * 流日志的 receiveTotal/sendTotal 与 Peer rx/tx 计数均为字节，
+     * 通知、预览页、悬浮球、卡片必须共用本函数保证口径一致。
+     *
+     * @param bytes 字节数
      */
-    export function bitsToString(len: number): string {
-      if (len < 0) {
-        return '0 b';
+    export function bytesToString(bytes: number): string {
+      if (bytes < 0) {
+        return '0 B';
       }
-      if (len < 1024) {
-        return `${len} b`;
+      if (bytes < 1024) {
+        return `${bytes} B`;
       }
-      let bytes: number = len / 8;
-      const units: string[] = ['B', 'KB', 'MB', 'GB', 'TB'];
-      let unitIndex: number = 0;
+      const units: string[] = ['KB', 'MB', 'GB', 'TB'];
+      let unitIndex: number = -1;
       while (bytes >= 1024 && unitIndex < units.length - 1) {
         bytes /= 1024;
         unitIndex++;
@@ -373,4 +394,40 @@ export namespace WireGuard {
     }
   }
 
+}
+
+/**
+ * 等待VPN_SERVICE_STOPPED事件确认VPN服务已停止
+ *
+ * 【已废弃保留备用】当前关闭流程为"通知式"：主进程发STOP后，VEA确认任务关闭
+ * 并自行关闭进程，主进程无需等待。
+ *
+ * @param timeout 最大等待时间（毫秒）
+ * @returns true=收到VPN_SERVICE_STOPPED确认, false=超时未收到
+ */
+function waitForVpnServiceStopped(timeout: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    let resolved: boolean = false;
+    const timer = setTimeout(() => {
+      if (!resolved) {
+        resolved = true;
+        LLog.warn(TAG, `等待VPN_SERVICE_STOPPED超时(${timeout}ms)`);
+        cancel.cancel();
+        resolve(false);
+      }
+    }, timeout);
+
+    const cancel = WGEvent.subscribeVpnChange((params) => {
+      const tag = params.tag as VpnEventTag;
+      if (tag === VpnEventTag.VPN_SERVICE_STOPPED) {
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          cancel.cancel();
+          LLog.info(TAG, '收到VPN_SERVICE_STOPPED确认');
+          resolve(true);
+        }
+      }
+    });
+  });
 }

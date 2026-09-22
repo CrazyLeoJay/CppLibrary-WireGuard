@@ -18,10 +18,37 @@ import { bundleManager, common, wantAgent, WantAgent } from '@kit.AbilityKit';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { notificationManager } from '@kit.NotificationKit';
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
-import { LLog, StreamLogMessage, MessageType } from 'wg_tunnel';
-import { NotificationUpdater } from './NotificationUpdater';
+import { LLog } from '../tools/LLog';
+import { StreamLogMessage, MessageType } from '../model/entity/napi_entity';
+import { WireGuard } from '../model/WGHelper';
+import { SingleFlightLoop } from './SingleFlightLoop';
 
 const TAG: string = 'VpnKeepAlive';
+
+/** VPN自定义通知固定ID：同id发布原地更新，保证任何情况下只有一条自定义通知 */
+const VPN_NOTIFY_ID: number = 20260912;
+
+/** 通知最长等待间隔：5分钟（平台要求DATA_TRANSFER任务10分钟内须有进度更新，取半留余量） */
+const NOTIFY_MAX_WAIT_INTERVAL: number = 5 * 60 * 1000;
+/** 通知最小发布间隔：1秒（高频流日志上报节流，多次上报合并为一次发布最新数据） */
+const NOTIFY_MIN_PUBLISH_GAP: number = 1 * 1000;
+
+/**
+ * 长时任务在系统侧的真实状态（用于区分"内存候选ID存在"与"系统确实在保活"）
+ *
+ * 内存中的 continuousTaskId 只是启动时的缓存，系统可能因业务未执行、低速、取消等
+ * 主动回收（CANCELLED）或挂起（SUSPENDED）长时任务，导致VPN实际失去后台保活。
+ */
+export enum ContinuousTaskState {
+  /** 无候选ID，从未成功申请或已停止 */
+  NONE = 'none',
+  /** 系统认可且处于激活状态（真正保活中） */
+  RUNNING = 'running',
+  /** 系统挂起（进程冻结，回前台自动激活；挂起期间VPN不被保活） */
+  SUSPENDED = 'suspended',
+  /** 系统已取消/回收（不再保活，需重新申请） */
+  CANCELLED = 'cancelled',
+}
 
 /**
  * VPN通知内容数据 - 纯数据类，用于构建通知文本
@@ -74,29 +101,6 @@ function getLongTaskState(): LongTaskState {
 }
 
 /**
- * 流量字节数转可读字符串
- * @param bits 字节数
- * @returns 格式化字符串，如 "1.23 MB"
- */
-function formatTraffic(bits: number): string {
-  if (bits < 0) {
-    return '0 B';
-  }
-  const bytes: number = bits / 8;
-  if (bytes < 1024) {
-    return `${bytes.toFixed(0)} B`;
-  }
-  const units: string[] = ['B', 'KB', 'MB', 'GB', 'TB'];
-  let val: number = bytes;
-  let unitIndex: number = 0;
-  while (val >= 1024 && unitIndex < units.length - 1) {
-    val /= 1024;
-    unitIndex++;
-  }
-  return `${val.toFixed(2)} ${units[unitIndex]}`;
-}
-
-/**
  * 时间戳格式化为可读时间
  * @param timestamp 毫秒时间戳
  * @returns 格式化时间字符串
@@ -111,36 +115,58 @@ function formatTime(timestamp: number): string {
 
 /**
  * 计算运行时长描述
+ *
+ * 格式规则：最小粒度到秒，最大单位到天——
+ * `X天X时X分X秒`（高位为0的单位省略，如 `5分10秒`、`2天3时5分10秒`）
+ *
  * @param startTime 开始时间戳（毫秒）
- * @returns 可读时长字符串，如 "1时23分"
+ * @returns 可读时长字符串
  */
 function formatDuration(startTime: number): string {
-  const elapsed: number = Date.now() - startTime;
-  const totalMinutes: number = Math.floor(elapsed / (60 * 1000));
-  const hours: number = Math.floor(totalMinutes / 60);
-  const minutes: number = totalMinutes % 60;
-  if (hours > 0) {
-    return `${hours}时${minutes}分`;
+  const elapsed: number = Math.max(0, Date.now() - startTime);
+  const totalSeconds: number = Math.floor(elapsed / 1000);
+  const days: number = Math.floor(totalSeconds / 86400);
+  const hours: number = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes: number = Math.floor((totalSeconds % 3600) / 60);
+  const seconds: number = totalSeconds % 60;
+  let text: string = '';
+  if (days > 0) {
+    text += `${days}天`;
   }
-  return `${minutes}分`;
+  if (hours > 0) {
+    text += `${hours}时`;
+  }
+  if (minutes > 0 || text.length > 0) {
+    text += `${minutes}分`;
+  }
+  text += `${seconds}秒`;
+  return text;
 }
 
 /**
  * 后台长时任务管理
- * 使用ContinuousTaskRequest新API签名，支持进度更新定时器保活
+ * 使用ContinuousTaskRequest新API签名；通知发布由SingleFlightLoop驱动：
+ * 数据上报合并节流（≤1次/秒发布最新数据），静默时等满5分钟兜底发布（满足平台进度更新约束）
  * 集成通知内容管理，在通知中展示VPN连接状态、流量和握手时间
  *
  * Created on 2026/7/27.
  * @author leojay`fu
  */
-class LongTaskModel {
-  private updater: NotificationUpdater;
+export class LongTaskModel {
+  /** 通知发布循环：频繁上报合并节流（≤1次/秒，每次发布最新数据）；静默时等满最长间隔兜底发布 */
+  private notifyLoop: SingleFlightLoop;
   private vpnData: VpnNotificationData = new VpnNotificationData();
+  /** 长时任务关联的wantAgent：通知点击跳转App，创建长时任务时构建一次复用 */
+  private taskWantAgent?: WantAgent;
 
   constructor() {
-    this.updater = new NotificationUpdater(() => {
-      this.publishNotification();
-    });
+    this.notifyLoop = new SingleFlightLoop(
+      async (): Promise<void> => {
+        this.publishNotification();
+      },
+      NOTIFY_MAX_WAIT_INTERVAL,
+      NOTIFY_MIN_PUBLISH_GAP,
+    );
   }
 
   /**
@@ -156,16 +182,20 @@ class LongTaskModel {
   private async createTaskRequest(_context: common.UIAbilityContext):
     Promise<backgroundTaskManager.ContinuousTaskRequest> {
     const bundleInfo = bundleManager.getBundleInfoForSelfSync(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT);
+    // 运行时从绑定Ability读取名称，避免硬编码宿主Ability，保证wg_tunnel可复用于任意UIAbility
+    const abilityName: string = _context.abilityInfo.name;
     const wantAgentInfo: wantAgent.WantAgentInfo = {
       wants: [{
         bundleName: bundleInfo.name,
-        abilityName: 'EntryAbility',
+        abilityName: abilityName,
       }],
       actionType: wantAgent.OperationType.START_ABILITY,
       requestCode: 0,
       wantAgentFlags: [wantAgent.WantAgentFlags.UPDATE_PRESENT_FLAG]
     };
     const wantAgentObj: WantAgent = await wantAgent.getWantAgent(wantAgentInfo);
+    // 缓存给自定义通知使用：发布通知时带上wantAgent，点击即可跳转App
+    this.taskWantAgent = wantAgentObj;
 
     const request = new backgroundTaskManager.ContinuousTaskRequest();
     request.backgroundTaskModes = [backgroundTaskManager.BackgroundTaskMode.MODE_DATA_TRANSFER];
@@ -188,11 +218,69 @@ class LongTaskModel {
   }
 
   /**
-   * 判断长时任务是否正在运行
-   * @returns true=长时任务已启动且未停止
+   * 判断长时任务是否正在运行（同步候选）
+   *
+   * ⚠️ 仅依据内存缓存的continuousTaskId判空，不反映系统真实状态。
+   * 若系统已取消/挂起长时任务，此值仍存在。需结合 probeSystemState() 判断真实有效性。
+   * @returns true=内存存在候选ID（可能是失效的）
    */
   isRunning(): boolean {
     return getLongTaskState().continuousTaskId != undefined;
+  }
+
+  /**
+   * 获取当前缓存的连续任务ID
+   * @returns 连续任务ID，或undefined
+   */
+  getContinuousTaskId(): number | undefined {
+    return getLongTaskState().continuousTaskId;
+  }
+
+  /**
+   * 探测长时任务在系统侧的真实状态
+   *
+   * 通过 getAllContinuousTasks(context, includeSuspended=true) 查询系统实际维护的长时任务，
+   * 区分：未申请(NONE) / 激活(RUNNING) / 挂起(SUSPENDED) / 已取消(CANCELLED)。
+   * 用于判断"内存ID存在但系统已关闭或挂起"的场景，避免VPN名义保活实则失效。
+   *
+   * @param context UIAbilityContext（仅UIAbility可查询）
+   * @returns 真实运行状态
+   */
+  async probeSystemState(context: common.UIAbilityContext): Promise<ContinuousTaskState> {
+    const id = getLongTaskState().continuousTaskId;
+    if (id == undefined) {
+      return ContinuousTaskState.NONE;
+    }
+    try {
+      // includeSuspended=true：查询含挂起任务的全部长时任务，便于精确区分挂起/取消
+      const tasks: backgroundTaskManager.ContinuousTaskInfo[] =
+        await backgroundTaskManager.getAllContinuousTasks(context, true);
+      const mine: backgroundTaskManager.ContinuousTaskInfo | undefined =
+        tasks.find((info: backgroundTaskManager.ContinuousTaskInfo) => info.continuousTaskId === id);
+      if (mine == undefined) {
+        return ContinuousTaskState.CANCELLED;
+      }
+      if (mine.suspendState === true) {
+        return ContinuousTaskState.SUSPENDED;
+      }
+      return ContinuousTaskState.RUNNING;
+    } catch (e) {
+      const err = e as BusinessError;
+      LLog.warn(TAG, `探测长时任务状态失败: code=${err.code}, message=${err.message}`);
+      // 查询失败：保守判定失效，交由上层决定是否重新申请
+      return ContinuousTaskState.CANCELLED;
+    }
+  }
+
+  /**
+   * 重置长时任务状态（公开版）
+   *
+   * 当探测到系统已取消/挂起长时任务、但内存候选仍存在时，
+   * 调用此方法清除内存状态，使 startLongTask 可以重新申请。
+   */
+  resetTaskState(): void {
+    this.resetState();
+    LLog.info(TAG, '重置长时任务状态（供重新申请保活）');
   }
 
   /**
@@ -204,6 +292,15 @@ class LongTaskModel {
    */
   private removeNotification(): void {
     const state = getLongTaskState();
+    // 固定id：本版本自定义通知（发布同id原地更新，取消固定id即可清理）
+    notificationManager.cancel(VPN_NOTIFY_ID).then(() => {
+      LLog.info(TAG, `已移除旧通知: id=${VPN_NOTIFY_ID}`);
+    }).catch((err: BusinessError) => {
+      if (err.code !== 1600004) {
+        LLog.warn(TAG, `移除旧通知失败: id=${VPN_NOTIFY_ID}, code=${err.code}`);
+      }
+    });
+    // 兼容：清理旧版本使用系统动态id发布产生的残留通知
     if (state.notificationId != undefined) {
       const oldId = state.notificationId;
       notificationManager.cancel(oldId).then(() => {
@@ -241,16 +338,16 @@ class LongTaskModel {
       state.notificationId = notification.notificationId;
       state.startTime = Date.now();
 
-      // 校验continuousTaskId：官方API声明为可选类型，不保证一定有值
-      // 若为空则无法使用新API的update/stop，需依赖旧API降级
+      // 校验continuousTaskId：官方API声明为可选类型，不保证一定有值。
+      // 若为空则后续无法用新API stop/update，残留任务由保活对账(reconcileExtraTasks)兜底清理
       if (state.continuousTaskId == undefined) {
-        LLog.warn(TAG, 'startBackgroundRunning成功但continuousTaskId为空，将使用旧API降级处理');
+        LLog.warn(TAG, 'startBackgroundRunning成功但continuousTaskId为空，无法跟踪该任务');
       }
 
       LLog.info(TAG, `startBackgroundRunning成功, taskId=${state.continuousTaskId}, notificationId=${state.notificationId}`);
 
       this.publishNotification();
-      this.updater.start();
+      this.notifyLoop.start();
     } catch (error) {
       const err = error as BusinessError;
       LLog.error(TAG, `startBackgroundRunning失败. code: ${err.code}, message: ${err.message}`);
@@ -298,7 +395,7 @@ class LongTaskModel {
         const ip = this.vpnData.connectedIps[peerIndex];
         const endpoint = this.vpnData.targetEndpoints[peerIndex];
         const label = endpoint ? `→${endpoint}` : '';
-        lines.push(`Peer[${peerIndex}]: ${ip}${label}`);
+        lines.push(`P${peerIndex}: ${ip}${label}`);
       }
     }
 
@@ -308,16 +405,15 @@ class LongTaskModel {
         continue;
       }
       const ip = this.vpnData.connectedIps[peerIndex] ?? '未知';
-      const rx = formatTraffic(log.sc.receiveTotal);
-      const tx = formatTraffic(log.sc.sendTotal);
+      const rx = WireGuard.Tools.bytesToString(log.sc.receiveTotal);
+      const tx = WireGuard.Tools.bytesToString(log.sc.sendTotal);
 
       const handshakeTs = this.vpnData.lastHandshakeTime.get(peerIndex);
       const handshakeStr = handshakeTs != undefined ? formatTime(handshakeTs) : '无';
 
       const endpoint = this.vpnData.targetEndpoints[peerIndex];
       const label = endpoint ? `→${endpoint}` : '';
-      // lines.push(`Peer[${peerIndex}]: ${ip}${label} ↓${rx} ↑${tx} 握手:${handshakeStr}`);
-      lines.push(`Peer[${peerIndex}]: ↓${rx} ↑${tx} 握手:${handshakeStr}`);
+      lines.push(`P${peerIndex}: ↓${rx} ↑${tx} 握手:${handshakeStr}`);
     }
 
     // 无数据时的占位提示
@@ -338,24 +434,28 @@ class LongTaskModel {
    */
   publishNotification(): void {
     const state = getLongTaskState();
+    // 仅在长时任务存活时发布（notificationId是每次startBackgroundRunning系统分配的，
+    // 仅作"任务存活"信号；自定义通知本体固定使用 VPN_NOTIFY_ID，
+    // 同id发布原地更新，保证任何情况下只有一条自定义通知）
     if (state.notificationId == undefined) {
       return;
     }
-
     try {
       const lines: string[] = this.buildNotificationLines();
 
       const request: notificationManager.NotificationRequest = {
-        id: state.notificationId,
-        isOngoing:true,
-        isUnremovable:false,
+        id: VPN_NOTIFY_ID,
+        isOngoing: true,
+        isUnremovable: false,
+        // 点击通知跳转App（与长时任务wantAgent一致，指向宿主UIAbility）
+        wantAgent: this.taskWantAgent,
         content: {
           notificationContentType: notificationManager.ContentType.NOTIFICATION_CONTENT_MULTILINE,
           multiLine: {
             title: this.vpnData.configName ? `${this.vpnData.configName} - VPN运行中` : 'WireGuard VPN 运行中',
             text: lines.length > 0 ? lines[0] : 'VPN运行中',
-            briefText:  'VPN运行中',
-            longTitle:  'WireGuard VPN',
+            briefText: 'VPN运行中',
+            longTitle: 'WireGuard VPN',
             lines: lines,
           }
         },
@@ -394,9 +494,7 @@ class LongTaskModel {
     if (data.targetEndpoints != undefined) {
       this.vpnData.targetEndpoints = data.targetEndpoints;
     }
-    if (getLongTaskState().continuousTaskId != undefined) {
-      this.updater.update();
-    }
+    this.notifyLoop.signal('vpnData');
   }
 
   /**
@@ -405,14 +503,16 @@ class LongTaskModel {
    * @param log VPN流日志消息（包含流量统计和握手时间）
    */
   updateStreamLog(log: StreamLogMessage): void {
+    // Socket链路异常事件不进入通知数据（无Peer统计意义），由保活状态机与VEA消费
+    if (log.messageType === MessageType.SOCKET_ERROR) {
+      return;
+    }
     this.vpnData.latestLogs.set(log.peerIndex, log);
     if (log.messageType === MessageType.HANDSHAKE_INITIATION ||
       log.messageType === MessageType.HANDSHAKE_RESPONSE) {
       this.vpnData.lastHandshakeTime.set(log.peerIndex, log.timestamp);
     }
-    if (getLongTaskState().continuousTaskId != undefined) {
-      this.updater.update();
-    }
+    this.notifyLoop.signal('streamLog');
   }
 
   setServiceStopped(stopped: boolean): void {
@@ -429,46 +529,35 @@ class LongTaskModel {
     const state = getLongTaskState();
     if (state.continuousTaskId == undefined) {
       LLog.info(TAG, '后台长时任务未启动');
+      // 任务无活动锚点，仅清理自定义通知残留
+      this.removeNotification();
       return;
     }
 
-    this.updater.stop();
+    this.notifyLoop.stop();
 
     // 清除VPN通知数据
     this.clearVpnData();
 
-    // 主动取消通知，防止残留多个通知窗口
-    this.removeNotification();
-
-    if (state.continuousTaskId != undefined) {
-      // 使用新API签名：stopBackgroundRunning(context, continuousTaskId)
-      backgroundTaskManager.stopBackgroundRunning(currentContext, state.continuousTaskId).then(() => {
+    // 注意顺序：必须先stopBackgroundRunning（系统随stop移除其锚点通知），
+    // 之后再取消通知。若先取消进行中任务的锚点，取消会被系统拒绝/无效，
+    // 失效重启循环中锚点通知会不断累积（实测弹窗十多个）。
+    const taskId: number = state.continuousTaskId;
+    backgroundTaskManager.stopBackgroundRunning(currentContext, taskId).then(() => {
+      this.resetState();
+      // 任务已停止：清理自定义通知(固定id)与动态id残留
+      this.removeNotification();
+      LLog.info(TAG, `取消后台长时任务：成功, taskId=${taskId}`);
+    }).catch((error: BusinessError) => {
+      if (error.code == 9800005) {
+        LLog.info(TAG, '取消后台长时任务：后台任务并未运行');
         this.resetState();
-        LLog.info(TAG, 'stopBackgroundRunning成功');
-        LLog.info(TAG, "取消后台长时任务：成功")
-      }).catch((error: BusinessError) => {
-        if (error.code == 9800005) {
-          LLog.info(TAG, "取消后台长时任务：后台任务并未运行")
-          this.resetState();
-          return
-        }
-        LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
-      });
-    } else {
-      // 降级：使用旧API（continuousTaskId为空时走此分支）
-      backgroundTaskManager.stopBackgroundRunning(currentContext).then(() => {
-        this.resetState();
-        LLog.info(TAG, 'stopBackgroundRunning成功');
-        LLog.info(TAG, "取消后台长时任务：成功")
-      }).catch((error: BusinessError) => {
-        if (error.code == 9800005) {
-          LLog.info(TAG, "取消后台长时任务：后台任务并未运行")
-          this.resetState();
-          return
-        }
-        LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
-      });
-    }
+        this.removeNotification();
+        return;
+      }
+      LLog.error(TAG, `stopBackgroundRunning失败. code: ${error.code}, message: ${error.message}`);
+      this.removeNotification();
+    });
   }
 }
 

@@ -16,12 +16,31 @@
  */
 import { pasteboard } from '@kit.BasicServicesKit';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
-import { LLog, StreamLogMessage, Tools, WGConfPeer, WGDBConf, WireGuard, getDnsMode, dnsResolveByMode, formatDnsError, SiteUrlType } from 'wg_tunnel';
+import {
+  LLog,
+  StreamLogMessage,
+  Tools,
+  WGConfPeer,
+  WGDBConf,
+  WireGuard,
+  getDnsMode,
+  getDnsScope,
+  dnsResolveByMode,
+  formatDnsError,
+  SiteUrlType,
+  DnsScope
+} from 'wg_tunnel';
+import { vpnToggleService, vpnToggleState } from './VpnToggleService';
 import { JSON } from '@kit.ArkTS';
 import { AppStorageV2, UIContext } from '@kit.ArkUI';
 
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
 const TAG = "配置查看"
+
+/** 从 AllSettled 解析结果取值：fulfilled 取 value，否则取 fallback */
+function settledValue(r: PromiseSettledResult<string>, fallback: string): string {
+  return r.status === 'fulfilled' ? r.value : fallback;
+}
 
 @ObservedV2
 export default class WGConfigPreViewModel {
@@ -47,9 +66,11 @@ export default class WGConfigPreViewModel {
 
   updateStatus() {
     const state = WireGuard.config.status.getConfig();
-    // 判断id是否相同，且存在
-    const isIdSame = this.params?.id != undefined && state.runningConfigId == this.params?.id;
-    this.isVpnOpen = isIdSame && state.isOpen()
+    // 开关显示跟随"用户意图"：开关开启且意图配置ID匹配本预览配置即视为开，
+    // 不受VPN启动/运行中间广播(running)影响；只有异常/用户关闭(intent回false)才关
+    const switchId = state.isSwitchOpen ? state.switchConfigId : undefined;
+    const id = this.params?.id;
+    this.isVpnOpen = switchId != undefined && id != undefined && switchId == id;
     LLog.info(TAG, `isVpnOpen=${this.isVpnOpen} status: ${JSON.stringify(state)}`)
   }
 
@@ -86,7 +107,14 @@ export default class WGConfigPreViewModel {
 
   async updateData() {
     if (this.params) {
-      this.loadData(this.params);
+      await this.loadData(this.params);
+      // 保存后自动热切换（保留）：接入单飞行槽，链内校验运行意图=本配置才发SWITCH；
+      // 两页面并发时后到意图生效，本任务若id不匹配自动作废
+      if (this.data) {
+        await vpnToggleService.requestConfigReloadSwitch(this.params.id, this.data);
+      }
+    } else {
+      LLog.info(TAG, "没有获取到当前配置ID")
     }
   }
 
@@ -106,62 +134,47 @@ export default class WGConfigPreViewModel {
     }
   }
 
-  /**
-   * 改变Vpn配置，启动或停止
-   */
-  async changeVpnConfig(context: UIContext, isOn: boolean) {
-    // 当点击启动按钮时，需要设置异常标记为false
-    this.isVPNNoGetParamThrow = false;
-    try {
-      const id = this.params!.id;
-      const config = this.data!;
+  isSwitchClick: boolean = false;
+  @Trace isSwitchEnable: boolean = true;
 
-      await WireGuard.runWGConfig(id, config, isOn)
-      // 这里主要是本地启动VPN，不在vpn 专属进程 便于测试。
-      //
-      // if (!this.helper) {
-      //   this.helper = WireGuard.makeVpnConnection(context);
-      // }
-      //
-      // if (WireGuard.getRunningServer().runningConfigId) {
-      //   LLog.info(TAG, `销毁VPN服务 ${id}`);
-      //   await this.helper.stopServer().finally(() => {
-      //     WireGuard.setRunningServer()
-      //   })
-      // }
-      // if (isOn) {
-      //   LLog.info(TAG, `启动VPN服务 ${id}`);
-      //   await this.helper!.startServer(vpnConf)
-      //     .finally(() => {
-      //       WireGuard.setRunningServer(id)
-      //     })
-      // }
-    } catch (e) {
-      this.isVpnOpen = false;
-      WireGuard.event.publishVpnNoOpen()
-      // 开启失败展示Toast，关闭操作不展示（用户主动关闭不应提示错误）
-      if (isOn) {
-        const reason = e != undefined ? String(e) : '';
-        context.getPromptAction().showToast({ message: reason.length > 0 ? 'VPN启动失败：' + reason : 'VPN启动失败' })
-      }
-      LLog.error(TAG, { error: e, message: `${isOn ? "开启" : "关闭"}VPN异常` });
+  /** 事务进行中的状态文案（开启中/关闭中/切换中），idle时undefined */
+  get busyText(): string | undefined {
+    const p = vpnToggleState.phase;
+    if (p === 'idle') {
+      return undefined;
     }
+    return p === 'starting' ? '开启中' : p === 'stopping' ? '关闭中' : '切换中';
   }
 
-
-  isSwitchClick: boolean = false;
-
+  /**
+   * 预览页开关点击处理（第一道闸门：isSwitchClick 手势守卫——仅真实点击进入，
+   * 程序性赋值引发的 onChange 因标记 false 空跑返回；主界面被动刷新亦不触发本方法）
+   *
+   * 与主界面共用 vpnToggleService：意图先行 → updateStatus 刷显示（纯显示写入）→
+   * 单飞行槽内 id 校验后执行，只有目标任务执行。
+   */
   onSwitchChange(context: UIContext, isOn: boolean) {
+    this.isSwitchEnable = false
     if (this.isSwitchClick) {
-      if (isOn) {
-        LLog.info(TAG, "点击开启VPN")
-        this.changeVpnConfig(context, true)
-      } else {
-        LLog.info(TAG, "点击关闭VPN")
-        this.changeVpnConfig(context, false)
+      this.isSwitchClick = false
+      // 当点击启动按钮时，需要设置异常标记为false
+      this.isVPNNoGetParamThrow = false;
+      const id = this.params?.id;
+      const config = this.data;
+      if (id == undefined || config == undefined) {
+        this.isSwitchEnable = true
+        return;
       }
+      vpnToggleService.requestVpnToggle(context, id, isOn, config,
+        () => {
+          this.updateStatus();
+        },
+        () => {
+          this.isSwitchEnable = true
+        });
+    } else {
+      this.isSwitchEnable = true
     }
-    this.isSwitchClick = false
   }
 
   setSwitchClick() {
@@ -169,18 +182,18 @@ export default class WGConfigPreViewModel {
   }
 
   updateStreamParams(log: StreamLogMessage) {
-    if (this.isVpnOpen) {// 如果vpn开启才需要更新，后续应该添加接口的 私钥 比对，判断日志是否为当前日志的日志。可以在注册时就指定。
+    if (this.isVpnOpen) { // 如果vpn开启才需要更新，后续应该添加接口的 私钥 比对，判断日志是否为当前日志的日志。可以在注册时就指定。
       this.logData.updateLogMessage(log);
       LLog.debug(TAG, `stream log: index=${log.peerIndex} receive=${log.sc.receiveTotal} send=${log.sc.sendTotal ?? 0}`)
     }
   }
 
   receiveData(index: number): string {
-    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.receiveTotal ?? 0)
+    return WireGuard.Tools.bytesToString(this.logData.getLatestLogForPeer(index)?.sc.receiveTotal ?? 0)
   }
 
   sendData(index: number): string {
-    return WireGuard.Tools.bitsToString(this.logData.getLatestLogForPeer(index)?.sc.sendTotal ?? 0)
+    return WireGuard.Tools.bytesToString(this.logData.getLatestLogForPeer(index)?.sc.sendTotal ?? 0)
   }
 
   /**
@@ -200,10 +213,16 @@ export default class WGConfigPreViewModel {
     }
     const mode = getDnsMode(peer.endpoint);
     try {
-      const ip = await dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode);
+      // 本地（系统DNS）与广域网（公网DNS）两路并行解析，双双标记展示
+      const settled = await Promise.allSettled([
+        dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode, DnsScope.PREFER_LOCAL),
+        dnsResolveByMode(peer.endpoint.ipStrOrDomain, mode, DnsScope.PREFER_WAN),
+      ]);
+      const local: string = settledValue(settled[0], '解析失败');
+      const wan: string = settledValue(settled[1], '解析失败');
       // @Trace 数组需整体重建才触发 UI 刷新
       const newResult: string[] = this.peerDnsTestResult.slice();
-      newResult[index] = ip;
+      newResult[index] = `本地: ${local}\n广域网: ${wan}`;
       this.peerDnsTestResult = newResult;
     } catch (e) {
       const err = e instanceof Error ? e : new Error(String(e));
@@ -225,7 +244,6 @@ export default class WGConfigPreViewModel {
 
 @ObservedV2
 export class WGStreamLogsData {
-
   @Trace logs: StreamLogMessage[] = []
   @Trace lastLogForMap: Map<number, StreamLogMessage> = new Map(); // // 上一条日志，一直表示最新,不过需要根据peer区分
 

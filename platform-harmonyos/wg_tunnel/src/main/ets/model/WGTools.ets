@@ -37,24 +37,28 @@ class WGToolsImpl {
   // 判断 VpnExtensionAbility 是否正在运行
   // 返回 true 表示正在运行，false 表示未运行
   async isVpnExtensionRunning(): Promise<boolean> {
+    return (await this.getVpnExtensionPid()) != undefined;
+  }
+
+  /**
+   * 获取VPN进程(:vpn)的PID；未运行返回undefined
+   * 供"关闭VEA"流程锁定目标进程：校验时PID变化=旧目标已退出、新进程是合法新生，不可误杀
+   */
+  async getVpnExtensionPid(): Promise<number | undefined> {
     try {
       // 获取当前应用所有运行进程的信息
       const processInfos: appManager.ProcessInformation[] = await appManager.getRunningProcessInformation();
-
-      // 遍历进程列表，查找进程名以 :vpn 结尾的进程
       for (const info of processInfos) {
         LLog.debug(TAG, '进程名: %{public}s, PID: %{public}d', info.processName, info.pid);
         if (info.processName.endsWith(':vpn')) {
-          LLog.debug(TAG, 'VPN 进程正在运行, 进程名: %{public}s', info.processName);
-          return true;
+          return info.pid;
         }
       }
-      LLog.debug(TAG, 'VPN 进程未运行');
-      return false;
+      return undefined;
     } catch (err) {
       const error = err as BusinessError;
       LLog.error(TAG, '获取进程信息失败: %{public}s', JSON.stringify(error));
-      return false;
+      return undefined;
     }
   }
 

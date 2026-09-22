@@ -1,0 +1,17 @@
+#!/bin/sh
+# pre-commit: SingleFlightLoop（保活/通知调度核心）变更时强制运行本地单元测试
+# 安装方式见 platform-harmonyos/tests/README.md
+
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -E "SingleFlightLoop\.ets$|wg_tunnel/src/test/|platform-harmonyos/tests/")
+if [ -n "$STAGED" ]; then
+  ROOT=$(git rev-parse --show-toplevel)
+  echo "pre-commit: 检测到 SingleFlightLoop 变更，运行本地单元测试..."
+  if sh "$ROOT/platform-harmonyos/tests/run-local-unit-test.sh"; then
+    exit 0
+  fi
+  echo ""
+  echo "pre-commit: 单元测试未通过，提交已阻止。"
+  echo "  修复后重试；确需跳过: git commit --no-verify（不建议）"
+  exit 1
+fi
+exit 0

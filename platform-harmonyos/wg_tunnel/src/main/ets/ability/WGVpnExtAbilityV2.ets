@@ -5,7 +5,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *     http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,81 +14,96 @@
  * limitations under the License.
  */
 
-import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
-import { connection } from '@kit.NetworkKit';
-import { bundleManager, Want } from '@kit.AbilityKit';
-import { BusinessError } from '@kit.BasicServicesKit';
-import { LLog } from '../tools/LLog';
-import { WireGuard } from '../model/WGHelper';
-import { WGDeviceConfig, WGDBConf } from '../model/entity/WGConfigEntity';
-import { VpnConnHelper, makeWGConf2VpnStartConfig } from '../model/WGConnect';
-import { StreamDirection } from '../../../../Index';
-import { WGEventThrowParam } from '../error/WGEventThrow';
-import WGTools from '../model/WGTools';
-import VPNEventStatusParams, { VpnEventTag } from '../model/entity/VPNEventStatusParams';
-import { VpnConfigAction, VpnConfigRequestParams } from '../model/entity/VpnConfigAction';
-import { SubEventCancel } from '../model/WGEvent';
-
-const TAG = "vpn_ability_v2"
-
 /**
- * WGVpnExtAbility V2 - 事件驱动的VPN Extension
+ * WGVpnExtAbility V2 - VPN扩展能力壳（仅生命周期与指令分发）
  *
- * 与V1的区别：
- * - V1：启动时通过 want.parameters 传入配置，切换配置需重启整个Extension
- * - V2：支持want.parameters参数直传（API 22+）+ 轮询降级（API 21及容错），支持热切换/更新/重启配置，无需重启Extension
+ * 【架构定位】本类是VEA进程入口的薄壳，连接逻辑全部在 VpnSessionManager：
+ * - onCreate：注册未捕获异常监听 → 订阅事件（状态查询/配置指令/重连请求）→
+ *   通知主进程VEA存活 → 参数直传启动或降级轮询
+ * - onDestroy：停止轮询 → 取消订阅 → 会话收尾 → 通知主进程VEA关闭
+ * - 指令分发：START/SWITCH/STOP/RESTART 委托 VpnSessionManager
  *
- * 参数直传模式（API 22+）：
- * - runWGConfig启动VEA时通过want.parameters传递id和wgDbConf（JSON字符串）
- * - onCreate优先从want.parameters读取配置，有效则直接执行VPN连接，跳过轮询延迟
- * - API 22+设备可享受即时启动（延迟<1秒），无需等待轮询
+ * 【异常边界】C层异常在NAPI胶水层捕获转ArkTS；ArkTS未捕获异常经
+ * errorManager监听在进程死亡前尽力广播THROW（native崩溃由主进程看门狗兜底）
  *
- * 轮询降级模式（API 21及参数丢失场景）：
- * - API 21设备：startVpnExtensionAbility的want.parameters不会传递到onCreate，自动降级为轮询
- * - 参数验证失败时（id缺失/无效、wgDbConf缺失/空/无法反序列化）：静默降级为轮询模式
- * - 轮询模式：3秒间隔请求配置，最多30次，通过CONFIG_QUERY/CONFIG_REQUEST事件获取配置
- *
- * 生命周期：
- * - onCreate：通知主进程VEA存活 → 订阅配置指令 → 尝试want.parameters直传 → 降级轮询
- * - onDestroy：停止VPN连接 → 通知主进程VEA关闭 → 清理资源
- *
- * - START：首次启动VPN连接
  * 配置指令（VpnConfigAction）：
+ * - START：首次启动VPN连接
  * - STOP：停止VPN服务但保留VEA进程（用于快速切换）
  * - SWITCH：切换到新配置（先停后启）
  * - RESTART：重启当前配置（DNS重解析）
  *
- * 长时任务由主进程的EntryAbility管理，跟随VEA的vpnThreadRunning状态。
+ * 启动模式：
+ * - 参数直传（API 22+）：want.parameters携带id+wgDbConf，即时启动
+ * - 轮询降级（API 21/参数丢失）：1秒间隔CONFIG_QUERY，最多30次
+ *
+ * 长时任务由主进程的EntryAbility管理；握手/socket维护/keepalive由C层内核负责。
  *
  * Created on 2026/8/27.
  * @author leojay`fu
  */
-export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
-  private vpnConnection?: VpnConnHelper;
-  private currentConfig?: WGDeviceConfig;
-  private currentDbConf?: WGDBConf;
-  private currentConfigId?: number;
-  private hasDomainEndpoint: boolean = false;
-  private isReconnecting: boolean = false;
-  private netConnection?: connection.NetConnection;
+import { errorManager, Want } from '@kit.AbilityKit';
+import { vpnExtension, VpnExtensionAbility } from '@kit.NetworkKit';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { LLog } from '../tools/LLog';
+import { WireGuard } from '../model/WGHelper';
+import { WGDBConf } from '../model/entity/WGConfigEntity';
+import { VpnConfigAction, VpnConfigRequestParams } from '../model/entity/VpnConfigAction';
+import { SubEventCancel } from '../model/WGEvent';
+import { VPNChangeHelperV2 } from './VPNChangeHelperV2';
+import { VpnSessionManager } from './VpnSessionManager';
 
+const TAG = "vpn_ability_v2"
+
+export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
   // V2: 配置请求轮询
   private configQueryTimer?: number;
   private configQueryRetries: number = 0;
   // V2: 事件订阅句柄
   private configRequestCancel?: SubEventCancel;
   private vpnStatusQueryCancel?: SubEventCancel;
+  private reconnectRequestCancel?: SubEventCancel;
+  // 未捕获异常监听句柄：进程死亡前尽力上报（满足"所有失败必须有报错"）
+  private errorObserver?: errorManager.GlobalObserver;
+  // VPN会话管理器：连接生命周期/流日志消费/网络监听调整
+  // 进程关闭权在主进程：会话收尾后广播serviceStopped（明确回复），主进程收到后stopVpnExtensionAbility
+  private session: VpnSessionManager = new VpnSessionManager(() => {
+    VPNChangeHelperV2.serviceStopped();
+  });
 
   override onCreate(want: Want): void {
     super.onCreate(want);
     try {
+      // 0. 注册未捕获异常监听：进程因ArkTS未捕获异常死亡前尽力广播失败原因，
+      //    主进程收到后回滚开关并Toast提示（native崩溃无法广播，由主进程看门狗兜底检测）
+      this.errorObserver = (err: errorManager.GlobalError) => {
+        LLog.error(TAG, `VEA未捕获异常: ${err.message ?? '未知'}`);
+        try {
+          // 尽力清理（进程即将死亡）：注销监听+销毁VPN连接（含destroy重试），减少系统DNS/路由残留
+          this.unlistenEvents();
+          this.session.shutdown();
+          VPNChangeHelperV2.startVpnThrow(`VPN进程内部异常: ${err.message ?? '未知'}`);
+        } catch (e) {
+          // 上报失败只能留日志（进程即将死亡）
+          LLog.error(TAG, `未捕获异常清理/上报失败: ${JSON.stringify(e)}`);
+        }
+      };
+      errorManager.on('globalErrorOccurred', this.errorObserver);
+
+      // 会话管理器接入VEA上下文
+      this.session.setContext(this.context);
+
       // 1. 先订阅事件，确保收到主进程回复
       this.vpnStatusQueryCancel = WireGuard.event.subscribeVpnStatusQuery(() => {
-        VPNChangeHelperV2.queryStatus(this.currentConfig);
+        VPNChangeHelperV2.queryStatus(this.session.getCurrentConfig());
       });
 
       this.configRequestCancel = WireGuard.event.subscribeVpnConfigRequest((params) => {
         this.onConfigRequest(params);
+      });
+
+      // 订阅主进程的重连请求
+      this.reconnectRequestCancel = WireGuard.event.subscribeVpnReconnectRequest(() => {
+        this.session.onReconnectRequest();
       });
 
       // 2. 通知主应用进程：VEA进程已启动（主进程收到后订阅CONFIG_QUERY并回复配置）
@@ -108,7 +123,8 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       const t = e as BusinessError;
       LLog.error(TAG, e);
       VPNChangeHelperV2.startVpnThrow(`${t.message}\n${t.stack}`);
-      this.selfTerminate();
+      // 进程关闭权在主进程：广播serviceStopped（明确回复），主进程收到后关闭进程
+      VPNChangeHelperV2.serviceStopped();
     }
   }
 
@@ -161,18 +177,41 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
 
     // 参数有效，直接执行VPN连接
     LLog.info(TAG, 'want.parameters参数有效: id=' + id.toString());
-    this.handleStartConfig(id, wgDbConf);
+    this.session.start(id, wgDbConf);
     return true;
   }
 
-  override onDestroy(): void {
+  override async onDestroy(): Promise<void> {
     super.onDestroy();
     LLog.info(TAG, "WGVpnExtAbilityV2 onDestroy");
 
     // 停止配置请求轮询
     this.stopConfigQueryPolling();
 
-    // 取消事件订阅
+    // 注销事件订阅
+    this.unlistenEvents();
+
+    // 注销未捕获异常监听
+    if (this.errorObserver != undefined) {
+      try {
+        errorManager.off('globalErrorOccurred', this.errorObserver);
+      } catch (e) {
+      }
+      this.errorObserver = undefined;
+    }
+
+    // 会话收尾：注销网络监听 + 停掉残留连接
+    await this.session.shutdown();
+
+    // 通知主进程VEA关闭
+    VPNChangeHelperV2.stopVpn();
+  }
+
+  /**
+   * 注销CommonEvent订阅（shutdown路径第一步：状态机"聋掉"后，
+   * destroy/close 过程中的系统事件不再触发任何指令处理，消灭关闭竞态）
+   */
+  private unlistenEvents(): void {
     if (this.configRequestCancel != undefined) {
       this.configRequestCancel.cancel();
       this.configRequestCancel = undefined;
@@ -181,21 +220,10 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
       this.vpnStatusQueryCancel.cancel();
       this.vpnStatusQueryCancel = undefined;
     }
-
-    // 注销网络监听
-    this.unregisterNetConnection();
-
-    // 通知主进程VEA关闭
-    VPNChangeHelperV2.stopVpn();
-
-    // 停止VPN连接
-    this.vpnConnection?.stopServer()
-      .then(() => {
-        LLog.info(TAG, "停止VPN成功");
-      })
-      .catch((err: BusinessError) => {
-        LLog.error(TAG, err);
-      });
+    if (this.reconnectRequestCancel != undefined) {
+      this.reconnectRequestCancel.cancel();
+      this.reconnectRequestCancel = undefined;
+    }
   }
 
   // ===== 配置请求轮询 =====
@@ -207,16 +235,16 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     // 立即发一次
     this.doConfigQuery();
 
-    // 3秒间隔轮询
+    // 1秒间隔轮询
     this.configQueryTimer = setInterval(() => {
-      if (this.currentConfig != undefined) {
+      if (this.session.hasActiveConfig()) {
         this.stopConfigQueryPolling();
         return;
       }
       if (this.configQueryRetries >= 30) {
-        LLog.error(TAG, '配置请求超时(30次)，关闭VEA');
+        LLog.error(TAG, '配置请求超时(30次)，广播serviceStopped交由主进程关闭VEA');
         this.stopConfigQueryPolling();
-        this.selfTerminate();
+        VPNChangeHelperV2.serviceStopped();
         return;
       }
       this.doConfigQuery();
@@ -236,20 +264,7 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     LLog.info(TAG, `配置请求已发送, 第${this.configQueryRetries}次`);
   }
 
-  private selfTerminate(): void {
-    bundleManager.getBundleInfoForSelf(bundleManager.BundleFlag.GET_BUNDLE_INFO_DEFAULT)
-      .then((bundleInfo) => {
-        vpnExtension.stopVpnExtensionAbility({
-          deviceId: '',
-          bundleName: bundleInfo.name,
-          abilityName: 'WGVpnExtAbility',
-        }).catch((e: BusinessError) => {
-          LLog.error(TAG, `自关闭VEA失败: ${e.message}`);
-        });
-      });
-  }
-
-  // ===== 配置指令处理 =====
+  // ===== 配置指令分发 =====
 
   private onConfigRequest(params: VpnConfigRequestParams): void {
     const action = params.action as VpnConfigAction;
@@ -258,353 +273,31 @@ export default class WGVpnExtAbilityV2 extends VpnExtensionAbility {
     switch (action) {
       case VpnConfigAction.START:
         if (params.configId != undefined && params.wgDbConf) {
-          this.handleStartConfig(params.configId, params.wgDbConf);
+          this.stopConfigQueryPolling();
+          this.session.start(params.configId, params.wgDbConf);
         } else {
           LLog.error(TAG, 'START指令缺少configId或wgDbConf');
         }
         break;
       case VpnConfigAction.STOP:
-        this.handleStopService();
+        // shutdown路径：先注销指令订阅（状态机"聋掉"，销毁过程零竞态），
+        // 会话按序收尾（destroy→close）后广播serviceStopped，进程由主进程关闭
+        this.unlistenEvents();
+        this.session.stop();
         break;
       case VpnConfigAction.SWITCH:
         if (params.configId != undefined && params.wgDbConf) {
-          this.handleSwitchConfig(params.configId, params.wgDbConf);
+          this.session.switchTo(params.configId, params.wgDbConf);
         } else {
           LLog.error(TAG, 'SWITCH指令缺少configId或wgDbConf');
         }
         break;
       case VpnConfigAction.RESTART:
-        this.handleRestartConfig(params.configId);
+        this.session.restart(params.configId);
         break;
       default:
         LLog.warn(TAG, `未知action: ${action}`);
         break;
     }
-  }
-
-  /**
-   * START：首次启动VPN连接
-   */
-  private handleStartConfig(configId: number, wgDbConf: WGDBConf): void {
-    // 停止轮询
-    this.stopConfigQueryPolling();
-
-    // 存储配置
-    this.currentConfigId = configId;
-    this.currentDbConf = wgDbConf;
-
-    // 启动VPN
-    this.resolveAndStartVpn(configId, wgDbConf);
-  }
-
-  /**
-   * STOP：停止VPN服务但保留VEA进程
-   */
-  private async handleStopService(): Promise<void> {
-    LLog.info(TAG, '停止VPN服务（保留VEA进程）');
-
-    // 停止VPN连接
-    try {
-      await this.vpnConnection?.stopServer();
-    } catch (e) {
-      LLog.error(TAG, `停止VPN连接异常: ${JSON.stringify(e)}`);
-    }
-    this.vpnConnection = undefined;
-
-    // 注销网络监听
-    this.unregisterNetConnection();
-
-    // 清理配置状态
-    this.currentConfig = undefined;
-    this.hasDomainEndpoint = false;
-    this.isReconnecting = false;
-
-    // 更新VPN进程本地状态
-    WireGuard.config.status.vpnStop();
-
-    // 通知主进程：VPN服务停止但VEA存活
-    VPNChangeHelperV2.serviceStopped();
-  }
-
-  /**
-   * SWITCH：切换到新配置（先停后启）
-   */
-  private async handleSwitchConfig(configId: number, wgDbConf: WGDBConf): Promise<void> {
-    LLog.info(TAG, `切换VPN配置: configId=${configId}`);
-
-    // 1. 停止旧连接
-    try {
-      await this.vpnConnection?.stopServer();
-    } catch (e) {
-      LLog.error(TAG, `停止旧VPN连接异常: ${JSON.stringify(e)}`);
-    }
-    this.vpnConnection = undefined;
-
-    // 2. 注销网络监听
-    this.unregisterNetConnection();
-
-    // 3. 更新配置
-    this.currentConfigId = configId;
-    this.currentDbConf = wgDbConf;
-    this.currentConfig = undefined;
-    this.isReconnecting = false;
-
-    // 4. 启动新配置
-    this.resolveAndStartVpn(configId, wgDbConf);
-  }
-
-  /**
-   * RESTART：重启当前配置（DNS重解析）
-   */
-  private async handleRestartConfig(configId?: number): Promise<void> {
-    LLog.info(TAG, `重启VPN配置: configId=${configId ?? this.currentConfigId}`);
-
-    // 如果有新configId则更新
-    if (configId != undefined) {
-      this.currentConfigId = configId;
-    }
-
-    // 必须有缓存的数据库配置才能重启
-    if (!this.currentDbConf || this.currentConfigId == undefined) {
-      LLog.warn(TAG, '无缓存配置，无法重启，发送配置请求');
-      this.startConfigQueryPolling();
-      return;
-    }
-
-    // 停止旧连接
-    try {
-      await this.vpnConnection?.stopServer();
-    } catch (e) {
-      LLog.error(TAG, `停止旧VPN连接异常: ${JSON.stringify(e)}`);
-    }
-    this.vpnConnection = undefined;
-    this.currentConfig = undefined;
-    this.isReconnecting = false;
-
-    // 用缓存的配置重新启动
-    this.resolveAndStartVpn(this.currentConfigId, this.currentDbConf);
-  }
-
-  // ===== VPN启动（复用V1核心逻辑） =====
-
-  private async resolveAndStartVpn(id: number, wgDbConf: WGDBConf): Promise<void> {
-    try {
-      const config = await makeWGConf2VpnStartConfig(wgDbConf);
-      this.currentConfig = config;
-      this.hasDomainEndpoint = this.checkHasDomainEndpoint(config);
-      this.startVpnInternal(id, config);
-      if (this.hasDomainEndpoint) {
-        this.registerNetConnection();
-      }
-    } catch (e) {
-      LLog.error(TAG, `DNS解析或VPN启动失败: ${JSON.stringify(e)}`);
-      VPNChangeHelperV2.startVpnThrow(`${e instanceof Error ? e.message : String(e)}`);
-      this.selfTerminate();
-    }
-  }
-
-  private startVpnInternal(id: number, config: WGDeviceConfig): void {
-    LLog.debug(TAG, `开启配置:${JSON.stringify(config)}`);
-    this.vpnConnection = new VpnConnHelper(vpnExtension.createVpnConnection(this.context), config)
-      .setStreamListener((msg) => {
-        const direction = msg.direction == StreamDirection.RECEIVE ? "接收" : "发送";
-        const mtype: string = WGTools.getMessageTypeDesc(msg.messageType);
-        LLog.info(TAG, `Peer 数据流(index:${msg.peerIndex}/${mtype}/Result:${msg.success}) ${direction} length:${msg.sc.length}`);
-        WireGuard.event.publishVpnStreamLogs(msg);
-      });
-
-    this.vpnConnection.startServer()
-      .then(() => {
-        VPNChangeHelperV2.startVpn(id, config);
-      })
-      .catch((e: BusinessError) => {
-        LLog.error(TAG, `VPN Error (${e.code}): ${e.message}`);
-        VPNChangeHelperV2.startVpnThrow(e.message);
-        this.selfTerminate();
-      });
-  }
-
-  // ===== 网络监听与DNS重连（复用V1逻辑） =====
-
-  private checkHasDomainEndpoint(config: WGDeviceConfig): boolean {
-    for (const peer of config.peers) {
-      if (peer.endpoint) {
-        const ip = peer.endpoint.address.ip;
-        if (!this.isDirectIp(ip)) {
-          return true;
-        }
-      }
-    }
-    return false;
-  }
-
-  private isDirectIp(ip: string): boolean {
-    const ipv4Regex = /^((25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)\.){3}(25[0-5]|2[0-4]\d|1\d\d|[1-9]?\d)$/;
-    const ipv6Regex = /^([0-9a-fA-F]{0,4}:){2,7}[0-9a-fA-F]{0,4}$/;
-    return ipv4Regex.test(ip) || ipv6Regex.test(ip);
-  }
-
-  private registerNetConnection(): void {
-    try {
-      this.netConnection = connection.createNetConnection();
-      this.netConnection.on('netAvailable', () => {
-        LLog.info(TAG, "网络可用变化，触发DNS重新解析");
-        this.onNetworkChanged();
-      });
-      this.netConnection.on('netLost', () => {
-        LLog.info(TAG, "网络丢失");
-      });
-      this.netConnection.on('netCapabilitiesChange', () => {
-        LLog.info(TAG, "网络能力变化");
-      });
-      this.netConnection.on('netConnectionPropertiesChange', () => {
-        LLog.info(TAG, "网络连接属性变化，触发DNS重新解析");
-        this.onNetworkChanged();
-      });
-      this.netConnection.register(() => {
-        LLog.info(TAG, "网络状态监听注册成功");
-      });
-    } catch (e) {
-      LLog.error(TAG, `注册网络监听失败: ${JSON.stringify(e)}`);
-    }
-  }
-
-  private unregisterNetConnection(): void {
-    if (this.netConnection) {
-      try {
-        this.netConnection.unregister(() => {
-          LLog.info(TAG, "网络状态监听注销成功");
-        });
-      } catch (e) {
-        LLog.error(TAG, `注销网络监听失败: ${JSON.stringify(e)}`);
-      }
-      this.netConnection = undefined;
-    }
-  }
-
-  private async onNetworkChanged(): Promise<void> {
-    if (this.isReconnecting || !this.currentDbConf || this.currentConfigId == undefined) {
-      return;
-    }
-    if (!this.hasDomainEndpoint) {
-      return;
-    }
-
-    this.isReconnecting = true;
-    LLog.info(TAG, "网络环境变化，开始重新解析域名并重连VPN");
-
-    try {
-      const newConfig = await makeWGConf2VpnStartConfig(this.currentDbConf);
-
-      const endpointChanged = this.checkEndpointChanged(this.currentConfig!, newConfig);
-      if (!endpointChanged) {
-        LLog.info(TAG, "域名解析结果未变化，无需重连");
-        this.isReconnecting = false;
-        return;
-      }
-
-      LLog.info(TAG, "域名解析结果已变化，重新连接VPN");
-
-      await this.vpnConnection?.stopServer();
-      LLog.info(TAG, "旧VPN连接已停止");
-
-      this.currentConfig = newConfig;
-      this.startVpnInternal(this.currentConfigId, newConfig);
-    } catch (e) {
-      LLog.error(TAG, `网络变化重连异常: ${JSON.stringify(e)}`);
-    } finally {
-      this.isReconnecting = false;
-    }
-  }
-
-  private checkEndpointChanged(oldConfig: WGDeviceConfig, newConfig: WGDeviceConfig): boolean {
-    if (oldConfig.peers.length !== newConfig.peers.length) {
-      return true;
-    }
-    for (let i = 0; i < oldConfig.peers.length; i++) {
-      const oldPeer = oldConfig.peers[i];
-      const newPeer = newConfig.peers[i];
-      if (oldPeer.endpoint.address.ip !== newPeer.endpoint.address.ip ||
-        oldPeer.endpoint.address.isIpv4 !== newPeer.endpoint.address.isIpv4) {
-        LLog.info(TAG, `Peer[${i}] 端点变化: ${oldPeer.endpoint.address.ip} -> ${newPeer.endpoint.address.ip}`);
-        return true;
-      }
-    }
-    return false;
-  }
-}
-
-/**
- * V2 VPN状态变化辅助类
- *
- * 与V1 VPNChangeHelper的区别：
- * - 新增 serviceStopped()：VPN服务停止但VEA进程存活（vpnThreadRunning=true）
- * - startVpnThrow 不再自动关闭VEA（V2模式下VEA可能继续服务）
- */
-class VPNChangeHelperV2 {
-  private static cachedConnectedIps?: Record<number, string>;
-
-  static onCreate(): void {
-    WireGuard.event.publishVpnChange({ isOpen: false, tag: VpnEventTag.ON_CREATE, vpnThreadRunning: true });
-  }
-
-  static startVpn(id: number, config?: WGDeviceConfig): void {
-    WireGuard.config.status.vpnStartRun(id);
-    const params: VPNEventStatusParams = { isOpen: true, tag: VpnEventTag.START_VPN, vpnThreadRunning: true };
-    if (config) {
-      const connectedIps: Record<number, string> = {};
-      config.peers.forEach((peer, index) => {
-        connectedIps[index] = peer.endpoint.address.ip;
-      });
-      params.connectedIps = connectedIps;
-      VPNChangeHelperV2.cachedConnectedIps = connectedIps;
-    }
-    WireGuard.event.publishVpnChange(params);
-  }
-
-  static stopVpn(): void {
-    WireGuard.config.status.vpnStop();
-    const params: VPNEventStatusParams = {
-      isOpen: false, tag: VpnEventTag.STOP_VPN, vpnThreadRunning: false,
-      connectedIps: VPNChangeHelperV2.cachedConnectedIps,
-    };
-    WireGuard.event.publishVpnChange(params);
-  }
-
-  /**
-   * VPN服务停止但VEA进程存活
-   * 主进程收到后应保持长时任务运行，仅更新通知内容
-   */
-  static serviceStopped(): void {
-    const params: VPNEventStatusParams = {
-      isOpen: false, tag: VpnEventTag.VPN_SERVICE_STOPPED, vpnThreadRunning: true,
-      connectedIps: VPNChangeHelperV2.cachedConnectedIps,
-    };
-    WireGuard.event.publishVpnChange(params);
-  }
-
-  static startVpnThrow(msg?: WGEventThrowParam): void {
-    WireGuard.config.status.vpnStopThrow();
-    WireGuard.event.publishVpnThrow(msg);
-    WireGuard.event.publishVpnChange({
-      isOpen: false, tag: VpnEventTag.THROW, vpnThreadRunning: false,
-      connectedIps: VPNChangeHelperV2.cachedConnectedIps,
-    });
-  }
-
-  static queryStatus(config?: WGDeviceConfig): void {
-    const isOpen = WireGuard.config.status.getConfig().isOpen();
-    const params: VPNEventStatusParams = { isOpen: isOpen, tag: VpnEventTag.QUERY_STATUS, vpnThreadRunning: true };
-    if (config) {
-      const connectedIps: Record<number, string> = {};
-      config.peers.forEach((peer, index) => {
-        connectedIps[index] = peer.endpoint.address.ip;
-      });
-      params.connectedIps = connectedIps;
-      VPNChangeHelperV2.cachedConnectedIps = connectedIps;
-    } else if (VPNChangeHelperV2.cachedConnectedIps) {
-      params.connectedIps = VPNChangeHelperV2.cachedConnectedIps;
-    }
-    WireGuard.event.publishVpnChange(params);
   }
 }

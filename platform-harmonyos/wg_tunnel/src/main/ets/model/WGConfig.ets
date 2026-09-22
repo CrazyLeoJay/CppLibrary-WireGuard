@@ -16,6 +16,8 @@
 import { AppStorageV2, UIUtils } from '@kit.ArkUI';
 import { LLog } from '../../../../Index';
 import { WGDBConf } from './entity/WGConfigEntity';
+import { cryptoFramework } from '@kit.CryptoArchitectureKit';
+import { buffer } from '@kit.ArkTS';
 
 const TAG = "WGConfig"
 
@@ -31,9 +33,31 @@ const TAG = "WGConfig"
 export class StatusConfig {
   @Trace runningConfigId?: number = undefined;
   @Trace running: boolean = false;
+  // ===== 用户开关意图（仅主进程本地维护，不参与跨进程DTO同步） =====
+  /** 用户是否开启了开关。true=用户意图开启；只有明确启动异常/VPN进程关闭/用户主动关闭才会置false */
+  @Trace isSwitchOpen: boolean = false;
+  /** 用户意图开启的配置ID（isSwitchOpen=false时为undefined） */
+  @Trace switchConfigId?: number = undefined;
+  /**
+   * 本进程内用户是否主动关闭过开关（进程存活期内不复位）
+   * 用于区分"主进程重启后的冷启动恢复"与"陈旧启动指令晚到"：
+   * 真冷启动的进程不可能有本地关闭记录；有过关闭记录后再看到"VPN运行但意图关"，
+   * 只能是用户关闭后在途的启动指令完成（如参数直传启动），必须拆除而非恢复意图。
+   */
+  @Trace hasLocalOff: boolean = false;
+  /** 最近一次用户意图开启的时间戳：供保活状态机在切换/启动宽限期内豁免中间态广播 */
+  lastSwitchOnTime: number = 0;
 
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true
+  }
+
+  /**
+   * 当前用户意图开启的配置ID
+   * @returns 意图开启的配置ID，未开启时为undefined
+   */
+  getSwitchOpenId(): number | undefined {
+    return this.isSwitchOpen ? this.switchConfigId : undefined;
   }
 
   /** 转为纯数据DTO，用于跨进程序列化（@Trace属性JSON.stringify会加__ob_前缀） */
@@ -89,13 +113,41 @@ class StatusImpl {
     const c = this.getConfig()
     c.runningConfigId = dto.runningConfigId
     c.running = dto.running
+    // 注意：isSwitchOpen/switchConfigId 是主进程本地的用户意图，
+    // 不随VPN进程广播同步，确保VPN启动过程中的中间广播不影响开关状态。
     LLog.info(TAG, `从VPN进程同步: running=${c.running}, configId=${c.runningConfigId}`)
   }
 
-  update(dto: StatusConfigDTO) {
+  /**
+   * 用户点击开启：立即将本地状态置为开启（意图先行）
+   *
+   * 点击开关/启动按钮时立即调用，使UI开关即刻显示为开。
+   * 注意：running/runningConfigId 为"实际运行事实"，只由VPN进程广播校正
+   * （syncFromVpnProcess），此处不伪造，避免启动阶段 isOpen() 提前为真。
+   *
+   * @param configId 用户意图开启的配置ID
+   */
+  switchOnIntent(configId: number) {
     const c = this.getConfig()
-    c.runningConfigId = dto.runningConfigId
-    c.running = dto.running
+    c.isSwitchOpen = true
+    c.switchConfigId = configId
+    c.lastSwitchOnTime = Date.now()
+    LLog.info(TAG, `用户意图开启(switchOnIntent): configId=${configId}`)
+  }
+
+  /**
+   * 用户主动关闭 / 明确启动异常 / VPN进程关闭 → 关闭开关意图
+   * switchConfigId 不清空：保留为"最后一次意图的配置id"，供关闭任务执行时校验
+   * 目标id是否一致（开关任务无论开关，只有id对上才执行）。读取方均以
+   * isSwitchOpen 为门控，保留id不影响任何现有逻辑。
+   */
+  switchOffIntent() {
+    const c = this.getConfig()
+    c.isSwitchOpen = false
+    c.running = false
+    c.runningConfigId = undefined
+    c.hasLocalOff = true
+    LLog.info(TAG, `用户意图关闭(switchOffIntent)`)
   }
 
   isRunning(id: number): boolean {
@@ -119,6 +171,7 @@ class StatusImpl {
 export class RunArgConfig {
   @Trace pendingConfigId?: number = undefined;
   @Trace pendingDbConf?: WGDBConf = undefined;
+  @Trace runningConfMd5?: string = undefined;
 }
 
 function getRunArgConfig(): RunArgConfig {
@@ -143,6 +196,7 @@ class RunArgImpl {
     const c = this.getConfig();
     c.pendingConfigId = undefined;
     c.pendingDbConf = undefined;
+    c.runningConfMd5 = undefined;
   }
 
   hasConfig(): boolean {
@@ -156,6 +210,14 @@ class RunArgImpl {
 
   getDbConf(): WGDBConf | undefined {
     return this.getConfig().pendingDbConf;
+  }
+
+  setRunningMd5(md5: string): void {
+    this.getConfig().runningConfMd5 = md5;
+  }
+
+  getRunningMd5(): string | undefined {
+    return this.getConfig().runningConfMd5;
   }
 }
 
@@ -175,3 +237,14 @@ class WGConfigImpl {
 const WGConfig = new WGConfigImpl();
 
 export default WGConfig;
+
+/**
+ * @throws
+ */
+export function computeConfMd5(conf: WGDBConf): string {
+  const json = JSON.stringify(conf);
+  const md = cryptoFramework.createMd('MD5');
+  md.updateSync({ data: new Uint8Array(buffer.from(json, 'utf-8').buffer) });
+  const result = md.digestSync();
+  return Array.from(result.data).map(b => b.toString(16).padStart(2, '0')).join('');
+}

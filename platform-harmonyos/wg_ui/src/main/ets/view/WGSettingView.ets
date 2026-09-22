@@ -13,12 +13,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-import { LLog, AppFilterMode } from 'wg_tunnel';
+import { LLog, AppFilterMode, networkResidueState } from 'wg_tunnel';
 import WGSettingViewModel from '../view_model/WGOfMeViewModel';
+import { BusinessError } from '@kit.BasicServicesKit';
+import { ComponentContent, promptAction } from '@kit.ArkUI';
+import BuildProfile from '../../../../BuildProfile';
 
 const TAG = "设置界面"
-/** 编译时决定，release 构建时此常量为 false，开发者选项不显示 */
-const IS_DEBUG = true;
 
 /**
  * 设置界面
@@ -59,7 +60,36 @@ struct WGSettingView {
   maxClick = 10 - 1;
 
   aboutToAppear(): void {
-    this.vm.loadData(this.getUIContext())
+    this.vm.loadData(this.getUIContext());
+    this.vm.refreshNetworkStatus();
+    this.vm.startNetworkStatusWatch();
+  }
+
+  aboutToDisappear(): void {
+    this.vm.stopNetworkStatusWatch();
+  }
+
+  /** 「修复网络」小字：当前网络状态实时摘要（当前网络/VPN挂载/残留/是否正常） */
+  get networkStatusText(): string {
+    const s = networkResidueState;
+    if (s.checking) {
+      return '正在检测网络状态…';
+    }
+    if (s.checkedAt === 0) {
+      return '尚未检测网络状态';
+    }
+    if (!s.hasNetwork) {
+      return '当前无可用网络，建议检查网络连接';
+    }
+    // vpnMounted按系统全部网络的BEARER_VPN枚举判定（分流配置下默认网络不切换为VPN，
+    // 不能以默认网络bearer为准）；residue=意图已关但VPN网络仍挂载
+    if (s.residue) {
+      return `当前网络=${s.netType}，VPN网络残留，建议修复`;
+    }
+    if (s.vpnMounted) {
+      return `当前网络=${s.netType}，VPN网络挂载中，网络正常`;
+    }
+    return `当前网络=${s.netType}，VPN网络未挂载，无残留，网络正常`;
   }
 
   @Styles
@@ -81,11 +111,19 @@ struct WGSettingView {
       this.buildStatement()
       // ===== 导出隧道配置 =====
       this.buildBaseFuns();
+      // ===== 悬浮球（闭源定制接入后显示；开源构建未注册门面则隐藏） =====
+      if (this.vm.floatBallAvailable) {
+        this.buildFloatBall();
+      }
+      // ===== 悬浮球测试（仅 debug 构建显示，绕过开关直接拉起悬浮窗） =====
+      if (BuildProfile.DEBUG && this.vm.floatBallAvailable) {
+        this.buildFloatBallDebug();
+      }
       // ===== 应用过滤配置 =====
       this.buildBaseSetting();
 
       // ===== 开发者模式（仅 debug 构建显示） =====
-      if (IS_DEBUG) {
+      if (BuildProfile.DEBUG) {
         this.buildDevModel();
       }
 
@@ -210,6 +248,96 @@ struct WGSettingView {
       .layoutWeight(1)
       .itemRowStyle()
     }
+    ListItem() {
+      Column({ space: '4vp' }) {
+        Text("修复网络")
+          .defaultTagTitleStyle()
+        Text(this.networkStatusText)
+          .width('100%')
+          .fontSize('12fp')
+      }
+      .onClick(() => {
+        this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
+          LLog.error(TAG, e)
+        })
+      })
+      .layoutWeight(1)
+      .itemRowStyle()
+    }
+  }
+
+  /**
+   * 悬浮球开关（照开发者模式 Toggle 行范式）
+   */
+  @LocalBuilder
+  buildFloatBall() {
+    ListItem() {
+      Column({ space: '8vp' }) {
+        Text('悬浮球')
+          .defaultTagTitleStyle()
+
+        Row() {
+          Column({ space: '2vp' }) {
+            Text('桌面悬浮球')
+              .fontSize('16fp')
+            Text('在其他应用上层悬浮显示连接状态，支持快捷检查网络与回到应用')
+              .fontSize('12fp')
+              .fontColor($r('sys.color.font_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Blank()
+          Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallEnabled })
+            .selectedColor($r('app.color.wg_theme_primary'))
+        }
+        .width('100%')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      .itemRowStyle()
+      .onClick(() => {
+        // 点击整行切换悬浮球
+        this.vm.toggleFloatBall(this.getUIContext());
+      })
+    }
+  }
+
+  /**
+   * 悬浮球测试入口（仅 debug 构建显示）：绕过开关配置直接拉起悬浮窗，
+   * 隔离"悬浮窗能否创建显示"与"悬浮球开关"两个问题；结果用Toast回报
+   */
+  @LocalBuilder
+  buildFloatBallDebug() {
+    ListItem() {
+      Column({ space: '8vp' }) {
+        Text('悬浮球测试')
+          .defaultTagTitleStyle()
+
+        Row() {
+          Column({ space: '2vp' }) {
+            Text('直接拉起悬浮球')
+              .fontSize('16fp')
+            Text('无论上方悬浮球开关是否开启，点击立即创建并显示悬浮窗')
+              .fontSize('12fp')
+              .fontColor($r('sys.color.font_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Blank()
+          Button('拉起')
+            .buttonStyle(ButtonStyleMode.NORMAL)
+            .onClick(() => {
+              this.vm.debugOpenFloatBall(this.getUIContext());
+            })
+        }
+        .width('100%')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      .itemRowStyle()
+    }
   }
 
   /**
@@ -239,7 +367,7 @@ struct WGSettingView {
                 .borderRadius({ topLeft: 14, bottomLeft: 14 })
                 .backgroundColor(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED
                   ? $r('app.color.wg_new_card_item_select_color')
-                  : '#1A000000')
+                  : $r('app.color.wg_seg_unselected_bg'))
 
               // 右侧：白名单背景
               Column()
@@ -248,7 +376,7 @@ struct WGSettingView {
                 .borderRadius({ topRight: 14, bottomRight: 14 })
                 .backgroundColor(this.vm.defaultFilterMode === AppFilterMode.INCLUDED
                   ? $r('app.color.wg_new_card_item_select_color')
-                  : '#1A000000')
+                  : $r('app.color.wg_seg_unselected_bg'))
             }
             .width('100%')
             .height('100%')
@@ -258,14 +386,14 @@ struct WGSettingView {
               Text('黑名单')
                 .fontSize('12fp')
                 .fontWeight(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED ? Color.White : '#666666')
+                .fontColor(this.vm.defaultFilterMode === AppFilterMode.EXCLUDED ? Color.White : $r('sys.color.font_secondary'))
                 .textAlign(TextAlign.Center)
                 .layoutWeight(1)
 
               Text('白名单')
                 .fontSize('12fp')
                 .fontWeight(this.vm.defaultFilterMode === AppFilterMode.INCLUDED ? FontWeight.Bold : FontWeight.Normal)
-                .fontColor(this.vm.defaultFilterMode === AppFilterMode.INCLUDED ? Color.White : '#666666')
+                .fontColor(this.vm.defaultFilterMode === AppFilterMode.INCLUDED ? Color.White : $r('sys.color.font_secondary'))
                 .textAlign(TextAlign.Center)
                 .layoutWeight(1)
             }
@@ -275,7 +403,7 @@ struct WGSettingView {
           .width('152vp')
           .height('28vp')
           .borderRadius(14)
-          .border({ width: 1, color: '#33999999', radius: 14 })
+          .border({ width: 1, color: $r('app.color.wg_input_border'), radius: 14 })
         }
         .width('100%')
 
@@ -283,12 +411,12 @@ struct WGSettingView {
         if (this.vm.defaultFilterMode === AppFilterMode.EXCLUDED) {
           Text('黑名单模式：列表中的应用不经过VPN通道，其余应用正常走VPN')
             .fontSize('12fp')
-            .fontColor('#ff707070')
+            .fontColor($r('sys.color.font_tertiary'))
             .width('100%')
         } else {
           Text('白名单模式：仅列表中的应用经过VPN通道，其余应用不走VPN')
             .fontSize('12fp')
-            .fontColor('#ff707070')
+            .fontColor($r('sys.color.font_tertiary'))
             .width('100%')
         }
       }
@@ -317,13 +445,14 @@ struct WGSettingView {
               .fontSize('16fp')
             Text('开启后在分享页面显示调试信息')
               .fontSize('12fp')
-              .fontColor('#ff707070')
+              .fontColor($r('sys.color.font_tertiary'))
           }
           .alignItems(HorizontalAlign.Start)
           .layoutWeight(1)
 
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.developerMode })
+            .selectedColor($r('app.color.wg_theme_primary'))
         }
         .width('100%')
       }
@@ -356,6 +485,32 @@ struct WGSettingView {
     ListItemGroup({
       header: this.buildForMeTitle(),
     }) {
+      ListItem() {
+        Row() {
+          Text('WG-VPN 主页')
+            .fontSize('18fp')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .listGroupItemStyle()
+        .onClick(() => {
+          this.vm.clickToWgVpnHome(this.getUIContext());
+        })
+      }
+
+      ListItem() {
+        Row() {
+          Text('使用说明')
+            .fontSize('18fp')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .listGroupItemStyle()
+        .onClick(() => {
+          this.vm.clickToUserGuide(this.getUIContext());
+        })
+      }
+
       ListItem() {
         Row() {
           Text('WireGuard 官网')
@@ -407,15 +562,73 @@ struct WGSettingView {
           this.vm.clickToMyGitHubWebSite(this.getUIContext());
         })
       }
+
+      ListItem() {
+        Row() {
+          Text('联系我')
+            .fontSize('18fp')
+          Blank().layoutWeight(1)
+          SymbolGlyph($r('sys.symbol.chevron_right'))
+        }
+        .listGroupItemStyle()
+        .onClick(() => {
+          this.showWechatQRCodeDialog();
+        })
+      }
     }
     .listGroupStyle()
+  }
+
+  showWechatQRCodeDialog() {
+    const contentNode = new ComponentContent(this.getUIContext(), wrapBuilder(buildWechatQRCodeDialog),
+      {} as WechatQRCodeDialogParams
+    );
+    this.getUIContext()
+      .getPromptAction()
+      .openCustomDialogWithController(contentNode, new promptAction.DialogController(), {
+        alignment: DialogAlignment.Center,
+        autoCancel: true
+      })
+      .then(() => {
+        contentNode.dispose();
+      })
+      .catch((e: BusinessError) => {
+        LLog.info(TAG, e);
+      });
+  }
+}
+
+interface WechatQRCodeDialogParams {}
+
+@Builder
+function buildWechatQRCodeDialog(_params: WechatQRCodeDialogParams) {
+  WechatQRCodeDialogContent()
+}
+
+@ComponentV2
+struct WechatQRCodeDialogContent {
+  build() {
+    Column() {
+      Image($r('app.media.wechat_qrcode'))
+        .width('260vp')
+        .height('260vp')
+        .objectFit(ImageFit.Contain)
+        .borderRadius('16vp')
+
+      Text('微信扫码联系')
+        .fontSize('16fp')
+        .fontColor($r('sys.color.font_tertiary'))
+        .margin({ top: '16vp' })
+    }
+    .padding('24vp')
+    .alignItems(HorizontalAlign.Center)
   }
 }
 
 @Extend(Text)
 function tagStyle() {
   .fontSize('12fp')
-  .fontColor('#ff707070')
+  .fontColor($r('sys.color.font_tertiary'))
 }
 
 /**
@@ -426,7 +639,8 @@ function listStyle() {
   .width('100%')
   // .height('100%')
   .divider({
-    strokeWidth: '2vp'
+    strokeWidth: '1vp',
+    color: $r('app.color.wg_divider_color'),
   })
 }
 
@@ -435,7 +649,8 @@ function listGroupStyle() {
   .width('100%')
   // .height('100%')
   .divider({
-    strokeWidth: '2vp'
+    strokeWidth: '1vp',
+    color: $r('app.color.wg_divider_color'),
   })
 }
 

@@ -79,6 +79,7 @@ namespace wg_napi {
     napi_value InitVpn(napi_env env, napi_callback_info info);
     napi_value Start(napi_env env, napi_callback_info info);
     napi_value setStreamLogListener(napi_env env, napi_callback_info info);
+    napi_value ResetSocket(napi_env env, napi_callback_info info);
     napi_value Close(napi_env env, napi_callback_info info);
 
     void GetConnectConfig(napi_env env, napi_value arg, WireGuard::DeviceRegisterConfig &config);

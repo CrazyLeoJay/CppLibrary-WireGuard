@@ -64,6 +64,16 @@ export function dnsToIp(domain: string): Promise<string>;
 export function dnsToIpWithType(domain: string, type: number): Promise<string>;
 
 /**
+ * 向指定DNS服务器直接查询（绕过系统解析器）
+ * 用于规避路由器DNS对自家DDNS域名返回NAT硬回流内网IP的问题
+ *
+ * @param domain 域名
+ * @param type 4=IPv4(A记录) 6=IPv6(AAAA记录)
+ * @param server DNS服务器IPv4地址，如 223.5.5.5
+ */
+export function dnsToIpFromServer(domain: string, type: number, server: string): Promise<string>;
+
+/**
  * @author leojay`fu
  */
 export class WireGuardDevice {
@@ -90,6 +100,14 @@ export class WireGuardDevice {
 
   // @ts-ignore
   async start(tunFd: number): Promise<void>;
+
+  /**
+   * 运行时重建底层socket（保留会话与epoll），经fd变更回调通知宿主重新protect。
+   * 用于网络切换后的轻量漫游，无需整体重建VPN连接。
+   * @returns 新的socket fd
+   */
+  // @ts-ignore
+  async resetSocket(): Promise<number>;
 
   // @ts-ignore
   async close(): Promise<void>;

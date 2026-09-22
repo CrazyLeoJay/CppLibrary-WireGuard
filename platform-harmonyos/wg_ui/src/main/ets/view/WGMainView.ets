@@ -15,13 +15,49 @@
  *
  */
 import WGMainViewModel, { MainItemData } from '../view_model/WGMainViewModel';
-import { ComponentContent, ComposeTitleBar, promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
+import { vpnToggleState } from '../view_model/VpnToggleService';
+import { ComponentContent, promptAction, SymbolGlyphModifier } from '@kit.ArkUI';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
-import { WGConf, WireGuard } from 'wg_tunnel';
+import { WGConf, WireGuard, vpnRunStatusState, StreamLogMessage, VpnEventTag } from 'wg_tunnel';
 
 const TAG = "WG主页";
+
+/** 删除粒子消散覆盖层的定位（vp，相对主页根Stack） */
+interface WgDeleteFx {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/**
+ * 删除消散粒子：一次性爆发——count为总量、高emitRate在约0.2s内全部射出，
+ * lifetime 500±200ms 自然消亡；颜色在删除红与中性灰间随机插值，深浅色均可读
+ */
+function buildDeleteDissolveParticle(): ParticleOptions<ParticleType, ParticleUpdater,
+  ParticleUpdater, ParticleUpdater, ParticleUpdater, ParticleUpdater, ParticleUpdater>[] {
+  return [{
+    emitter: {
+      particle: {
+        type: ParticleType.POINT,
+        config: { radius: 4 },
+        count: 72,
+        lifetime: 500,
+        lifetimeRange: 200
+      },
+      emitRate: 360,
+      shape: ParticleEmitterShape.RECTANGLE,
+      position: ['50%', '50%'],
+      size: ['100%', '100%']
+    },
+    velocity: { speed: [40, 140], angle: [-180, 180] },
+    color: { range: ['#FFE84026', '#FFBBBBBB'] },
+    opacity: { range: [0.5, 1.0] },
+    scale: { range: [0.5, 1.2] }
+  }];
+}
 
 @Builder
 export function NavWGMainPage() {
@@ -65,6 +101,8 @@ export struct WGMainViewNavDest {
       main: $r('app.string.app_name'),
       sub: $r('app.string.sub_title'),
     })
+    // 菜单文案用静态标签：NavDestination.menus 的动态文案在V2下不随状态刷新，
+    // 当前值改为点击后toast反馈（排序字段/方向/显示信息）
     .menus([
       {
         value: "刷新",
@@ -90,33 +128,36 @@ export struct WGMainViewNavDest {
         }
       },
       {
-        value: `排序参数:${this.vm.uiConfig.getColumnName()}`,
+        value: "排序字段",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
         action: () => {
           this.vm.uiConfig.sortColumnToNext()
+          this.getUIContext().getPromptAction().showToast({
+            message: `已按${this.vm.uiConfig.getColumnName()}排序`,
+          })
         }
       },
-
       {
-        value: `排序顺序:${this.vm.uiConfig.listSortAsc ? '正序' : '倒叙'}`,
+        value: "排序方向",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.timer')),
         action: () => {
           this.vm.uiConfig.listSortAsc = !this.vm.uiConfig.listSortAsc
+          this.getUIContext().getPromptAction().showToast({
+            message: `已切换为${this.vm.uiConfig.listSortAsc ? '正序' : '倒序'}`,
+          })
         }
       },
       {
-        value: `显示信息：${this.vm.uiConfig.listShowSimple ? '简略' : '详细'}`,
+        value: "显示信息",
         symbolIcon: new SymbolGlyphModifier($r('sys.symbol.message')),
         action: () => {
           this.vm.uiConfig.listShowSimple = !this.vm.uiConfig.listShowSimple
+          this.getUIContext().getPromptAction().showToast({
+            message: `已切换为${this.vm.uiConfig.listShowSimple ? '简略' : '详细'}`,
+          })
         }
       },
     ])
-  }
-
-  @LocalBuilder
-  titleView() {
-    ComposeTitleBar()
   }
 }
 
@@ -135,6 +176,12 @@ function buildDialog(params: QRCodeNewParams) {
 export struct WGMainView {
   @Param vm: WGMainViewModel = new WGMainViewModel();
   @Local isShow: boolean = true;
+  @Local isSwipeActionDelete: boolean = false;
+  @Local nowTick: number = Date.now();
+  @Local deleteFx: WgDeleteFx | undefined = undefined;
+  listScroller: ListScroller = new ListScroller();
+  private tickTimer?: number;
+  private deleteFxTimer?: number;
   funcBtn: MenuElement[] = [
     {
       value: "选择conf或者zip文件导入配置",
@@ -178,6 +225,12 @@ export struct WGMainView {
               message: `code=${e.code}`
             , error: e
             })
+            try {
+              this.getUIContext().getPromptAction().showToast({
+                message: e.message
+              })
+            } catch (error) {
+            }
           })
       }
     },
@@ -192,20 +245,121 @@ export struct WGMainView {
   ];
   vpnEvent = WireGuard.event.subscribeVpnChange((params) => {
     LLog.info(TAG, `配置读取: ${JSON.stringify(params)}`)
-    const status = params.status
-    if (status) {
-      // 设置开关
-      this.vm.setActiveConfigId(status);
+    // 【仅显示同步，不控制开关】行开关唯一状态源是本地意图(StatusConfig)。
+    // 仅在VPN进程要关闭（异常/进程关闭，本地意图已被状态机置关）时同步一次显示
+    if (params.vpnThreadRunning === false) {
+      this.vm.refreshRowStates();
+      this.vm.resetRunTraffic();
     }
+    // 新会话开启（含热切换到新配置）：清空上一会话的累计流量展示
+    if ((params.tag as VpnEventTag) === VpnEventTag.START_VPN) {
+      this.vm.resetRunTraffic();
+    }
+  })
+  // 运行行流量展示的数据管道：只更新vm缓存，文本由每秒tick节流刷新
+  streamEvent = WireGuard.event.subscribeVpnStreamLogs((log: StreamLogMessage) => {
+    this.vm.updateRunTraffic(log);
   })
 
   aboutToAppear(): void {
     this.vm.loadConfigs();
     WireGuard.event.publishVpnStatusQuery();
+    // 运行状态条"收/发X前"滚动刷新 + 运行行流量文本节流刷新（仅页面可见期间计时）
+    this.tickTimer = setInterval(() => {
+      this.nowTick = Date.now();
+      this.vm.refreshRunTrafficText();
+    }, 1000);
   }
 
   aboutToDisappear(): void {
     this.vpnEvent.cancel()
+    this.streamEvent.cancel()
+    if (this.tickTimer != undefined) {
+      clearInterval(this.tickTimer);
+      this.tickTimer = undefined;
+    }
+    if (this.deleteFxTimer != undefined) {
+      clearTimeout(this.deleteFxTimer);
+      this.deleteFxTimer = undefined;
+    }
+  }
+
+  /**
+   * 删除配置并播放粒子消散动效：
+   * 取被删行相对主页根Stack的坐标，在原位播放一次粒子爆发（约0.9s），
+   * 数据在粒子起飞后延迟120ms移除并伴随列表收拢动画；
+   * 坐标取不到（页面瞬时重建等）时退化为直接删除。
+   */
+  private deleteWithFx(item: MainItemData): void {
+    const ui = this.getUIContext();
+    try {
+      const row = ui.getComponentUtils().getRectangleById(`wg_cfg_row_${item.id}`);
+      const root = ui.getComponentUtils().getRectangleById('wg_main_root');
+      this.deleteFx = {
+        left: ui.px2vp(row.windowOffset.x - root.windowOffset.x),
+        top: ui.px2vp(row.windowOffset.y - root.windowOffset.y),
+        width: ui.px2vp(row.size.width),
+        height: ui.px2vp(row.size.height),
+      };
+    } catch (e) {
+      LLog.warn(TAG, `删除动效取行坐标失败，直接删除: ${e}`);
+    }
+    if (this.deleteFxTimer != undefined) {
+      clearTimeout(this.deleteFxTimer);
+    }
+    this.deleteFxTimer = setTimeout(() => {
+      this.deleteFx = undefined;
+      this.deleteFxTimer = undefined;
+    }, 900);
+    const idx = this.vm.wgList.findIndex(it => it.id === item.id);
+    if (idx < 0) {
+      return;
+    }
+    ui.animateTo({ duration: 260, curve: Curve.EaseOut, delay: 120 }, () => {
+      this.vm.deleteConfig(idx, item);
+    });
+  }
+
+  /** 状态条文案（nowTick驱动"收/发X前"响应式滚动） */
+  get runStatusText(): string {
+    return vpnRunStatusState.buildStatusText(this.nowTick);
+  }
+
+  /** 状态条颜色（深浅色资源自适应）：绿=已连接且心跳新鲜；橙=连接中/心跳久远；红=Socket异常 */
+  get runStatusColor(): ResourceStr {
+    const s = vpnRunStatusState;
+    const socketErrorFresh = s.socketError !== '' && (this.nowTick - s.socketErrorTime) < 30 * 1000;
+    if (socketErrorFresh) {
+      return $r('app.color.wg_run_status_error');
+    }
+    const heartbeatStale = s.lastHeartbeatTime === 0 || (this.nowTick - s.lastHeartbeatTime) > 180 * 1000;
+    if (!s.handshakeOk || heartbeatStale) {
+      return $r('app.color.wg_run_status_warn');
+    }
+    return $r('app.color.wg_run_status_ok');
+  }
+
+  /**
+   * 运行状态条：标题与配置列表之间的固定单行窗体
+   * 展示当前VPN连接情况——连接是否成功/上次收发数据时间/Socket异常提示
+   */
+  @LocalBuilder
+  buildRunStatusBanner() {
+    if (vpnRunStatusState.running) {
+      Row({ space: 8 }) {
+        Circle({ width: 8, height: 8 })
+          .fill(this.runStatusColor)
+        Text(this.runStatusText)
+          .fontSize(13)
+          .fontColor(this.runStatusColor)
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
+      }
+      .width('100%')
+      .alignItems(VerticalAlign.Center)
+      .padding({ left: 16, right: 16, top: 7, bottom: 7 })
+      .backgroundColor($r('app.color.wg_run_status_banner_bg'))
+    }
   }
 
   build() {
@@ -213,7 +367,20 @@ export struct WGMainView {
       if (this.vm.isEmptyList) {
         this.buildEmptyView()
       } else {
-        this.buildConfigListView()
+        Column() {
+          this.buildRunStatusBanner()
+          this.buildConfigListView()
+        }
+        .width('100%')
+        .height('100%')
+      }
+      // 删除粒子消散覆盖层（定位到被删行原位置，粒子播完自动移除）
+      if (this.deleteFx != undefined) {
+        Particle({ particles: buildDeleteDissolveParticle() })
+          .width(this.deleteFx.width)
+          .height(this.deleteFx.height)
+          .position({ x: this.deleteFx.left, y: this.deleteFx.top })
+          .hitTestBehavior(HitTestMode.None)
       }
       Button() {
         SymbolGlyph($r('sys.symbol.plus'))
@@ -226,8 +393,7 @@ export struct WGMainView {
       .layoutGravity(LocalizedAlignment.BOTTOM_END)
       .margin({ bottom: '32vp', right: "32vp" })
       // .position({ x: '80%', y: '85%' }) // 右下角位置
-      .hitTestBehavior(HitTestMode.Transparent) // 穿透触摸事件
-      .hitTestBehavior(HitTestMode.Block) // 阻塞父组件事件
+      .hitTestBehavior(HitTestMode.Block) // 阻塞父组件事件（原Transparent被此处覆盖，属无效代码已去重）
       .onClick((event: ClickEvent) => {
         animateToImmediately({ duration: 100 }, () => {
           this.isShow = true;
@@ -237,19 +403,24 @@ export struct WGMainView {
         placement: Placement.Top,
       })
     }
+    .id('wg_main_root')
     .width('100%')
     .height('100%')
   }
 
   @LocalBuilder
   buildConfigListView() {
-    List() {
+    List({ scroller: this.listScroller }) {
       Repeat(this.vm.wgList)
         .each((it) => {
           ListItem() {
             MainItemView({ vm: this.vm, data: it.item, index: it.index })
+              .id(`wg_cfg_row_${it.item.id}`)
               .onClick(() => {
-                WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id });
+                WireGuardNav.navDescToWGConfigPreView(this.vm.nav, { id: it.item.id }, () => {
+                  LLog.info(TAG, "onPop 从预览页返回，刷新列表")
+                  this.vm.loadConfigs();
+                });
               })
           }
           .swipeAction({
@@ -258,7 +429,14 @@ export struct WGMainView {
                 this.itemEndFunsView(it);
               },
               onAction: () => {
-                LLog.info(TAG, "item row to end");
+                this.listScroller.closeAllSwipeActions();
+                this.deleteWithFx(it.item);
+              },
+              onEnterActionArea: () => {
+                this.isSwipeActionDelete = true;
+              },
+              onExitActionArea: () => {
+                this.isSwipeActionDelete = false
               }
             },
             start: undefined,
@@ -267,9 +445,10 @@ export struct WGMainView {
         .virtualScroll({})
     }
     .width('100%')
-    .height('100%')
+    .layoutWeight(1)
     .divider({
       strokeWidth: '1vp',
+      color: $r('app.color.wg_divider_color'),
     })
 
   }
@@ -282,19 +461,32 @@ export struct WGMainView {
     Text("快来添加一个新配置吧")
   }
 
+  @Styles
+  deleteStyle(){
+    .width('120vp')
+    .height('100%')
+
+  }
+
   @LocalBuilder
   itemEndFunsView(it: RepeatItem<MainItemData>) {
     Row() {
-      Text("删除")
-        .textAlign(TextAlign.Center)
-        .fontColor(Color.White)
-        .width('150vp')
-        .height('100%')
-        .backgroundColor(Color.Red)
-        .onClick(() => {
-          this.vm.deleteConfig(it.index, it.item);
-        })
-    }
+      if (this.isSwipeActionDelete) {
+        Text("松开删除")
+          .textAlign(TextAlign.Center)
+          .fontColor($r('app.color.swipe_delete_text_color'))
+          .deleteStyle()
+      } else {
+        Text("删除")
+          .textAlign(TextAlign.Center)
+          .fontColor($r('app.color.swipe_delete_text_color'))
+          .deleteStyle()
+          .onClick(() => {
+            this.listScroller.closeAllSwipeActions();
+            this.deleteWithFx(it.item);
+          })
+      }
+    }.backgroundColor($r('app.color.swipe_delete_bg_color'))
   }
 
   newConfigDialog(wgConf: WGConf) {
@@ -330,15 +522,32 @@ struct MainItemView {
       Column() {
         Text(`${this.data.name}`)
           .fontSize('18fp')
+          .maxLines(1)
+          .textOverflow({ overflow: TextOverflow.Ellipsis })
         if (!this.vm.uiConfig.listShowSimple) {
           Text(`createAt: ${this.data.data.createdAt}`)
             .fontSize('12fp')
+            .maxLines(1)
+            .textOverflow({ overflow: TextOverflow.Ellipsis })
         }
       }
       .alignItems(HorizontalAlign.Start)
-
-      Blank().layoutWeight(1)
+      .layoutWeight(1)
+      if (this.data.busyLabel != undefined) {
+        Text(this.data.busyLabel)
+          .fontSize('12fp')
+          .fontColor($r('sys.color.font_tertiary'))
+          .margin({ right: '8vp' })
+      }
+      // 运行中配置：开关左侧展示本会话累计下载/上传（vm每秒节流刷新）
+      if (this.data.open) {
+        Text(`↓${this.vm.runRxText} ↑${this.vm.runTxText}`)
+          .fontSize('12fp')
+          .fontColor($r('app.color.share_secondary_text'))
+          .margin({ right: '8vp' })
+      }
       Toggle({ type: ToggleType.Switch, isOn: this.data.open!! })
+        .selectedColor($r('app.color.wg_theme_primary'))
         .size({
           width: '50vp',
           height: '28vp',
@@ -348,13 +557,14 @@ struct MainItemView {
           this.vm.closeOther(this.data.id)
           this.data.onClick();
         })
+        .enabled(this.data.toggleEnable && vpnToggleState.phase === 'idle')
         .onChange((isOn: boolean) => {
           this.data.openChange(this.getUIContext(), isOn);
         })
     }
     .padding({ left: '16vp', right: '16vp' })
     .width('100%')
-    .height('60vp')
+    .constraintSize({ minHeight: '60vp' })
   }
 }
 

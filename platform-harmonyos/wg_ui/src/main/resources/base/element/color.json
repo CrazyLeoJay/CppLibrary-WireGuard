@@ -75,6 +75,74 @@
     {
       "name": "share_unselected_border",
       "value": "#FFCCCCCC"
+    },
+    {
+      "name": "swipe_delete_bg_color",
+      "value": "#FFE84026"
+    },
+    {
+      "name": "swipe_delete_text_color",
+      "value": "#FFFFFF"
+    },
+    {
+      "name": "wg_run_status_ok",
+      "value": "#2A5F1E"
+    },
+    {
+      "name": "wg_run_status_warn",
+      "value": "#B25F00"
+    },
+    {
+      "name": "wg_run_status_error",
+      "value": "#D83931"
+    },
+    {
+      "name": "wg_run_status_banner_bg",
+      "value": "#14000000"
+    },
+    {
+      "name": "wg_divider_color",
+      "value": "#33000000"
+    },
+    {
+      "name": "wg_theme_primary",
+      "value": "#FF345FDE"
+    },
+    {
+      "name": "wg_seg_unselected_bg",
+      "value": "#1A000000"
+    },
+    {
+      "name": "wg_input_border",
+      "value": "#33000000"
+    },
+    {
+      "name": "wg_state_on",
+      "value": "#34C759"
+    },
+    {
+      "name": "wg_state_busy",
+      "value": "#FF9F0A"
+    },
+    {
+      "name": "wg_state_off",
+      "value": "#FF3B30"
+    },
+    {
+      "name": "wg_error_banner_bg",
+      "value": "#FFFCE8E8"
+    },
+    {
+      "name": "wg_error_banner_text",
+      "value": "#FFC62828"
+    },
+    {
+      "name": "wg_status_ok",
+      "value": "#2A5F1E"
+    },
+    {
+      "name": "wg_status_error",
+      "value": "#D83931"
     }
   ]
 }

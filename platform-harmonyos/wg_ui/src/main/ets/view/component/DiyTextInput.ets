@@ -133,7 +133,7 @@ export struct DiyTextInput {
       .width('100%')
       .border({
         width: '1vp',
-        color: (this.inputEnable && this.isFocused) ? this.bgSelectColor : Color.Black,
+        color: (this.inputEnable && this.isFocused) ? this.bgSelectColor : $r('app.color.wg_input_border'),
         radius: 6
       })
       .backgroundColor(this.bgColor)

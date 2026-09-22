@@ -31,6 +31,7 @@ import { WireGuard } from 'wg_tunnel/src/main/ets/model/WGHelper';
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import WGConfigPreViewParams from '../entity/WGConfigPreViewParams';
 import WGConfigPreViewModel, { IconSwitchBtnParam } from '../view_model/WGConfigPreViewModel';
+import { vpnToggleState } from '../view_model/VpnToggleService';
 import { SymbolGlyphModifier } from '@kit.ArkUI';
 import { WireGuardNav } from '../../../../Index';
 import { SubEventCancel } from 'wg_tunnel/src/main/ets/model/WGEvent';
@@ -54,26 +55,6 @@ export struct WGConfigPreViewNavDest {
   build() {
     NavDestination() {
       WGConfigPreView({ vm: this.vm })
-
-      // Swiper() {
-      //   SwiperTitleLineView({
-      //     rightTag: "左滑查看日志"
-      //   }) {
-      //     WGConfigPreView({ vm: this.vm })
-      //   }
-      //
-      //   SwiperTitleLineView({
-      //     leftTag: "右滑回到主页"
-      //   }) {
-      //     WGConfigPreViewStreamLogView({ vm: this.vm })
-      //   }
-      // }
-      // .loop(false)
-      // .width('100%')
-      // .height('100%')
-      // .onSelected((index) => {
-      //   this.subTitle = index == 0 ? "配置预览" : "VPN日志"
-      // })
     }
     // .hideTitleBar(true)
     .title(`WireGuard：${this.vm.configName}`)
@@ -81,6 +62,10 @@ export struct WGConfigPreViewNavDest {
     //   main: `WireGuard：${this.vm.configName}`,
     //   sub: this.subTitle,
     // })
+    .onBackPressed(() => {
+      this.vm.nav.pop({});
+      return true;
+    })
     .onReady((data) => {
       if (data.pathStack instanceof NavPathStack) {
         this.vm.nav = data.pathStack
@@ -90,7 +75,6 @@ export struct WGConfigPreViewNavDest {
         const params = data.pathInfo.param as WGConfigPreViewParams;
         this.vm.params = params;
         this.vm.loadData(params);
-        // 打开预览界面时主动查询VPN状态，获取VPN进程实际连接IP
         WireGuard.event.publishVpnStatusQuery();
       } else {
         LLog.warn(TAG, "未得到参数！")
@@ -146,9 +130,9 @@ export default struct WGConfigPreView {
             "启动异常，没有读取到参数。如果您是第一次碰到这个异常，请尝试重新开启是否能解决。后续将不会有这个问题。\n这个异常是第一次启动VPN时，需要用户确认，用户确认后，系统会自动生成新的启动参数导致后台服务接收错误，此时只需要重新开启即可。\n如还有问题，可以通过设置中的指导提交问题反馈。\n点击这个消息可以关闭本消息。")
             .width('100%')
             .cardBackgroundStyle()
-            .backgroundColor('#ffff7676')
+            .backgroundColor($r('app.color.wg_error_banner_bg'))
             .margin({ left: '16vp', right: '16vp' })
-            .fontColor('#fff')
+            .fontColor($r('app.color.wg_error_banner_text'))
             .layoutWeight(1)
             .onClick(() => {
               this.vm.isVPNNoGetParamThrow = false
@@ -380,15 +364,27 @@ struct InterfaceCardView {
       }
       .cardBackgroundStyle()
 
+      if (this.vm.busyText != undefined) {
+        Text(this.vm.busyText)
+          .fontSize('12fp')
+          .fontColor($r('sys.color.font_tertiary'))
+          .layoutGravity(LocalizedAlignment.TOP_END)
+          .margin({
+            top: '30vp',
+            right: '100vp',
+          })
+      }
       Toggle({
         type: ToggleType.Switch,
         isOn: this.vm.isVpnOpen!!,
       })
+        .selectedColor($r('app.color.wg_theme_primary'))
         .layoutGravity(LocalizedAlignment.TOP_END)
         .margin({
           top: '24vp',
           right: '40vp',
         })
+        .enabled(this.vm.isSwitchEnable && vpnToggleState.phase === 'idle')
         .onChange((isOn) => {
           this.vm.onSwitchChange(this.getUIContext(), isOn)
         })
@@ -490,7 +486,11 @@ struct PeerCardView {
 
       Column({ space: ConfigColumnSpace }) {
         Text(`连接保活时间`).width('100%').TagStyle()
-        Text(`每隔 ${this.data.keepaliveInterval ?? 25} 秒`).width('100%').TagContentStyle()
+        if (this.data.keepaliveInterval) {
+          Text(`每隔 ${this.data.keepaliveInterval ?? 0} 秒`).width('100%').TagContentStyle()
+        } else {
+          Text(`不发送心跳包`).width('100%').TagContentStyle()
+        }
       }
 
       if (this.vm.isVpnOpen) {

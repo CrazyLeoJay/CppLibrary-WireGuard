@@ -20,7 +20,7 @@ import { SymbolGlyphModifier } from '@ohos.arkui.modifier';
 import { DiyTextInput as WgCardTextInput } from './component/DiyTextInput';
 import PeerEditConfig from 'wg_tunnel/src/main/ets/model/entity/PeerEditConfig';
 import WGEditConfigParams from '../entity/WGEditConfigParams';
-import { LLog, DnsResolveMode, AppFilterMode, WGSettingsPrefs, AppFilterItem } from 'wg_tunnel';
+import { LLog, DnsResolveMode, DnsScope, AppFilterMode, WGSettingsPrefs, AppFilterItem } from 'wg_tunnel';
 import { pasteboard } from '@kit.BasicServicesKit';
 
 const TAG = "编辑界面";
@@ -274,6 +274,7 @@ struct AppFilterEditModule {
           type: ToggleType.Switch,
           isOn: this.isFilterOn,
         })
+          .selectedColor($r('app.color.wg_theme_primary'))
           .onChange((isOn: boolean) => {
             if (isOn) {
               const defaultMode = WGSettingsPrefs.getDefaultFilterMode();
@@ -299,7 +300,7 @@ struct AppFilterEditModule {
         // 提示文字
         Text(this.modeHintText)
           .fontSize('12fp')
-          .fontColor(Color.Gray)
+          .fontColor($r('sys.color.font_tertiary'))
           .width('100%')
 
         // 包名输入行列表
@@ -315,7 +316,7 @@ struct AppFilterEditModule {
               } else {
                 SymbolGlyph($r('sys.symbol.square_grid_2x2'))
                   .fontSize('24fp')
-                  .fontColor([Color.Gray])
+                  .fontColor([$r('sys.color.font_tertiary')])
               }
 
               if (it.item.isShared) {
@@ -365,17 +366,17 @@ struct AppFilterEditModule {
         Row() {
           SymbolGlyph($r('sys.symbol.plus'))
             .fontSize('16fp')
-            .fontColor([Color.Gray])
+            .fontColor([$r('sys.color.font_tertiary')])
           Text('添加应用')
             .fontSize('14fp')
-            .fontColor(Color.Gray)
+            .fontColor($r('sys.color.font_tertiary'))
         }
         .width('100%')
         .justifyContent(FlexAlign.Center)
         .padding('12vp')
         .border({
           width: 1,
-          color: Color.Gray,
+          color: $r('app.color.wg_input_border'),
           radius: 6,
           style: BorderStyle.Dashed,
         })
@@ -383,34 +384,35 @@ struct AppFilterEditModule {
           this.vm.client.filterApps.push({ bundleName: '', isShared: false });
         })
 
-        // 从剪贴板获取按钮
-        Row() {
-          Text(this.clipboardButtonText)
-            .fontSize('14fp')
-            .fontColor(Color.Gray)
-            .maxLines(2)
-            .textOverflow({ overflow: TextOverflow.Ellipsis })
-        }
-        .width('100%')
-        .justifyContent(FlexAlign.Center)
-        .padding('12vp')
-        .border({
-          width: 1,
-          color: Color.Gray,
-          radius: 6,
-          style: BorderStyle.Solid,
-        })
-        .onClick(() => {
-          const context = this.getUIContext().getHostContext() as Context;
-          this.vm.addFromClipboard(context).catch((e: BusinessError) => {
-            LLog.warn(TAG, `addFromClipboard failed: ${JSON.stringify(e)}`);
-          });
-        })
+        // // 从剪贴板获取按钮
+        // // 不许删除此段注释代码。 由于华为官方权限申请问题，隐私协议和权限对不上，导致无法发布，先注释这个功能，等修复成功后再开放。
+        // Row() {
+        //   Text(this.clipboardButtonText)
+        //     .fontSize('14fp')
+        //     .fontColor(Color.Gray)
+        //     .maxLines(2)
+        //     .textOverflow({ overflow: TextOverflow.Ellipsis })
+        // }
+        // .width('100%')
+        // .justifyContent(FlexAlign.Center)
+        // .padding('12vp')
+        // .border({
+        //   width: 1,
+        //   color: Color.Gray,
+        //   radius: 6,
+        //   style: BorderStyle.Solid,
+        // })
+        // .onClick(() => {
+        //   const context = this.getUIContext().getHostContext() as Context;
+        //   this.vm.addFromClipboard(context).catch((e: BusinessError) => {
+        //     LLog.warn(TAG, `addFromClipboard failed: ${JSON.stringify(e)}`);
+        //   });
+        // })
 
         // 说明文字
         Text('因系统限制，无法获取已安装应用列表，需手动输入应用包名')
           .fontSize('12fp')
-          .fontColor(Color.Gray)
+          .fontColor($r('sys.color.font_tertiary'))
           .width('100%')
       }
     }
@@ -421,7 +423,7 @@ struct AppFilterEditModule {
   buildModeTab(mode: AppFilterMode, desc: string) {
     Text(desc)
       .fontSize('12fp')
-      .fontColor(this.vm.client.filterMode === mode ? Color.White : Color.Gray)
+      .fontColor(this.vm.client.filterMode === mode ? Color.White : $r('sys.color.font_secondary'))
       .backgroundColor(this.vm.client.filterMode === mode
         ? $r('app.color.wg_new_card_item_select_color')
         : Color.Transparent)
@@ -495,7 +497,7 @@ struct PeerEditCardView {
 
       Row() {
         Text(this.data.addressCheckMessage)
-          .fontColor(this.data.addressVerify ? Color.Green : Color.Red)
+          .fontColor(this.data.addressVerify ? $r('app.color.wg_status_ok') : $r('app.color.wg_status_error'))
           .fontSize('12fp')
           .layoutWeight(1)
           .layoutGravity(LocalizedAlignment.START)
@@ -504,7 +506,7 @@ struct PeerEditCardView {
       .layoutWeight(0)
       .width("100%")
 
-      // 仅域名时显示解析偏好四选一与解析测试
+      // 仅域名时显示解析偏好四选一、解析范围二选一与解析测试
       if (this.data.isDomain) {
         Column({ space: '8vp' }) {
           Text("DNS解析偏好")
@@ -517,6 +519,18 @@ struct PeerEditCardView {
             this.buildDnsModeTab(DnsResolveMode.PREFER_IPV6, "优先IPv6")
             this.buildDnsModeTab(DnsResolveMode.FORCE_IPV6, "强制IPv6")
             this.buildDnsModeTab(DnsResolveMode.FORCE_IPV4, "强制IPv4")
+          }
+          .width('100%')
+
+          Text("解析范围")
+            .fontSize('14fp')
+            .width('100%')
+            .layoutGravity(LocalizedAlignment.START)
+          // 单行横排两个选项卡：本地DNS可能对自家DDNS域名返回NAT硬回流内网IP，
+          // 优先广域网时私网结果自动改用公网DNS解析的广域网地址
+          Row({ space: '8vp' }) {
+            this.buildDnsScopeTab(DnsScope.PREFER_WAN, "优先广域网")
+            this.buildDnsScopeTab(DnsScope.PREFER_LOCAL, "优先本地")
           }
           .width('100%')
         }
@@ -563,7 +577,7 @@ struct PeerEditCardView {
   buildDnsModeTab(mode: DnsResolveMode, desc: string) {
     Text(desc)
       .fontSize('12fp')
-      .fontColor(this.data.dnsMode == mode ? Color.White : Color.Gray)
+      .fontColor(this.data.dnsMode == mode ? Color.White : $r('sys.color.font_secondary'))
       .backgroundColor(this.data.dnsMode == mode
         ? $r('app.color.wg_new_card_item_select_color')
         : Color.Transparent)
@@ -578,6 +592,28 @@ struct PeerEditCardView {
       .layoutWeight(1)
       .onClick(() => {
         this.data.dnsMode = mode;
+      })
+  }
+
+  @Builder
+  buildDnsScopeTab(scope: DnsScope, desc: string) {
+    Text(desc)
+      .fontSize('12fp')
+      .fontColor(this.data.dnsScope == scope ? Color.White : $r('sys.color.font_secondary'))
+      .backgroundColor(this.data.dnsScope == scope
+        ? $r('app.color.wg_new_card_item_select_color')
+        : Color.Transparent)
+      .borderRadius('8vp')
+      .padding({
+        top: '6vp',
+        bottom: '6vp',
+        left: '4vp',
+        right: '4vp'
+      })
+      .textAlign(TextAlign.Center)
+      .layoutWeight(1)
+      .onClick(() => {
+        this.data.dnsScope = scope;
       })
   }
 }
