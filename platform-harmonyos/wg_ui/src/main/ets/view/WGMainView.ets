@@ -21,8 +21,17 @@ import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
 import { WGConf, WireGuard, vpnRunStatusState, StreamLogMessage, VpnEventTag } from 'wg_tunnel';
+import { floatingMaterial, supportsImmersiveMaterial } from '../ui/WGImmersiveMaterial';
 
 const TAG = "WG主页";
+
+/** 鸿蒙7内嵌卡片行：系统卡片底色（深浅色自适应）+ 系统圆角档 + 行间距 */
+@Extend(ListItem)
+function mainRowCardStyle() {
+  .backgroundColor($r('sys.color.comp_background_primary'))
+  .borderRadius($r('sys.float.corner_radius_level4'))
+  .margin({ bottom: '8vp' })
+}
 
 /** 删除粒子消散覆盖层的定位（vp，相对主页根Stack） */
 interface WgDeleteFx {
@@ -388,8 +397,12 @@ export struct WGMainView {
       }
       .width('45vp')
       .aspectRatio(1)
-      .backgroundColor($r(`app.color.wg_float_button_backgroud_color`))
+      // 鸿蒙7沉浸光感：API26+改ULTRA_THIN浮动件材质（透明底+按压形变+光感流光），
+      // 材质在背景色之下故背景须透明；旧系统undefined忽略回落原浅青纯色
+      .backgroundColor(supportsImmersiveMaterial()
+        ? Color.Transparent : $r(`app.color.wg_float_button_backgroud_color`))
       .borderRadius($r('sys.float.corner_radius_level5'))
+      .systemMaterial(floatingMaterial())
       .layoutGravity(LocalizedAlignment.BOTTOM_END)
       .margin({ bottom: '32vp', right: "32vp" })
       // .position({ x: '80%', y: '85%' }) // 右下角位置
@@ -423,6 +436,7 @@ export struct WGMainView {
                 });
               })
           }
+          .mainRowCardStyle()
           .swipeAction({
             end: {
               builder: () => {
@@ -446,11 +460,8 @@ export struct WGMainView {
     }
     .width('100%')
     .layoutWeight(1)
-    .divider({
-      strokeWidth: '1vp',
-      color: $r('app.color.wg_divider_color'),
-    })
-
+    // 鸿蒙7内嵌卡片行：行自带卡片底/圆角，分割线由行间距替代
+    .padding({ left: '12vp', right: '12vp', top: '4vp' })
   }
 
   /**

@@ -45,3 +45,70 @@ export function panelMaterial(): uiMaterial.Material | undefined {
   }
   return new uiMaterial.ImmersiveMaterial({ style: uiMaterial.ImmersiveStyle.REGULAR });
 }
+
+/**
+ * 弹窗材质：ULTRA_THICK 超厚档（官方弹窗推荐档），模糊最强，内容可读性最高。
+ * 注意：材质视觉在 backgroundColor 之下，启用方须把背景设为透明；
+ * applyShadow=false 保留调用方自定义 shadow（材质自带阴影会覆盖通用 shadow）。
+ */
+export function dialogMaterial(): uiMaterial.Material | undefined {
+  if (!supportsImmersiveMaterial()) {
+    return undefined;
+  }
+  return new uiMaterial.ImmersiveMaterial({
+    style: uiMaterial.ImmersiveStyle.ULTRA_THICK,
+    applyShadow: false,
+  });
+}
+
+/** 菜单材质：THICK 厚档（官方菜单推荐档），bindMenu 等弹出菜单用 */
+export function menuMaterial(): uiMaterial.Material | undefined {
+  if (!supportsImmersiveMaterial()) {
+    return undefined;
+  }
+  return new uiMaterial.ImmersiveMaterial({ style: uiMaterial.ImmersiveStyle.THICK });
+}
+
+/**
+ * 卡片材质：REGULAR 常规档 + 可选交互形变/光感流光。
+ * 列表卡片、设置分组等静态内容面用默认；可点按的入口卡片开 interactive。
+ */
+export function cardMaterial(interactive: boolean = false, lightEffect: boolean = false)
+  : uiMaterial.Material | undefined {
+  if (!supportsImmersiveMaterial()) {
+    return undefined;
+  }
+  if (lightEffect) {
+    return new uiMaterial.ImmersiveMaterial({
+      style: uiMaterial.ImmersiveStyle.REGULAR,
+      interactive: true,
+      lightEffect: { color: undefined },
+    });
+  }
+  return new uiMaterial.ImmersiveMaterial({
+    style: uiMaterial.ImmersiveStyle.REGULAR,
+    interactive: interactive,
+  });
+}
+
+/**
+ * 浮动控件材质：ULTRA_THIN 超薄档（官方浮动工具推荐档）+ 按压弹性形变 +
+ * 光感流光。FAB、悬浮工具条等小面积浮动件用；薄材质折射边框明显，
+ * 内容型容器勿用（可读性用 cardMaterial）。
+ */
+export function floatingMaterial(lightEffect: boolean = true): uiMaterial.Material | undefined {
+  if (!supportsImmersiveMaterial()) {
+    return undefined;
+  }
+  if (lightEffect) {
+    return new uiMaterial.ImmersiveMaterial({
+      style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+      interactive: true,
+      lightEffect: { color: undefined },
+    });
+  }
+  return new uiMaterial.ImmersiveMaterial({
+    style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+    interactive: true,
+  });
+}

@@ -152,6 +152,8 @@ struct WGSettingView {
     .width('100%')
     .height('100%')
     .listStyle()
+    // 鸿蒙7内嵌卡片：列表两侧留边，功能区块以卡片呈现
+    .padding({ left: '12vp', right: '12vp' })
   }
 
   /**
@@ -228,42 +230,51 @@ struct WGSettingView {
   }
 
   /**
-   * 应用基础功能
+   * 应用基础功能（鸿蒙7分组卡片：两行一组，组内分割线）
    */
   @LocalBuilder
   buildBaseFuns() {
-    ListItem() {
-      Column({ space: '4vp' }) {
-        Text("导出隧道配置")
-          .defaultTagTitleStyle()
-        Text("导出配置为zip文件在下载目录中")
-          .width('100%')
-          .fontSize('12fp')
-      }
-      .onClick(() => {
-        this.vm.saveConfigToZip(this.getUIContext()).catch((e: BusinessError) => {
-          LLog.error(TAG, e)
+    ListItemGroup() {
+      ListItem() {
+        Column({ space: '4vp' }) {
+          Text("导出隧道配置")
+            .defaultTagTitleStyle()
+          Text("导出配置为zip文件在下载目录中")
+            .width('100%')
+            .fontSize('12fp')
+        }
+        .onClick(() => {
+          this.vm.saveConfigToZip(this.getUIContext()).catch((e: BusinessError) => {
+            LLog.error(TAG, e)
+          })
         })
-      })
-      .layoutWeight(1)
-      .itemRowStyle()
-    }
-    ListItem() {
-      Column({ space: '4vp' }) {
-        Text("修复网络")
-          .defaultTagTitleStyle()
-        Text(this.networkStatusText)
-          .width('100%')
-          .fontSize('12fp')
+        .layoutWeight(1)
+        .itemRowStyle()
       }
-      .onClick(() => {
-        this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
-          LLog.error(TAG, e)
+      ListItem() {
+        Column({ space: '4vp' }) {
+          Text("修复网络")
+            .defaultTagTitleStyle()
+          Text(this.networkStatusText)
+            .width('100%')
+            .fontSize('12fp')
+        }
+        .onClick(() => {
+          this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
+            LLog.error(TAG, e)
+          })
         })
-      })
-      .layoutWeight(1)
-      .itemRowStyle()
+        .layoutWeight(1)
+        .itemRowStyle()
+      }
     }
+    .divider({
+      strokeWidth: '1vp',
+      color: $r('app.color.wg_divider_color'),
+      startMargin: '16vp',
+      endMargin: '16vp',
+    })
+    .settingGroupCardStyle()
   }
 
   /**
@@ -290,6 +301,10 @@ struct WGSettingView {
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallEnabled })
             .selectedColor($r('app.color.wg_theme_primary'))
+            .onChange((isOn: boolean) => {
+              // 点开关本体也能切换（此前只有整行onClick，点开关被Toggle消费无效果）
+              this.vm.toggleFloatBall(this.getUIContext());
+            })
         }
         .width('100%')
       }
@@ -301,6 +316,7 @@ struct WGSettingView {
         this.vm.toggleFloatBall(this.getUIContext());
       })
     }
+    .settingCardStyle()
   }
 
   /**
@@ -338,6 +354,7 @@ struct WGSettingView {
       .layoutWeight(1)
       .itemRowStyle()
     }
+    .settingCardStyle()
   }
 
   /**
@@ -427,6 +444,7 @@ struct WGSettingView {
         this.vm.toggleDefaultFilterMode();
       })
     }
+    .settingCardStyle()
   }
 
   /**
@@ -453,6 +471,10 @@ struct WGSettingView {
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.developerMode })
             .selectedColor($r('app.color.wg_theme_primary'))
+            .onChange((isOn: boolean) => {
+              // 点开关本体也能切换（同悬浮球开关行）
+              this.vm.toggleDeveloperMode();
+            })
         }
         .width('100%')
       }
@@ -464,6 +486,7 @@ struct WGSettingView {
         this.vm.toggleDeveloperMode();
       })
     }
+    .settingCardStyle()
   }
 
   @LocalBuilder
@@ -577,6 +600,7 @@ struct WGSettingView {
       }
     }
     .listGroupStyle()
+    .settingGroupCardStyle()
   }
 
   showWechatQRCodeDialog() {
@@ -642,6 +666,20 @@ function listStyle() {
     strokeWidth: '1vp',
     color: $r('app.color.wg_divider_color'),
   })
+}
+
+/** 鸿蒙7内嵌卡片：独立功能行（系统卡片底色深浅色自适应 + 系统圆角档） */
+@Extend(ListItem)
+function settingCardStyle() {
+  .backgroundColor($r('sys.color.comp_background_primary'))
+  .borderRadius($r('sys.float.corner_radius_level4'))
+}
+
+/** 鸿蒙7内嵌卡片：分组容器 */
+@Extend(ListItemGroup)
+function settingGroupCardStyle() {
+  .backgroundColor($r('sys.color.comp_background_primary'))
+  .borderRadius($r('sys.float.corner_radius_level4'))
 }
 
 @Extend(ListItemGroup)
