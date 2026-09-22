@@ -18,8 +18,16 @@ import WGSettingViewModel from '../view_model/WGOfMeViewModel';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ComponentContent, promptAction } from '@kit.ArkUI';
 import BuildProfile from '../../../../BuildProfile';
+import {
+  CustomSectionArg,
+  CustomSettingsSection,
+  getCustomSettingsSections,
+} from '../custom/WGCustomGate';
 
 const TAG = "设置界面"
+
+/** 区块 builder 共享入参（区块组件自包含） */
+const SECTION_ARG: CustomSectionArg = {};
 
 /**
  * 设置界面
@@ -47,6 +55,12 @@ struct WGSettingViewNavDest {
       if (info.pathInfo instanceof NavPathStack) {
         this.vm.nav = info.pathStack
       }
+    })
+    // 页面重新可见：转发给定制区块（如授权返回后同步开关实际状态）
+    .onShown(() => {
+      getCustomSettingsSections().forEach((section: CustomSettingsSection) => {
+        section.onShown?.();
+      });
     })
     .title("设置")
     // 鸿蒙7内嵌卡片：页面二级灰底衬托卡片（深浅色自适应）
@@ -113,14 +127,12 @@ struct WGSettingView {
       this.buildStatement()
       // ===== 导出隧道配置 =====
       this.buildBaseFuns();
-      // ===== 悬浮球（闭源定制接入后显示；开源构建未注册门面则隐藏） =====
-      if (this.vm.floatBallAvailable) {
-        this.buildFloatBall();
-      }
-      // ===== 悬浮球测试（仅 debug 构建显示，绕过开关直接拉起悬浮窗） =====
-      if (BuildProfile.DEBUG && this.vm.floatBallAvailable) {
-        this.buildFloatBallDebug();
-      }
+      // ===== 定制模块贡献的设置区块（免费/开源构建注册表为空则不渲染） =====
+      ForEach(getCustomSettingsSections(), (section: CustomSettingsSection) => {
+        if (section.visible()) {
+          section.builder.builder(SECTION_ARG)
+        }
+      }, (section: CustomSettingsSection) => section.id)
       // ===== 应用过滤配置 =====
       this.buildBaseSetting();
 
@@ -279,110 +291,6 @@ struct WGSettingView {
     .settingGroupCardStyle()
   }
 
-  /**
-   * 悬浮球开关（照开发者模式 Toggle 行范式）
-   */
-  @LocalBuilder
-  buildFloatBall() {
-    ListItem() {
-      Column({ space: '8vp' }) {
-        Text('悬浮球')
-          .defaultTagTitleStyle()
-
-        Row() {
-          Column({ space: '2vp' }) {
-            Text('桌面悬浮球')
-              .fontSize('16fp')
-            Text('在其他应用上层悬浮显示连接状态，支持快捷检查网络与回到应用')
-              .fontSize('12fp')
-              .fontColor($r('sys.color.font_tertiary'))
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          Blank()
-          Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallEnabled })
-            .selectedColor($r('app.color.wg_theme_primary'))
-            // 点击统一由整行onClick处理：Toggle不拦截触摸，避免onChange与
-            // 行onClick同拍双触发（一次点击切两次等于没切）
-            .hitTestBehavior(HitTestMode.None)
-        }
-        .width('100%')
-
-        Divider()
-          .color($r('app.color.wg_divider_color'))
-          .strokeWidth(1)
-
-        Row() {
-          Column({ space: '2vp' }) {
-            Text('VPN关闭时显示')
-              .fontSize('16fp')
-            Text('关闭后悬浮球仅在VPN连接期间显示，断开即隐藏')
-              .fontSize('12fp')
-              .fontColor($r('sys.color.font_tertiary'))
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          Blank()
-          Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallShowWhenVpnOff })
-            .selectedColor($r('app.color.wg_theme_primary'))
-            // 点击统一由整行onClick处理（同主开关行，防双触发）
-            .hitTestBehavior(HitTestMode.None)
-        }
-        .width('100%')
-        .onClick(() => {
-          this.vm.toggleFloatBallShowWhenVpnOff();
-        })
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      .itemRowStyle()
-      .onClick(() => {
-        // 点击整行切换悬浮球
-        this.vm.toggleFloatBall(this.getUIContext());
-      })
-    }
-    .settingCardStyle()
-  }
-
-  /**
-   * 悬浮球测试入口（仅 debug 构建显示）：绕过开关配置直接拉起悬浮窗，
-   * 隔离"悬浮窗能否创建显示"与"悬浮球开关"两个问题；结果用Toast回报
-   */
-  @LocalBuilder
-  buildFloatBallDebug() {
-    ListItem() {
-      Column({ space: '8vp' }) {
-        Text('悬浮球测试')
-          .defaultTagTitleStyle()
-
-        Row() {
-          Column({ space: '2vp' }) {
-            Text('直接拉起悬浮球')
-              .fontSize('16fp')
-            Text('无论上方悬浮球开关是否开启，点击立即创建并显示悬浮窗')
-              .fontSize('12fp')
-              .fontColor($r('sys.color.font_tertiary'))
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          Blank()
-          Button('拉起')
-            .buttonStyle(ButtonStyleMode.NORMAL)
-            .onClick(() => {
-              this.vm.debugOpenFloatBall(this.getUIContext());
-            })
-        }
-        .width('100%')
-      }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      .itemRowStyle()
-    }
-    .settingCardStyle()
-  }
 
   /**
    * 应用基础设置

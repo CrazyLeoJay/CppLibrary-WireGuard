@@ -20,7 +20,6 @@ import { LLog, networkResidueState, vpnKeepAliveManager, WireGuard, WGSettingsPr
 import fs from '@ohos.file.fs';
 import { zlib } from '@kit.BasicServicesKit';
 import { fileUri, picker } from '@kit.CoreFileKit';
-import { getFloatBallGate } from '../custom/WGCustomGate';
 
 const TAG = "设置界面"
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -49,14 +48,6 @@ export default class WGSettingViewModel {
   @Trace appVersion: string = ""
   @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
   @Trace defaultFilterMode: number = WGSettingsPrefs.getDefaultFilterMode();
-  @Trace floatBallEnabled: boolean = getFloatBallGate()?.isEnabled() ?? false;
-  /** VPN关闭时是否仍显示悬浮球（false=跟随VPN，仅连接期间显示；默认跟随） */
-  @Trace floatBallShowWhenVpnOff: boolean = getFloatBallGate()?.isShowWhenVpnOff() ?? false;
-
-  /** 悬浮球入口是否可用（闭源定制已接入=true；开源构建未注册恒false，入口隐藏） */
-  get floatBallAvailable(): boolean {
-    return getFloatBallGate() != undefined;
-  }
   email: string = email
 
   constructor(nav: NavPathStack) {
@@ -112,54 +103,6 @@ export default class WGSettingViewModel {
       : AppFilterMode.EXCLUDED;
     WGSettingsPrefs.setDefaultFilterMode(this.defaultFilterMode);
     LLog.info(TAG, `默认过滤模式切换为: ${this.defaultFilterMode === AppFilterMode.INCLUDED ? '白名单' : '黑名单'}`);
-  }
-
-  /**
-   * 同步悬浮球开关显示状态（页面可见时调用）：
-   * 授权返回自动补开发生在EntryAbility层，页面不可感知，靠这里对齐
-   */
-  syncFloatBallEnabled(): void {
-    this.floatBallEnabled = getFloatBallGate()?.isEnabled() ?? false;
-    this.floatBallShowWhenVpnOff = getFloatBallGate()?.isShowWhenVpnOff() ?? false;
-  }
-
-  /**
-   * 切换"VPN关闭时是否显示悬浮球"（实现侧持久化并即时生效，这里只同步显示）
-   */
-  toggleFloatBallShowWhenVpnOff(): void {
-    const gate = getFloatBallGate();
-    if (gate == undefined) {
-      return;
-    }
-    gate.setShowWhenVpnOff(!gate.isShowWhenVpnOff());
-    this.floatBallShowWhenVpnOff = gate.isShowWhenVpnOff();
-  }
-
-  /**
-   * 【debug测试入口】绕过悬浮球开关直接拉起悬浮窗（仅debug构建可见）：
-   * 隔离"悬浮窗能否创建显示"与"开关配置"，Toast回报结果便于真机定位
-   */
-  debugOpenFloatBall(context: UIContext): void {
-    const gate = getFloatBallGate();
-    if (gate == undefined) {
-      context.getPromptAction().showToast({ message: '测试失败：未接入悬浮球' });
-      return;
-    }
-    gate.debugShow(context);
-  }
-
-  /**
-   * 切换悬浮球（设置页开关；权限申请/挂起补开/提示交互全部内聚在
-   * 定制实现侧，这里只经门面委托并同步最终落定状态）
-   */
-  toggleFloatBall(context: UIContext): void {
-    const gate = getFloatBallGate();
-    if (gate == undefined) {
-      return;
-    }
-    gate.toggle(context, (enabled: boolean) => {
-      this.floatBallEnabled = enabled;
-    });
   }
 
   clickToWireGuardWebSite(context: UIContext) {

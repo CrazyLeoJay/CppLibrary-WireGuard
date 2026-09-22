@@ -17,6 +17,13 @@ import { AbilityConstant, ConfigurationConstant, UIAbility, Want } from '@kit.Ab
 import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { LLog, SubEventCancel, VpnConfigAction, WGEventThrow, WireGuard, WGSettingsPrefs, vpnKeepAliveManager } from 'wg_tunnel';
+import {
+  dispatchAppBackground,
+  dispatchAppCreate,
+  dispatchAppDestroy,
+  dispatchAppForeground,
+  dispatchMainWindowReady,
+} from 'wg_ui';
 
 const TAG = "EntryAbility"
 
@@ -59,6 +66,9 @@ export default class EntryAbility extends UIAbility {
     // backgroundTaskManager要求UIAbilityContext，因此在EntryAbility中传入context并attach
     vpnKeepAliveManager.attach(this.context);
 
+    // 定制功能装配（付费隔离点）：悬浮球/卡片同步等经 wg_ui 通用注册表分发，
+    dispatchAppCreate(this.context);
+
     // 订阅VEA配置请求与VPN异常事件（UI层职责，与保活机制解耦）
     this.subscribeVpnConfigQueryIfNeeded();
     this.subscribeVpnThrowIfNeeded();
@@ -87,23 +97,30 @@ export default class EntryAbility extends UIAbility {
       } catch (e) {
         LLog.error(TAG, `获取UIContext失败: ${(e as BusinessError).message}`);
       }
+      // 主窗口就绪：定制窗口类功能（悬浮球上屏等）经注册表分发
+      dispatchMainWindowReady();
     });
   }
 
   onWindowStageDestroy(): void {
     LLog.info(TAG, 'Ability onWindowStageDestroy');
+    dispatchAppDestroy();
   }
 
   onForeground(): void {
     LLog.info(TAG, 'Ability onForeground');
     // 交保活管理器处理：VPN运行中立即查询状态并做一次隧道健康检查
     vpnKeepAliveManager.onAppForeground();
+    // 定制前台钩子（如悬浮球授权返回自动补开）
+    dispatchAppForeground();
   }
 
   onBackground(): void {
     LLog.info(TAG, 'Ability onBackground');
     // 交保活管理器处理：VPN运行中但长时任务被停止时重新吊起
     vpnKeepAliveManager.onAppBackground();
+    // 定制后台钩子（如悬浮球常驻任务兜底）
+    dispatchAppBackground();
   }
 
   /**
