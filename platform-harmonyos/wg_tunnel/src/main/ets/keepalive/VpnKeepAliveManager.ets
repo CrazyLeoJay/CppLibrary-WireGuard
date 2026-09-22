@@ -305,12 +305,17 @@ export class VpnRunStatusState {
    * @param ts 目标时刻ms
    */
   formatGapBefore(now: number, ts: number): string {
-    if (ts <= 0 || ts > now) {
+    if (ts <= 0) {
       return '无';
+    }
+    if (ts >= now) {
+      // 时刻领先当前基准不算"无"：UI的nowTick每秒才刷新，刚写入的时刻会
+      // 领先它最多1秒，此时应显示刚刚
+      return '刚刚';
     }
     const sec = Math.floor((now - ts) / 1000);
     if (sec < 60) {
-      return `${sec}秒前`;
+      return sec <= 0 ? '刚刚' : `${sec}秒前`;
     }
     if (sec < 3600) {
       return `${Math.floor(sec / 60)}分钟前`;

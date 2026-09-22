@@ -26,7 +26,8 @@ import { VpnRunStatusState } from '../main/ets/keepalive/VpnKeepAliveManager';
  *
  * 【用例组织】每个 it 验证一条文案行为：构造状态 + 断言完整文案。
  * 覆盖：Socket异常提示（含保鲜窗口/成功恢复清提示）、连接中两阶段、
- * 已连接收/发双方向秒/分/小时换算、无收包/无发包的"无"占位、未来时刻防御。
+ * 已连接收/发双方向秒/分/小时换算、无收包/无发包的"无"占位（仅零值）、
+ * 未来时刻与不足1秒显示刚刚。
  * 文案不含配置名：主页开关行的选中态已表明当前配置。
  */
 
@@ -131,14 +132,21 @@ export default function vpnRunStatusTextTest() {
       expect(text).assertEqual('已连接 · 收2秒前 发8秒前');
     });
 
-    it('formatGap_未来时刻防御返回无', 0, () => {
+    it('formatGap_未来时刻视为刚刚', 0, () => {
       const s = makeState();
-      expect(s.formatGapBefore(BASE, BASE + 1000)).assertEqual('无');
+      // UI的nowTick每秒刷新，刚写入的时刻会领先它最多1秒：应显示刚刚而非无
+      expect(s.formatGapBefore(BASE, BASE + 1000)).assertEqual('刚刚');
     });
 
     it('formatGap_零值返回无', 0, () => {
       const s = makeState();
       expect(s.formatGapBefore(BASE, 0)).assertEqual('无');
+    });
+
+    it('formatGap_不足1秒显示刚刚', 0, () => {
+      const s = makeState();
+      expect(s.formatGapBefore(BASE, BASE - 500)).assertEqual('刚刚');
+      expect(s.formatGapBefore(BASE, BASE)).assertEqual('刚刚');
     });
 
     it('formatGap_分钟小时换算', 0, () => {
