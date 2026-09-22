@@ -5,4 +5,7 @@ export * from './src/main/ets/view_model/WGMainViewModel';
 export * from './src/main/ets/view/WGEditConfigView';
 export * from './src/main/ets/view/WGSettingView';
 export * from './src/main/ets/view/ShareConfigView';
+export * from './src/main/ets/ui/WGImmersiveMaterial';
+export * from './src/main/ets/view_model/VpnToggleService';
+export * from './src/main/ets/custom/WGCustomGate';
 

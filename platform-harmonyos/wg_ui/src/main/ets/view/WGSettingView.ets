@@ -111,6 +111,14 @@ struct WGSettingView {
       this.buildStatement()
       // ===== 导出隧道配置 =====
       this.buildBaseFuns();
+      // ===== 悬浮球（闭源定制接入后显示；开源构建未注册门面则隐藏） =====
+      if (this.vm.floatBallAvailable) {
+        this.buildFloatBall();
+      }
+      // ===== 悬浮球测试（仅 debug 构建显示，绕过开关直接拉起悬浮窗） =====
+      if (BuildProfile.DEBUG && this.vm.floatBallAvailable) {
+        this.buildFloatBallDebug();
+      }
       // ===== 应用过滤配置 =====
       this.buildBaseSetting();
 
@@ -292,6 +300,43 @@ struct WGSettingView {
         // 点击整行切换悬浮球
         this.vm.toggleFloatBall(this.getUIContext());
       })
+    }
+  }
+
+  /**
+   * 悬浮球测试入口（仅 debug 构建显示）：绕过开关配置直接拉起悬浮窗，
+   * 隔离"悬浮窗能否创建显示"与"悬浮球开关"两个问题；结果用Toast回报
+   */
+  @LocalBuilder
+  buildFloatBallDebug() {
+    ListItem() {
+      Column({ space: '8vp' }) {
+        Text('悬浮球测试')
+          .defaultTagTitleStyle()
+
+        Row() {
+          Column({ space: '2vp' }) {
+            Text('直接拉起悬浮球')
+              .fontSize('16fp')
+            Text('无论上方悬浮球开关是否开启，点击立即创建并显示悬浮窗')
+              .fontSize('12fp')
+              .fontColor($r('sys.color.font_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Blank()
+          Button('拉起')
+            .buttonStyle(ButtonStyleMode.NORMAL)
+            .onClick(() => {
+              this.vm.debugOpenFloatBall(this.getUIContext());
+            })
+        }
+        .width('100%')
+      }
+      .alignItems(HorizontalAlign.Start)
+      .layoutWeight(1)
+      .itemRowStyle()
     }
   }
 
