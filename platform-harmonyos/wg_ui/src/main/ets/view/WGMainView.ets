@@ -110,6 +110,8 @@ export struct WGMainViewNavDest {
       main: $r('app.string.app_name'),
       sub: $r('app.string.sub_title'),
     })
+    // 鸿蒙7内嵌卡片：页面二级灰底衬托卡片行（深浅色自适应）
+    .backgroundColor($r('sys.color.background_secondary'))
     // 菜单文案用静态标签：NavDestination.menus 的动态文案在V2下不随状态刷新，
     // 当前值改为点击后toast反馈（排序字段/方向/显示信息）
     .menus([

@@ -49,6 +49,8 @@ struct WGSettingViewNavDest {
       }
     })
     .title("设置")
+    // 鸿蒙7内嵌卡片：页面二级灰底衬托卡片（深浅色自适应）
+    .backgroundColor($r('sys.color.background_secondary'))
   }
 }
 
@@ -662,10 +664,6 @@ function tagStyle() {
 function listStyle() {
   .width('100%')
   // .height('100%')
-  .divider({
-    strokeWidth: '1vp',
-    color: $r('app.color.wg_divider_color'),
-  })
 }
 
 /** 鸿蒙7内嵌卡片：独立功能行（系统卡片底色深浅色自适应 + 系统圆角档） */
