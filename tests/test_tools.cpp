@@ -74,6 +74,30 @@ TEST(tools_conf, readWireGuardConfFileToJson) {
 
 }
 
+// ========== Interface Address 无掩码（无CIDR）测试 ==========
+
+static const char* no_cidr_conf = R"(
+[Interface]
+PrivateKey = CKvZGm8S0HoQUwvUIsZ8wd39Bqt/5Z5vaJNuKX4LHGI=
+Address = 10.0.0.2
+DNS = 8.8.8.8
+[Peer]
+PublicKey = sMDHZrFHvyZKaYe1NYCy9+r2iR2DSQlcIFVFpeAh32A=
+Endpoint = your.server.com:51820
+AllowedIPs = 0.0.0.0/0
+PersistentKeepalive = 25
+)";
+
+// Address 不带掩码属于正常情况：IP正常解析，cidr保持-1，回写时不补默认掩码
+TEST(tools_conf, address_without_cidr_is_normal) {
+    const auto config = WireGuard::Tools::readConfFileToEntity(no_cidr_conf);
+    EXPECT_EQ(config.inter.ipArea.address.toIpStr(), "10.0.0.2");
+    EXPECT_EQ(config.inter.ipArea.cidr, -1);
+
+    const auto str = WireGuard::Tools::wgConfToOfficialConfigStr(config);
+    EXPECT_NE(str.find("Address=10.0.0.2\n"), std::string::npos);
+}
+
 // ========== 应用过滤配置（ExcludedApplications / IncludedApplications）边界测试 ==========
 
 // 基础配置模板（不含应用过滤），用于拼接测试

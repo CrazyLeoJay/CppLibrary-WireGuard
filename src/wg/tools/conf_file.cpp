@@ -329,11 +329,11 @@ namespace WireGuard {
                 throw WGException("Interface PrivateKey 不能为空");
             }
 
-            if (conf.inter.ipArea.cidr == -1) {
+            if (conf.inter.ipArea.address == IPAddress{}) {
                 throw WGException("Interface Address 不能为空");
             }
 
-            if (!isValidCIDR(conf.inter.ipArea.cidr, conf.inter.ipArea.address.family)) {
+            if (conf.inter.ipArea.cidr != -1 && !isValidCIDR(conf.inter.ipArea.cidr, conf.inter.ipArea.address.family)) {
                 throw WGException("Interface Address CIDR 无效，IPv4 范围应为 0-32，IPv6 范围应为 0-128");
             }
 
@@ -463,6 +463,9 @@ namespace WireGuard {
                             std::string ipStr = value.substr(0, slashPos);
                             conf.inter.ipArea.address = parseIPAddress(ipStr);
                             conf.inter.ipArea.cidr = std::stoi(value.substr(slashPos + 1));
+                        } else {
+                            // 没有掩码属于正常情况，只解析IP，cidr保持-1表示没有掩码
+                            conf.inter.ipArea.address = parseIPAddress(value);
                         }
                     } else if (key == "DNS") {
                         std::vector<std::string> dnsList = split(value, ',');

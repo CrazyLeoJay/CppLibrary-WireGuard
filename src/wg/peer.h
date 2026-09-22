@@ -338,6 +338,11 @@ namespace WireGuard {
          * @return 是否活跃
          */
         bool isActive() const;
+
+        /**
+         * @return 最近一次外发活动（数据/握手/Keepalive发出）的时间
+         */
+        TimePoint lastOutboundActivity() const;
     };
 
 

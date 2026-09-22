@@ -45,11 +45,40 @@ namespace WireGuard {
         close();
         _isFinish.store(false);
 
-        int _socket_domain;
+        const int newFd = createUdpSocketFd();
+        if (newFd == -1) {
+            return -1;
+        }
+        _fd.store(newFd);
+
+        if (port) {
+            // 如果要绑定端口和指定地址。一般是不指定地址
+            try {
+                if (type == DNS::IPV4) {
+                    bindPortForIpv4(newFd, *port, bindAddress);
+                } else {
+                    bindPortForIpv6(newFd, *port, bindAddress);
+                }
+            } catch (...) {
+                // 绑定失败时清理已创建的fd，防止泄漏（close 会将 _fd 等全部复位）
+                close();
+                throw;
+            }
+        }
+
+        // 处理唤醒通道和多路复用实现
+        initEpollFd();
+
+        _initialized = true;
+        return _fd.load();
+    }
+
+    int UDPSocket::createUdpSocketFd() const {
+        int socketDomain;
         if (type == DNS::IPV4) {
-            _socket_domain = AF_INET;
+            socketDomain = AF_INET;
         } else {
-            _socket_domain = AF_INET6;
+            socketDomain = AF_INET6;
         }
         // int socket(int domain, int type, int protocol);
         //  domain：地址族（Address Family）
@@ -62,36 +91,62 @@ namespace WireGuard {
         //  SOCK_RAW：原始套接字
         //  protocol：协议（通常设为 0，由系统根据 type 自动选择）
         //  如 IPPROTO_TCP、IPPROTO_UDP
-        _fd = socket(_socket_domain, SOCK_DGRAM, 0);
+        const int newFd = socket(socketDomain, SOCK_DGRAM, 0);
+        if (newFd == -1) {
+            return -1;
+        }
         if (type == DNS::IPV6) {
             // 2. 允许该 socket 同时接收 IPv4 流量（关闭 IPV6_V6ONLY）
             //    使得 bind 到 :: 后，IPv4 包会被自动映射为 ::ffff:xxx.xxx.xxx.xxx 并接收
             int opt = 0;
-            if (setsockopt(_fd, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0) {
+            if (setsockopt(newFd, IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0) {
                 perror("setsockopt IPV6_V6ONLY");
-                close();
+                ::close(newFd);
                 return -1;
             }
         }
-
-        if (port) {
-            // 如果要绑定端口和指定地址。一般是不指定地址
-            if (type == DNS::IPV4) {
-                bindPortForIpv4(*port, bindAddress);
-            } else {
-                bindPortForIpv6(*port, bindAddress);
-            }
-        }
-
-        // 处理唤醒通道和多路复用实现
-        initEpollFd();
-
-        _initialized = true;
-        return _fd;
+        return newFd;
     }
 
     int UDPSocket::resetSocketFd() {
         return initSocketStart(_port, _bind_address);
+    }
+
+    int UDPSocket::swapSocketFd() {
+        if (!_initialized.load() || epoll_fd_ == -1 || _fd.load() == -1) {
+            // 未初始化或处于 select 退化模式，无法原地换 fd，走完整重建
+            return resetSocketFd();
+        }
+        const int newFd = createUdpSocketFd();
+        if (newFd == -1) {
+            throw WGException("swapSocketFd: 创建新Socket失败");
+        }
+        try {
+            if (_port) {
+                if (type == DNS::IPV4) {
+                    bindPortForIpv4(newFd, *_port, _bind_address);
+                } else {
+                    bindPortForIpv6(newFd, *_port, _bind_address);
+                }
+            }
+            // 从 epoll 移除旧 fd，挂载新 fd；epoll 实例与唤醒管道保持不变，阻塞中的读线程无感知
+            epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, _fd.load(), nullptr);
+            epoll_event ev{};
+            ev.events = EPOLLIN;
+            ev.data.fd = newFd;
+            if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, newFd, &ev) == -1) {
+                throw WGException("swapSocketFd: 将新Socket挂载epoll失败");
+            }
+        } catch (...) {
+            ::close(newFd);
+            throw;
+        }
+        const int oldFd = _fd.exchange(newFd);
+        if (oldFd != -1) {
+            ::close(oldFd);
+        }
+        LOG_SOCKET("swapSocketFd: %d -> %d", oldFd, newFd);
+        return newFd;
     }
 
     ssize_t UDPSocket::read(char *buf, size_t len, Endpoint &endpoint) {
@@ -188,20 +243,19 @@ namespace WireGuard {
         }
 
         if (_fd != -1) {
-            ::close(_fd);
-            // _fd = -1;
+            ::close(_fd.load());
+            _fd.store(-1);
         }
 
         if (epoll_fd_ != -1) {
             ::close(epoll_fd_);
-            // epoll_fd_ = -1;
+            epoll_fd_ = -1;
         }
         // 关闭唤醒通道
         for (int &i: wakeup_pipe_) {
-            const auto wp_fd = i;
-            if (wp_fd != -1) {
-                ::close(wp_fd);
-                // i = -1;
+            if (i != -1) {
+                ::close(i);
+                i = -1;
             }
         }
         _initialized = false;
@@ -209,7 +263,7 @@ namespace WireGuard {
         LOG_DEBUG("socket close finish");
     }
 
-    void UDPSocket::bindPortForIpv4(const uint32_t port, const std::shared_ptr<IPAddress> &bindHost) {
+    void UDPSocket::bindPortForIpv4(const int fd, const uint32_t port, const std::shared_ptr<IPAddress> &bindHost) {
         sockaddr_in addr{};
         addr.sin_family = AF_INET;
         addr.sin_port = htons(port);
@@ -219,13 +273,12 @@ namespace WireGuard {
         } else {
             addr.sin_addr.s_addr = htonl(INADDR_ANY);
         }
-        if (::bind(_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
-            close();
+        if (::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
             throw WGException("绑定到端口异常: %d", port);
         }
     }
 
-    void UDPSocket::bindPortForIpv6(uint32_t port, const std::shared_ptr<IPAddress> &bindHost) {
+    void UDPSocket::bindPortForIpv6(const int fd, uint32_t port, const std::shared_ptr<IPAddress> &bindHost) {
         sockaddr_in6 addr{};
         addr.sin6_family = AF_INET6;
         addr.sin6_port = htons(port);
@@ -235,8 +288,7 @@ namespace WireGuard {
         } else {
             addr.sin6_addr = in6addr_any;
         }
-        if (::bind(_fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
-            close();
+        if (::bind(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0) {
             throw WGException("绑定到端口异常: %d", port);
         }
     }
@@ -281,64 +333,76 @@ namespace WireGuard {
             return -2;
         }
 
-        // 使用 IO 多路复用，防止
-        fd_set read_fds;
-        // 清空 fd_set 集合（必须初始化）
-        FD_ZERO(&read_fds);
+        while (true) {
+            // 使用 IO 多路复用，防止
+            fd_set read_fds;
+            // 清空 fd_set 集合（必须初始化；select会修改集合，EINTR重试时须重新填充）
+            FD_ZERO(&read_fds);
 
-        // 获取最大的fd
-        int max_fd = fd;
-        // 将 UDP socket 文件描述符加入监听集合
-        FD_SET(fd, &read_fds);
+            // 获取最大的fd
+            int max_fd = fd;
+            // 将 UDP socket 文件描述符加入监听集合
+            FD_SET(fd, &read_fds);
 
-        if (wakeup_fd != -1) {
-            if (max_fd < wakeup_fd) {
-                max_fd = wakeup_fd;
+            if (wakeup_fd != -1) {
+                if (max_fd < wakeup_fd) {
+                    max_fd = wakeup_fd;
+                }
+                // 将自管道的读端（wakeup_pipe_[0]）也加入监听集合，
+                // 这样当有停止信号写入管道时，select 会立即返回
+                FD_SET(wakeup_fd, &read_fds);
             }
-            // 将自管道的读端（wakeup_pipe_[0]）也加入监听集合，
-            // 这样当有停止信号写入管道时，select 会立即返回
-            FD_SET(wakeup_fd, &read_fds);
-        }
 
-        // 调用 select 阻塞等待，直到以下任 一 情况发生：
-        //   - UDP socket 有数据可读
-        //   - 自管道有数据可读（即收到停止信号）
-        //   - 发生错误
-        // 第四个参数 timeout 为 nullptr，表示无限期阻塞
-        int activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
-        // 如果 select 返回负值，说明发生错误（如被信号中断等）
-        if (activeFd < 0) {
-            return -2;
-        }
+            // 调用 select 阻塞等待，直到以下任 一 情况发生：
+            //   - UDP socket 有数据可读
+            //   - 自管道有数据可读（即收到停止信号）
+            //   - 发生错误
+            // 第四个参数 timeout 为 nullptr，表示无限期阻塞
+            int activeFd = ::select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
+            // 如果 select 返回负值，说明发生错误（如被信号中断等）
+            if (activeFd < 0) {
+                if (errno == EINTR) {
+                    // 被信号打断不属于错误，重试等待（此前误返回-2导致读线程被当成正常关闭退出）
+                    continue;
+                }
+                return -2;
+            }
 
-        // 检查是否是自管道可读（即收到了停止信号）
-        if (wakeup_fd != -1 && FD_ISSET(wakeup_fd, &read_fds)) {
-            pip_read_wake();
-            return -2;
-        }
-
-        // 如果不是停止信号，那么应该是 socket 数据
-        if (_fd.load() != -1 && FD_ISSET(fd, &read_fds)) {
-            return pip_read_socket(buf, len, endpoint);
-        }
-        return -2;
-    }
-
-    ssize_t UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
-        const int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
-        if (nfds == -1) {
-            return -2;
-        }
-        for (int i = 0; i < nfds; ++i) {
-            const int fd = events[i].data.fd;
-            if (fd == _fd.load()) {
-                return pip_read_socket(buf, len, endpoint);
-            } else if (fd == wakeup_pipe_[0]) {
+            // 检查是否是自管道可读（即收到了停止信号）
+            if (wakeup_fd != -1 && FD_ISSET(wakeup_fd, &read_fds)) {
                 pip_read_wake();
                 return -2;
             }
+
+            // 如果不是停止信号，那么应该是 socket 数据
+            if (_fd.load() != -1 && FD_ISSET(fd, &read_fds)) {
+                return pip_read_socket(buf, len, endpoint);
+            }
+            return -2;
         }
-        return -2;
+    }
+
+    ssize_t UDPSocket::read_epoll(char *buf, size_t len, Endpoint &endpoint) {
+        while (true) {
+            const int nfds = epoll_wait(epoll_fd_, events, MAX_EVENTS, -1);
+            if (nfds == -1) {
+                if (errno == EINTR) {
+                    // 被信号打断不属于错误，重试等待（此前误返回-2导致读线程被当成正常关闭退出）
+                    continue;
+                }
+                return -2;
+            }
+            for (int i = 0; i < nfds; ++i) {
+                const int fd = events[i].data.fd;
+                if (fd == _fd.load()) {
+                    return pip_read_socket(buf, len, endpoint);
+                } else if (fd == wakeup_pipe_[0]) {
+                    pip_read_wake();
+                    return -2;
+                }
+            }
+            return -2;
+        }
     }
 
     void UDPSocket::pip_read_wake() const {

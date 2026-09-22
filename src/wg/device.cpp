@@ -49,12 +49,8 @@ namespace WireGuard {
     }
 
     Device::~Device() {
-        try {
-            LOG_INFO("析构 Device 关闭");
-            close();
-        } catch (const std::exception &e) {
-            LOG_ERROR("设备关闭Close方法异常：%{public}s", e.what());
-        }
+        LOG_INFO("析构 Device 关闭");
+        close();
     }
 
     uint32_t Device::initSocketStart(const std::function<void(int &)> &onSocketFDChange) {
@@ -75,12 +71,16 @@ namespace WireGuard {
         this->tunFd = tunFd;
         isRunning.store(true, std::memory_order_release);
         isLoopTunRunning.store(true, std::memory_order_release);
+        // 先置位防启动竞态：心跳守护（ensureSocketReadLoop）在读线程函数进入前
+        // 探测到false会误判"读线程死亡"而join掉健康线程
+        isSocketRunning.store(true, std::memory_order_release);
         // 启动心跳线程
         _loopSocketHeartbeatTask = std::thread(&Device::loopSocketHeartbeatTask, this);
         // 轮询读取远端 Socket 数据包
         _loopSocketTask = std::thread(&Device::loopReceiveForSocket, this);
         // 轮询读取本地 VPN 虚拟网卡数据包
         _loopTunFdTask = std::thread(&Device::loopReceiveForTun, this);
+        // 线程创建异常不在此捕获：向上抛出，由NAPI胶水层捕获转ArkTS走正常异常流程
         LOG_INFO("device start end");
     }
 
@@ -106,8 +106,12 @@ namespace WireGuard {
         LOG_INFO("Tun read task stoped");
 
         // 等待Socket读取线程结束
-        if (_loopSocketTask.joinable()) {
-            _loopSocketTask.join();
+        // 加锁防止与心跳线程的读线程守护（ensureSocketReadLoop）并发 join/重建
+        {
+            std::lock_guard<std::mutex> lockReadLoop(_readLoopMutex);
+            if (_loopSocketTask.joinable()) {
+                _loopSocketTask.join();
+            }
         }
         LOG_INFO("socket read task stoped");
 
@@ -128,6 +132,14 @@ namespace WireGuard {
         _peers.clear();
         LOG_INFO("device 清除Peers");
         LOG_INFO("关闭设备通信并清除数据");
+        // 异常不在此捕获：向上抛出，由NAPI胶水层捕获转ArkTS走正常异常流程
+    }
+
+    int Device::swapSocket() {
+        const int fd = socket.swapSocketFd();
+        LOG_SOCKET("swapSocket 新fd=%{public}d", fd);
+        socketNewFd(fd);
+        return fd;
     }
 
     void Device::sendPacket(const uint8_t *data, const size_t len) const {
@@ -162,141 +174,260 @@ namespace WireGuard {
     }
 
     void Device::loopSocketHeartbeatTask() {
-        LOG_INFO("开启心跳+清理任务");
-        std::vector<std::shared_ptr<Peer> > peers{};
-        while (isRunning.load(std::memory_order_acquire)) {
-            // 睡眠等待任务由 Tools::PipeWait 实现，
-            // 当需要结束时，会由通道唤醒，所以这里正常25s睡眠即可
-            std::chrono::milliseconds nextSleepDuration = std::chrono::seconds(25);
-            {
-                std::lock_guard<std::mutex> lock(_peerMutex);
-                peers.clear();
-                if (_peers.size() > peers.capacity()) {
-                    peers.reserve(_peers.size());
-                }
-                for (const auto &it: _peers) {
-                    if (it.second) {
-                        peers.push_back(it.second);
+        // 【线程不可逃逸】任何异常逃逸线程顶层都会std::terminate→进程崩溃(SIGABRT)，
+        // 函数级catch(...)兜底，异常时上报后线程退出，由主进程健康守护走重启恢复
+        try {
+            LOG_INFO("开启心跳+清理任务");
+            std::vector<std::shared_ptr<Peer> > peers{};
+            while (isRunning.load(std::memory_order_acquire)) {
+                // 迭代级兜底：守护/加锁/清理/等待中的未知异常不允许杀死线程
+                try {
+                    // 守护 socket 读线程：读线程因致命异常退出且自愈耗尽时，在此重新拉起
+                    ensureSocketReadLoop();
+
+                    // 睡眠等待任务由 Tools::PipeWait 实现，需要结束时由通道唤醒。
+                    // 默认睡眠从25s收敛为5s：守护检查(ensureSocketReadLoop)随每轮迭代执行，
+                    // 心跳/握手的实际发送时机由各peer的waitTime在每轮迭代中精确计算，
+                    // 提高唤醒频率不影响发送时机，仅将读线程死亡的最坏发现时间从25s收敛到5s
+                    // （读线程退出时还会主动notify唤醒本线程，5s只是兜底上限）
+                    std::chrono::milliseconds nextSleepDuration = std::chrono::seconds(5);
+                    {
+                        std::lock_guard<std::mutex> lock(_peerMutex);
+                        peers.clear();
+                        if (_peers.size() > peers.capacity()) {
+                            peers.reserve(_peers.size());
+                        }
+                        for (const auto &it: _peers) {
+                            if (it.second) {
+                                peers.push_back(it.second);
+                            }
+                        }
                     }
-                }
-            }
 
             for (const auto &peer: peers) {
                 if (!peer) {
                     continue;
                 }
 
+                // 握手失联判死上报（握手维护统一到C层）：外发活跃但2分钟无任何入站。
+                // 放在循环最前：握手从未成功的场景（isCanSendData()==false分支）也要覆盖
+                checkPeerStale(peer);
+
                 if (!peer->isCanSendData()) {
-                    // 如果还没准备好，但触发了心跳，那就发送握手，而不是心跳包
-                    LOG_DEBUG(
-                        "发现有Peer还未准备好，则发起握手 当前 iAmInitiator=%{public}s",
-                        peer->getIAmInitiator() ? "发起者" : "接收者"
-                    );
-                    try {
-                        sendInitiation(peer);
-                        peer->updateHeartbeatPacketSendTime();
-                    } catch (const std::exception &e) {
-                        // 一般是创建的太频繁，这里等2秒再循环 或者直接调用握手
-                        LOG_WARN(
-                            "发送握手初始化失败 peerIndex=%{public}zu err=%{public}s，2秒后重试", peer->getIndex(),
-                            e.what()
-                        );
-                    }
-                    nextSleepDuration = std::chrono::seconds(2);
-                    continue;
-                }
-
-                // 判断发送心跳包还需要等待的时间
-                auto waitTime = peer->heartbeatPacketSendWaitTime();
-
-                if (waitTime == std::chrono::milliseconds(0)) {
-                    if (peer->canSendHeartbeatPacket()) {
-                        // 发送心跳包需要判断段是否需要发送，如果间隔时间为0，则只需要判断握手即可
-                        try {
-                            encryptPacketAndSendSocket(peer, nullptr, 0); // 发送心跳包
-                            peer->updateHeartbeatPacketSendTime();
-                            // 成功后计算下一次时间
-                            const auto keep = std::chrono::seconds(peer->getKeepaliveInterval());
-                            const auto keep_ms = std::chrono::duration_cast<std::chrono::milliseconds>(keep);
-                            nextSleepDuration = std::min(nextSleepDuration, keep_ms);
-                        } catch (const std::exception &e) {
-                            // 如果发送发生异常，就设置一个小的等待时间，再次尝试
-                            LOG_WARN(
-                                "心跳发送数据包失败 peerIndex=%{public}zu err=%{public}s，1秒后重试", peer->getIndex(),
-                                e.what()
+                            // 如果还没准备好，但触发了心跳，那就发送握手，而不是心跳包
+                            LOG_DEBUG(
+                                "发现有Peer还未准备好，则发起握手 当前 iAmInitiator=%{public}s",
+                                peer->getIAmInitiator() ? "发起者" : "接收者"
                             );
-                            nextSleepDuration = std::chrono::seconds(1);
+                            try {
+                                sendInitiation(peer);
+                                peer->updateHeartbeatPacketSendTime();
+                            } catch (const std::exception &e) {
+                                // 一般是创建的太频繁，这里等2秒再循环 或者直接调用握手
+                                LOG_WARN(
+                                    "发送握手初始化失败 peerIndex=%{public}zu err=%{public}s，2秒后重试",
+                                    peer->getIndex(),
+                                    e.what()
+                                );
+                            }
+                            nextSleepDuration = std::chrono::seconds(2);
+                            continue;
                         }
-                    }
+
+                        // 判断发送心跳包还需要等待的时间
+                        auto waitTime = peer->heartbeatPacketSendWaitTime();
+
+                        if (waitTime == std::chrono::milliseconds(0)) {
+                            if (peer->canSendHeartbeatPacket()) {
+                                // 发送心跳包需要判断段是否需要发送，如果间隔时间为0，则只需要判断握手即可
+                                try {
+                                    encryptPacketAndSendSocket(peer, nullptr, 0); // 发送心跳包
+                                    peer->updateHeartbeatPacketSendTime();
+                                    // 成功后计算下一次时间
+                                    const auto keep = std::chrono::seconds(peer->getKeepaliveInterval());
+                                    const auto keep_ms = std::chrono::duration_cast<std::chrono::milliseconds>(keep);
+                                    nextSleepDuration = std::min(nextSleepDuration, keep_ms);
+                                } catch (const std::exception &e) {
+                                    // 如果发送发生异常，就设置一个小的等待时间，再次尝试
+                                    LOG_WARN(
+                                        "心跳发送数据包失败 peerIndex=%{public}zu err=%{public}s，1秒后重试",
+                                        peer->getIndex(),
+                                        e.what()
+                                    );
+                                    nextSleepDuration = std::chrono::seconds(1);
+                                }
+                            }
                 } else {
                     nextSleepDuration = std::min(nextSleepDuration, waitTime);
                 }
             }
 
-            // 执行清理任务
-            indexMapClear();
+                    // 执行清理任务
+                    indexMapClear();
 
-            // 根据最短时间设置睡眠时间，否则就睡默认值s数
-            // 即使在退出心跳任务时，这个任务不需要等待结束，在后台默默退出即可
-            pipWaitForHeartbeatTask.wait(nextSleepDuration);
-            LOG_DEBUG("pip wait callback");
+                    // 根据最短时间设置睡眠时间，否则就睡默认值s数
+                    // 即使在退出心跳任务时，这个任务不需要等待结束，在后台默默退出即可
+                    pipWaitForHeartbeatTask.wait(nextSleepDuration);
+                    LOG_DEBUG("pip wait callback");
+                } catch (const std::exception &e) {
+                    LOG_ERROR("心跳轮询异常(线程继续运行)：%{public}s", e.what());
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                } catch (...) {
+                    LOG_ERROR("心跳轮询未知异常(线程继续运行)");
+                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                }
+            }
+            LOG_INFO("心跳任务结束");
+        } catch (const std::exception &e) {
+            LOG_ERROR("心跳任务异常退出：%{public}s", e.what());
+            reportSocketEvent(std::string("心跳线程异常退出: ") + e.what());
+        } catch (...) {
+            LOG_ERROR("心跳任务未知异常退出");
+            reportSocketEvent("心跳线程未知异常退出");
         }
-        LOG_INFO("心跳任务结束");
     }
 
     void Device::loopReceiveForSocket() {
-        LOG_INFO("开始Socket读取任务");
+        // 【线程不可逃逸】函数级catch(...)兜底：异常时上报后退出，由心跳守护重新拉起
+        try {
+            LOG_INFO("开始Socket读取任务");
 
-        std::vector<char> buffer(65536);
-        Endpoint endpoint;
-        isSocketRunning = true;
-        int i = 0;
-        while (isRunning.load(std::memory_order_acquire) && isSocketRunning.load(std::memory_order_acquire) &&
-               socket.isRunning()) {
-            try {
-                LOG_INFO("socket read for count=%{public}d begin", ++i);
-                const ssize_t received = socket.read(buffer.data(), buffer.size(), endpoint);
-                LOG_INFO("socket read for count=%{public}d red end, received=%{public}zd", i, received);
-                if (received < 0) {
+            std::vector<char> buffer(65536);
+            Endpoint endpoint;
+            isSocketRunning = true;
+            int i = 0;
+            int resetRetries = 0;
+            while (isRunning.load(std::memory_order_acquire) && isSocketRunning.load(std::memory_order_acquire) &&
+                   socket.isRunning()) {
+                try {
+                    LOG_INFO("socket read for count=%{public}d begin", ++i);
+                    const ssize_t received = socket.read(buffer.data(), buffer.size(), endpoint);
+                    // 立即捕获errno，避免后续日志调用覆盖错误码
+                    const int readErrno = errno;
+                    LOG_INFO("socket read for count=%{public}d red end, received=%{public}zd", i, received);
+                    if (received < 0) {
+                        if (!isRunning.load(std::memory_order_acquire) ||
+                            !isSocketRunning.load(std::memory_order_acquire)) {
+                            break;
+                        }
+                        if (received == -2) {
+                            // 多路复用层真实错误（关闭信号走SOCKET_CLOSE_SING异常路径，不会到这）：
+                            // 线程将退出，按报错策略经回调通知（心跳守护会自动重新拉起，不算崩溃）
+                            LOG_WARN("socket读循环多路复用层异常(-2)，线程退出等待守护重新拉起");
+                            reportSocketEvent("Socket读线程因多路复用错误退出，等待守护重新拉起");
+                            break;
+                        }
+                        if (readErrno == EAGAIN || readErrno == EWOULDBLOCK) {
+                            std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                            continue;
+                        }
+                        LOG_SOCKET("Socket读错误 errno=%{public}d，尝试重建", readErrno);
+                        if (!recoverSocketReadLoop(resetRetries)) {
+                            break;
+                        }
+                        continue;
+                    }
+                    resetRetries = 0;
+                    Logs::print_space([&]() {
+                        LOG_SOCKET(
+                            "数据流:Socket接收目标 %{public}s len: %{public}zd", endpoint.address.toIpStr().c_str(),
+                            received
+                        );
+                    });
+                    // 将读取的数据写出
+                    processSocketPacket(buffer.data(), static_cast<size_t>(received), endpoint);
+                    LOG_INFO("socket read for count=%{public}d finish", i);
+                } catch (const WGException &e) {
+                    if (e.type == WGErrType::SOCKET_CLOSE_SING) {
+                        // 正常断开，无需打印日志
+                        break;
+                    }
+                    LOG_ERROR("socket 异常中断： %{public}s", e.what());
                     if (!isRunning.load(std::memory_order_acquire) ||
                         !isSocketRunning.load(std::memory_order_acquire)) {
                         break;
                     }
-                    if (received == -2) {
+                    // 致命异常不再直接退出线程：有限次重建fd自愈，耗尽才上报死亡事件并退出
+                    if (!recoverSocketReadLoop(resetRetries)) {
                         break;
                     }
-                    if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
-                        continue;
+                } catch (const std::exception &e) {
+                    LOG_ERROR("socket 异常中断： %{public}s", e.what());
+                    if (!isRunning.load(std::memory_order_acquire) ||
+                        !isSocketRunning.load(std::memory_order_acquire)) {
+                        break;
                     }
-                    auto fd = socket.resetSocketFd();
-                    LOG_SOCKET("更换Socket fd=%{public}d", fd);
-                    socketNewFd(fd);
-                    continue;
-                }
-                Logs::print_space([&]() {
-                    LOG_SOCKET(
-                        "数据流:Socket接收目标 %{public}s len: %{public}zd", endpoint.address.toIpStr().c_str(),
-                        received
-                    );
-                });
-                // 将读取的数据写出
-                processSocketPacket(buffer.data(), static_cast<size_t>(received), endpoint);
-                LOG_INFO("socket read for count=%{public}d finish", i);
-            } catch (const WGException &e) {
-                if (e.type == WGErrType::SOCKET_CLOSE_SING) {
-                    // 正常断开，无需打印日志
+                    if (!recoverSocketReadLoop(resetRetries)) {
+                        break;
+                    }
+                } catch (...) {
+                    // 非std异常不允许逃逸线程顶层：上报后退出，由心跳守护重新拉起
+                    LOG_ERROR("socket 读循环未知异常，线程退出等待守护拉起");
+                    reportSocketEvent("Socket读线程未知异常退出");
                     break;
                 }
-                LOG_ERROR("socket 异常中断： %{public}s", e.what());
-                break;
-            } catch (const std::exception &e) {
-                LOG_ERROR("socket 异常中断： %{public}s", e.what());
-                break;
             }
+        } catch (const std::exception &e) {
+            LOG_ERROR("Socket读取任务异常退出：%{public}s", e.what());
+            reportSocketEvent(std::string("Socket读线程异常退出: ") + e.what());
+        } catch (...) {
+            LOG_ERROR("Socket读取任务未知异常退出");
+            reportSocketEvent("Socket读线程未知异常退出");
         }
+        // 无条件复位运行标记：保证心跳守护能探测到线程退出并重新拉起
         isSocketRunning = false;
         LOG_INFO("Socket读取任务(%{public}d) 读取停止", socket.fd());
+        // 唤醒心跳线程立即执行读线程守护检查（事件驱动重新拉起，
+        // 否则最长要等一个睡眠周期5s才发现线程死亡）
+        pipWaitForHeartbeatTask.notify();
+    }
+
+    bool Device::recoverSocketReadLoop(int &retries) {
+        constexpr int MAX_RESET_RETRIES = 3;
+        while (retries < MAX_RESET_RETRIES) {
+            retries++;
+            try {
+                const int fd = socket.resetSocketFd();
+                LOG_SOCKET("Socket重建成功 fd=%{public}d (第%{public}d次重试)", fd, retries);
+                socketNewFd(fd);
+                return true;
+            } catch (const std::exception &e) {
+                LOG_ERROR("Socket重建失败(第%{public}d次)：%{public}s", retries, e.what());
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+            }
+        }
+        // 自愈耗尽：上报链路死亡事件，交由宿主（ArkTS）决定重连策略
+        reportSocketEvent("Socket读线程自愈重试耗尽，链路已死亡");
+        return false;
+    }
+
+    void Device::ensureSocketReadLoop() {
+        if (!isRunning.load(std::memory_order_acquire) || isSocketRunning.load(std::memory_order_acquire)) {
+            return;
+        }
+        // 【线程不可逃逸】锁/日志/线程创建全部纳入try，任何异常不允许逃逸心跳线程顶层
+        try {
+            std::lock_guard<std::mutex> lock(_readLoopMutex);
+            // 双重检查：拿到锁后状态可能已被 close() 或上一轮守护改变
+            if (!isRunning.load(std::memory_order_acquire) || isSocketRunning.load(std::memory_order_acquire)) {
+                return;
+            }
+            LOG_WARN("检测到Socket读线程已退出，尝试重新拉起");
+            // 先占住运行标记防止重复进入，拉起失败时回滚
+            isSocketRunning.store(true, std::memory_order_release);
+            try {
+                if (_loopSocketTask.joinable()) {
+                    _loopSocketTask.join();
+                }
+                _loopSocketTask = std::thread(&Device::loopReceiveForSocket, this);
+            } catch (...) {
+                // 线程资源耗尽(system_error)或分配失败(bad_alloc)等一律回滚等待下轮重试
+                LOG_ERROR("Socket读线程重新拉起失败，等待下轮重试");
+                isSocketRunning.store(false, std::memory_order_release);
+            }
+        } catch (...) {
+            LOG_ERROR("Socket读线程守护执行异常");
+        }
     }
 
     void Device::processSocketPacket(const char *data, size_t len, const Endpoint &endpoint) {
@@ -323,30 +454,43 @@ namespace WireGuard {
     }
 
     void Device::loopReceiveForTun() {
-        LOG_INFO("开始VPN Tun读取任务");
-        std::vector<uint8_t> buffer(TUN_READ_BUFFER_SIZE);
-        while (isRunning.load(std::memory_order_acquire) && isLoopTunRunning.load(std::memory_order_acquire) &&
-               tunFd.load(std::memory_order_acquire) > 0) {
-            try {
-                // 读取网卡数据
-                ssize_t readLen = readFromLocal(buffer.data(), TUN_READ_BUFFER_SIZE);
-                if (readLen <= 0) {
-                    if (errno != EAGAIN) {
-                        if (tunFd < 0 || !isLoopTunRunning.load(std::memory_order_acquire)) {
-                            break;
+        // 【线程不可逃逸】函数级catch(...)兜底：任何异常不允许逃逸线程顶层导致进程崩溃
+        try {
+            LOG_INFO("开始VPN Tun读取任务");
+            std::vector<uint8_t> buffer(TUN_READ_BUFFER_SIZE);
+            while (isRunning.load(std::memory_order_acquire) && isLoopTunRunning.load(std::memory_order_acquire) &&
+                   tunFd.load(std::memory_order_acquire) > 0) {
+                try {
+                    // 读取网卡数据
+                    ssize_t readLen = readFromLocal(buffer.data(), TUN_READ_BUFFER_SIZE);
+                    if (readLen <= 0) {
+                        if (errno != EAGAIN) {
+                            if (tunFd < 0 || !isLoopTunRunning.load(std::memory_order_acquire)) {
+                                break;
+                            }
                         }
+                        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                        continue;
                     }
-                    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                    //                LOG_WARN("读取到数据：%{public}zd", readLen);
+                    consumeTunData(buffer.data(), readLen);
+                } catch (const std::exception &e) {
+                    LOG_SOCKET("读取异常：%{public}s", e.what());
                     continue;
+                } catch (...) {
+                    // 非std异常不允许杀死线程：记录并继续（带退避防忙转）
+                    LOG_ERROR("Tun读循环未知异常(线程继续运行)");
+                    std::this_thread::sleep_for(std::chrono::milliseconds(100));
                 }
-                //                LOG_WARN("读取到数据：%{public}zd", readLen);
-                consumeTunData(buffer.data(), readLen);
-            } catch (const std::exception &e) {
-                LOG_SOCKET("读取异常：%{public}s", e.what());
-                continue;
             }
+            LOG_INFO("Tun任务(%{public}d) 读取停止", tunFd.load());
+        } catch (const std::exception &e) {
+            LOG_ERROR("Tun读取任务异常退出：%{public}s", e.what());
+            reportSocketEvent(std::string("Tun线程异常退出: ") + e.what());
+        } catch (...) {
+            LOG_ERROR("Tun读取任务未知异常退出");
+            reportSocketEvent("Tun线程未知异常退出");
         }
-        LOG_INFO("Tun任务(%{public}d) 读取停止", tunFd.load());
         isLoopTunRunning = false;
     }
 
@@ -620,31 +764,43 @@ namespace WireGuard {
         //            throw WGException("接收到的加密消息长度不是16倍数len=%d", cipherLen);
         //        }
         auto *msg = reinterpret_cast<const MessageData *>(data);
-        std::lock_guard<std::mutex> guard(_indexMutex);
-        // 简化处理：遍历所有 Peer
-        const uint32_t keyIndex = ntohl(msg->keyIndex);
-        if (_receiverIndexPeers.find(keyIndex) == _receiverIndexPeers.end()) {
-            throw WGException("未找到远端Peer");
+        // 【死锁修复】锁内严禁调用会再次加 _indexMutex 的函数（sendInitiation→createNewIndex），
+        // 同线程对非递归mutex双重加锁会自死锁：读线程永久卡死、隧道静默死亡
+        // （触发条件：密钥过期后收到残留数据包，长寿命会话重握手期间高概率出现）
+        std::shared_ptr<Peer> rehandshakePeer;
+        std::vector<uint8_t> result;
+        {
+            std::lock_guard<std::mutex> guard(_indexMutex);
+            // 简化处理：遍历所有 Peer
+            const uint32_t keyIndex = ntohl(msg->keyIndex);
+            if (_receiverIndexPeers.find(keyIndex) == _receiverIndexPeers.end()) {
+                throw WGException("未找到远端Peer");
+            }
+            if (_keypairIndexPeers.find(keyIndex) == _keypairIndexPeers.end()) {
+                throw WGException("未找到远端KeyPair index=0x%s", crypto::bin2Hex(msg->keyIndex).c_str());
+            }
+            //        // 获取到当前 peer
+            const auto currentPeer = _receiverIndexPeers[keyIndex];
+            // 记录接收的数据
+            currentPeer->addRxBytes(cipherLen);
+            // 发送数据流日志
+            printStreamLog(currentPeer, MessageType::DATA, StreamLog::RECEIVE, len);
+            //        // 解密数据流
+            //        auto result = currentPeer->decryptPacket(msg, len);
+            //        // 获取密钥对
+            const auto kp = _keypairIndexPeers[keyIndex];
+            if (kp.expired()) {
+                // 锁外重握手（见函数头死锁说明）
+                rehandshakePeer = currentPeer;
+            } else {
+                // 解密数据
+                result = kp.lock()->decrypt(msg, len);
+            }
         }
-        if (_keypairIndexPeers.find(keyIndex) == _keypairIndexPeers.end()) {
-            throw WGException("未找到远端KeyPair index=0x%s", crypto::bin2Hex(msg->keyIndex).c_str());
-        }
-        //        // 获取到当前 peer
-        const auto currentPeer = _receiverIndexPeers[keyIndex];
-        // 记录接收的数据
-        currentPeer->addRxBytes(cipherLen);
-        // 发送数据流日志
-        printStreamLog(currentPeer, MessageType::DATA, StreamLog::RECEIVE, len);
-        //        // 解密数据流
-        //        auto result = currentPeer->decryptPacket(msg, len);
-        //        // 获取密钥对
-        const auto kp = _keypairIndexPeers[keyIndex];
-        if (kp.expired()) {
-            sendInitiation(currentPeer); // 如果当前是接收端，这里便会转变角色变成发送端
+        if (rehandshakePeer != nullptr) {
+            sendInitiation(rehandshakePeer); // 如果当前是接收端，这里便会转变角色变成发送端
             throw WGException("keyPair 不存在，需要重新握手");
         }
-        // 解密数据
-        const std::vector<uint8_t> result = kp.lock()->decrypt(msg, len);
         if (result.empty()) {
             LOG_SOCKET("接收到心跳包");
             return;
@@ -799,11 +955,13 @@ namespace WireGuard {
             // 加密数据，并且通过 socket 发送
             socket.write(message.data(), message.size(), endpoint);
             peer->addTxBytes(message.size());
+            _consecutiveSendFailures.store(0, std::memory_order_release);
             // 发送数据流日志
             printStreamLog(peer, MessageType::DATA, StreamLog::SEND, message.size());
         } catch (const std::exception &e) {
-            // 由于发送失败是服务自己原因，这里不去触发重新握手
-            LOG_WARN("socket 发送失败：%{public}s", e.what());
+            // 发送失败通常意味着底层链路问题（网络切换/接口失效/对端不可达），
+            // 累计连续失败并在达到阈值时上报 SOCKET_ERROR，由宿主决定重连策略
+            noteSendFailure(e);
         }
     }
 
@@ -824,7 +982,7 @@ namespace WireGuard {
             }
         } catch (const std::exception &e) {
             // 这里就不重复握手了，如果异常表示之前握手逻辑还是有问题
-            LOG_ERROR("发送缓存数据异常，msg：%{public}s", e.what());
+            noteSendFailure(e);
         }
     }
 
@@ -898,8 +1056,8 @@ namespace WireGuard {
                 now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx},
                 true, "成功发送"
             });
-        } catch (const std::exception &e) {
-            LOG_WARN("[%s] 日志输出异常： %s", LOG_TAG, e.what());
+        } catch (...) {
+            LOG_WARN("[%s] 日志输出异常（已吞掉，日志回调不允许抛出）", LOG_TAG);
         }
     }
 
@@ -919,8 +1077,54 @@ namespace WireGuard {
                 now, peer->getPublicKey(), peer->getIndex(), type, direction, {len, rx, tx},
                 false, message
             });
-        } catch (const std::exception &e) {
-            LOG_WARN("[%s] 日志输出异常： %s", LOG_TAG, e.what());
+        } catch (...) {
+            LOG_WARN("[%s] 日志输出异常（已吞掉，日志回调不允许抛出）", LOG_TAG);
         }
+    }
+
+    void Device::reportSocketEvent(const std::string &message) const {
+        if (!streamLog) {
+            return;
+        }
+        try {
+            streamLog({
+                std::chrono::system_clock::now(), PublicKey{}, 0, MessageType::SOCKET_ERROR, StreamLog::SEND,
+                {0, 0, 0}, false, message
+            });
+        } catch (...) {
+            LOG_WARN("[%s] Socket事件上报异常（已吞掉）", LOG_TAG);
+        }
+    }
+
+    void Device::noteSendFailure(const std::exception &e) const {
+        const int failures = ++_consecutiveSendFailures;
+        LOG_WARN("socket 发送失败(连续%{public}d次)：%{public}s", failures, e.what());
+        if (failures >= SEND_FAILURE_REPORT_THRESHOLD) {
+            _consecutiveSendFailures.store(0, std::memory_order_release);
+            reportSocketEvent(std::string("Socket连续发送失败: ") + e.what());
+        }
+    }
+
+    void Device::checkPeerStale(const std::shared_ptr<Peer> &peer) {
+        const auto now = Clock::now();
+        if (peer->isActive()) {
+            // 有入站，链路健康：清除上报节流标记
+            _staleReportTimes.erase(peer->getIndex());
+            return;
+        }
+        // 外发武装：最近50s（约两个心跳周期）内有握手/数据/心跳发出才判定；
+        // keepalive=0且空闲的隧道没有外发信号，跳过（无法区分空闲与失效）
+        if (now - peer->lastOutboundActivity() > std::chrono::seconds(50)) {
+            return;
+        }
+        // 上报节流：同一Peer 120s内只上报一次
+        const auto it = _staleReportTimes.find(peer->getIndex());
+        if (it != _staleReportTimes.end() && now - it->second < std::chrono::seconds(120)) {
+            return;
+        }
+        _staleReportTimes[peer->getIndex()] = now;
+        LOG_WARN("Peer %zu 外发活跃但超过120s无入站，判定隧道失效并上报", peer->getIndex());
+        printStreamLogThrow(peer, MessageType::SOCKET_ERROR, StreamLog::SEND, 0,
+                             "握手失联超过120s且外发活跃，判定隧道失效，请重建隧道");
     }
 }; // namespace WireGuard

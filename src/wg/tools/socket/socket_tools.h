@@ -68,9 +68,23 @@ namespace WireGuard {
                        const std::shared_ptr<IPAddress> &bindAddress = nullptr);
 
         /**
-         * @return 重置Socket的套接字
+         * @return 重置Socket的套接字（完整重建：关闭旧 fd/epoll/唤醒管道后全部新建）
+         *
+         * 仅允许在 socket 读线程内调用（读线程自愈场景）；
+         * 外部线程触发换 fd 请使用 swapSocketFd()，避免关闭正被 epoll_wait 阻塞的实例。
          */
         int resetSocketFd();
+
+        /**
+         * 仅替换 UDP socket fd 并重新挂载到现有 epoll（唤醒管道与 epoll 实例保持不变）
+         *
+         * 供外部线程（如 NAPI 调用方）在网络切换时按需换 fd，读线程无感知；
+         * epoll/select 退化模式或未初始化时自动降级为 resetSocketFd() 完整重建。
+         *
+         * @return 新的 socket fd
+         * @throws WGException 创建新 socket 或挂载 epoll 失败
+         */
+        int swapSocketFd();
 
         int fd() const { return _fd.load(); }
 
@@ -101,9 +115,16 @@ namespace WireGuard {
         void close();
 
     private:
-        void bindPortForIpv4(uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
+        /**
+         * 按当前 IP 类型创建 UDP socket fd（IPv6 模式下关闭 V6ONLY 以双栈收发）
+         *
+         * @return 新的 socket fd，失败返回 -1
+         */
+        int createUdpSocketFd() const;
 
-        void bindPortForIpv6(uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
+        static void bindPortForIpv4(int fd, uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
+
+        static void bindPortForIpv6(int fd, uint32_t port, const std::shared_ptr<IPAddress> &bindHost);
 
         /**
          * 初始化 epoll 多路复用

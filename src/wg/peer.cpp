@@ -152,6 +152,11 @@ namespace WireGuard {
         return Clock::now() - lastDataReceived_ <= std::chrono::minutes(2);
     }
 
+    TimePoint Peer::lastOutboundActivity() const {
+        const auto latest1 = std::max(lastDataSent_, lastSentHandshake_);
+        return std::max(latest1, lastKeepaliveSent_);
+    }
+
 
     void Peer::init() {
         if (std::all_of(content_key.local_private_key.begin(), content_key.local_private_key.end(), [](uint8_t it) {

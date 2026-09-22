@@ -118,7 +118,15 @@ namespace WireGuard {
                 // 实际应用中可根据需要调整
                 constexpr int count = 1;
                 epoll_event events[count]{};
-                int nfds = ::epoll_wait(epoll_fd_, events, count, timeout_ms);
+                int nfds = 0;
+                while (true) {
+                    nfds = ::epoll_wait(epoll_fd_, events, count, timeout_ms);
+                    if (nfds < 0 && errno == EINTR) {
+                        // 被信号打断不属于错误，重试等待
+                        continue;
+                    }
+                    break;
+                }
                 if (nfds == 0) {
                     return;
                 } else if (nfds < 0) {
