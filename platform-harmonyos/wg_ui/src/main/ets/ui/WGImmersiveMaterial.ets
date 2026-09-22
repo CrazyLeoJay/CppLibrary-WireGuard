@@ -95,10 +95,30 @@ export function cardMaterial(interactive: boolean = false, lightEffect: boolean 
  * 浮动控件材质：ULTRA_THIN 超薄档（官方浮动工具推荐档）+ 按压弹性形变 +
  * 光感流光。FAB、悬浮工具条等小面积浮动件用；薄材质折射边框明显，
  * 内容型容器勿用（可读性用 cardMaterial）。
+ *
+ * tint：半透明赋色（如 '#A6B3F8FD'）。纯色页面上超薄材质无内容可折射会
+ * 完全隐形，赋色让玻璃体/边缘可见（materialColor 需带透明度，纯不透明会
+ * 盖死材质）；低算力设备自动转背景色平滑降级。
  */
-export function floatingMaterial(lightEffect: boolean = true): uiMaterial.Material | undefined {
+export function floatingMaterial(tint?: ResourceColor, lightEffect: boolean = true)
+  : uiMaterial.Material | undefined {
   if (!supportsImmersiveMaterial()) {
     return undefined;
+  }
+  if (tint != undefined && lightEffect) {
+    return new uiMaterial.ImmersiveMaterial({
+      style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+      materialColor: tint,
+      interactive: true,
+      lightEffect: { color: undefined },
+    });
+  }
+  if (tint != undefined) {
+    return new uiMaterial.ImmersiveMaterial({
+      style: uiMaterial.ImmersiveStyle.ULTRA_THIN,
+      materialColor: tint,
+      interactive: true,
+    });
   }
   if (lightEffect) {
     return new uiMaterial.ImmersiveMaterial({

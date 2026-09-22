@@ -133,6 +133,10 @@
       "value": "#FF2F3136"
     },
     {
+      "name": "wg_float_button_glass_tint",
+      "value": "#A62F3136"
+    },
+    {
       "name": "wg_float_button_svg_color",
       "value": "#FFFFFF"
     },
