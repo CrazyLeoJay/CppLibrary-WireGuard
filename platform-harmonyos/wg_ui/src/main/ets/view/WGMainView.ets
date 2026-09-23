@@ -20,7 +20,7 @@ import { ComponentContent, promptAction, SymbolGlyphModifier } from '@kit.ArkUI'
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
-import { WGConf, WireGuard, vpnRunStatusState, StreamLogMessage, VpnEventTag } from 'wg_tunnel';
+import { WGConf, WireGuard, vpnRunStatusState, VpnRunPhase, StreamLogMessage, VpnEventTag } from 'wg_tunnel';
 import { floatingMaterial, supportsImmersiveMaterial } from '../ui/WGImmersiveMaterial';
 
 const TAG = "WG主页";
@@ -336,15 +336,21 @@ export struct WGMainView {
     return vpnRunStatusState.buildStatusText(this.nowTick);
   }
 
-  /** 状态条颜色（深浅色资源自适应）：绿=已连接且心跳新鲜；橙=连接中/心跳久远；红=Socket异常 */
+  /**
+   * 状态条颜色（深浅色资源自适应）：
+   * 绿=已连接且心跳新鲜；橙=启动中/等待握手/心跳久远/关闭中；红=Socket异常；灰=关闭成功
+   */
   get runStatusColor(): ResourceStr {
     const s = vpnRunStatusState;
+    if (s.phase === VpnRunPhase.STOPPED) {
+      return $r('app.color.wg_run_status_idle');
+    }
     const socketErrorFresh = s.socketError !== '' && (this.nowTick - s.socketErrorTime) < 30 * 1000;
     if (socketErrorFresh) {
       return $r('app.color.wg_run_status_error');
     }
     const heartbeatStale = s.lastHeartbeatTime === 0 || (this.nowTick - s.lastHeartbeatTime) > 180 * 1000;
-    if (!s.handshakeOk || heartbeatStale) {
+    if (s.phase === VpnRunPhase.STOPPING || !s.handshakeOk || heartbeatStale) {
       return $r('app.color.wg_run_status_warn');
     }
     return $r('app.color.wg_run_status_ok');
@@ -352,11 +358,12 @@ export struct WGMainView {
 
   /**
    * 运行状态条：标题与配置列表之间的固定单行窗体
-   * 展示当前VPN连接情况——连接是否成功/上次收发数据时间/Socket异常提示
+   * 展示VPN开关全链路的真实状态变化——启动VPN中→服务已启动等待握手→已发起握手→
+   * 握手成功/已连接收发→关闭中→关闭成功（可见性由阶段+保鲜窗口决定）
    */
   @LocalBuilder
   buildRunStatusBanner() {
-    if (vpnRunStatusState.running) {
+    if (vpnRunStatusState.isBannerVisible(this.nowTick)) {
       Row({ space: 8 }) {
         Circle({ width: 8, height: 8 })
           .fill(this.runStatusColor)

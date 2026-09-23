@@ -38,7 +38,7 @@
  * @author leojay`fu
  */
 import { UIContext, AppStorageV2, UIUtils } from '@kit.ArkUI';
-import { LLog, vpnKeepAliveManager, WireGuard, WGDBConf, VpnEventTag, SubEventCancel } from 'wg_tunnel';
+import { LLog, vpnKeepAliveManager, vpnRunStatusState, WireGuard, WGDBConf, VpnEventTag, SubEventCancel } from 'wg_tunnel';
 
 const TAG = 'VpnToggle'
 
@@ -115,6 +115,12 @@ class VpnToggleServiceImpl {
     // 1. 事务置位（先于入队：迟到广播按targetId/phase判定，无法伪造提前解锁）
     vpnToggleState.phase = isOn ? 'starting' : 'stopping';
     vpnToggleState.targetId = targetId;
+    // 运行状态条同步用户意图：广播尚未到达即显示"启动VPN中/关闭中"（阶段推进的起点）
+    if (isOn) {
+      vpnRunStatusState.markStarting();
+    } else {
+      vpnRunStatusState.markStopping();
+    }
 
     // 2. 意图先行：本地状态立即置为目标态，UI开关由意图驱动
     if (isOn) {

@@ -101,6 +101,10 @@
       "value": "#D83931"
     },
     {
+      "name": "wg_run_status_idle",
+      "value": "#8A8A8E"
+    },
+    {
       "name": "wg_run_status_banner_bg",
       "value": "#14000000"
     },
