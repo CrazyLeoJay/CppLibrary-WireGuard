@@ -27,20 +27,6 @@
       "name": "default"
     },
     {
-      "name": "free",
-      "source": {
-        "pages": [
-          "pages/Index"
-        ]
-      },
-      "resource": {
-        "directories": [
-          "./src/main/custom/resources",
-          "./src/main/resources"
-        ]
-      }
-    },
-    {
       "name": "ohosTest",
     }
   ]

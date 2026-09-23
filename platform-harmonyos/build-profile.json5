@@ -45,23 +45,6 @@
     {
       name: 'entry',
       srcPath: './entry',
-      targets: [
-        {
-          name: 'default',
-          applyToProducts: [
-            'default',
-          ],
-        },
-        {
-          // 免费渠道 target：free 资源目录覆盖 paid_features_enabled=false，
-          // 付费功能运行时全停（同包名同签名可互覆）；runtimeOverlay 声明在
-          // entry/build-profile.json5 的模块级 targets
-          name: 'free',
-          applyToProducts: [
-            'default',
-          ],
-        },
-      ],
     },
     {
       name: 'wg_tunnel',
