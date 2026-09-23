@@ -14,9 +14,15 @@
 
 ## 定制域清单（只有这些路径 = 定制改动）
 
-- `platform-harmonyos/wg_custom/**`（含其 module.json5 定制配置——悬浮窗权限、form 扩展声明与
-  form_config/卡片页，构建时自动合并进最终 HAP；摘除 wg_custom 即整组消失，entry 配置零改动）
-- entry 内指向 `wg_custom` 的 import 语句（EntryAbility 的 `import 'wg_custom'` 装配行）
+- `platform-harmonyos/wg_custom/**`（含其 module.json5——`SYSTEM_FLOAT_WINDOW` 权限经
+  HAR 构建时合并进最终 HAP，已实证可用）
+- `entry/src/main/module.json5` 的 form 扩展声明段（工具链约束：form 扩展/form_config/
+  卡片页必须在最终 HAP 模块本地声明，HAR 声明会导致 `:form` 进程运行时模块解析崩溃）
+- `entry/src/main/ets/formability/**`、`entry/src/main/ets/form/cards/WGWidgetCard.ets`（三行薄壳）
+- entry 内指向 `wg_custom` 的 import 语句（EntryAbility 的 `import 'wg_custom'` 装配行与
+  卡片页编译保障副作用导入）
+- 其余一切 = 核心域。entry 的 `pages/WindowHost.ets` 是核心通用宿主页（渲染注册表注入的
+  定制窗口内容），`main_pages.json` 中不出现任何定制页面名。
 - 其余一切 = 核心域。entry 的 `pages/WindowHost.ets` 是核心通用宿主页（渲染注册表注入的
   定制窗口内容），`main_pages.json` 中不出现任何定制页面名。
 
