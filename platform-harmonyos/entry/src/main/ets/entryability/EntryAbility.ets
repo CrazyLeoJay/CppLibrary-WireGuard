@@ -23,6 +23,7 @@ import {
   dispatchAppDestroy,
   dispatchAppForeground,
   dispatchMainWindowReady,
+  setChannelPaidEnabled,
 } from 'wg_ui';
 
 const TAG = "EntryAbility"
@@ -67,6 +68,12 @@ export default class EntryAbility extends UIAbility {
     vpnKeepAliveManager.attach(this.context);
 
     // 定制功能装配（付费隔离点）：悬浮球/卡片同步等经 wg_ui 通用注册表分发，
+    // 渠道开关：free target 资源覆盖 paid_features_enabled=false（免费包付费功能全停）
+    try {
+      setChannelPaidEnabled(this.context.resourceManager.getBooleanByName('paid_features_enabled'));
+    } catch (err) {
+      setChannelPaidEnabled(true);
+    }
     dispatchAppCreate(this.context);
 
     // 订阅VEA配置请求与VPN异常事件（UI层职责，与保活机制解耦）

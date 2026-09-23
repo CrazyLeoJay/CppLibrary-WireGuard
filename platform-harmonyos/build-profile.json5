@@ -2,18 +2,18 @@
   app: {
     signingConfigs: [
       {
-        name: 'default',
-        type: 'HarmonyOS',
-        material: {
-          certpath: 'C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_iJ7G2DIQzRIwU7btNzBF2DVvN94cbCYmsCjzWULjT8=.cer',
-          keyAlias: 'debugKey',
-          keyPassword: '0000001b5d52d2a5891f9ddb2c6401ad1060c93e2ffb9a6f803b8d55004c6d5a1fb2c0a73c356d19cf2c3d',
-          profile: 'C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_iJ7G2DIQzRIwU7btNzBF2DVvN94cbCYmsCjzWULjT8=.p7b',
-          signAlg: 'SHA256withECDSA',
-          storeFile: 'C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_iJ7G2DIQzRIwU7btNzBF2DVvN94cbCYmsCjzWULjT8=.p12',
-          storePassword: '0000001b5d52d2a5891f9ddb2c6401ad1060c93e2ffb9a6f803b8d55004c6d5a1fb2c0a73c356d19cf2c3d',
-        },
-      },
+        "name": "default",
+        "type": "HarmonyOS",
+        "material": {
+          "certpath": "C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_u1jz0TML2OUgQxE7Fk5jsoUFjesFk899wT2vj6gpBsM=.cer",
+          "keyAlias": "debugKey",
+          "keyPassword": "0000001BBF772CA9102A5001B4F6CEF8D9C19DF22121A798DEC287AE028A9047EDD2379808151EEC94575A",
+          "profile": "C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_u1jz0TML2OUgQxE7Fk5jsoUFjesFk899wT2vj6gpBsM=.p7b",
+          "signAlg": "SHA256withECDSA",
+          "storeFile": "C:\\Users\\Leojay\\.ohos\\config\\default_platform-harmonyos_u1jz0TML2OUgQxE7Fk5jsoUFjesFk899wT2vj6gpBsM=.p12",
+          "storePassword": "0000001BC99A059F903E4B2FB3E5334D575B321C954E27B9C9D18C1925F26735DDB0DE4467C8BE9C2CB993"
+        }
+      }
     ],
     products: [
       {
@@ -48,6 +48,15 @@
       targets: [
         {
           name: 'default',
+          applyToProducts: [
+            'default',
+          ],
+        },
+        {
+          // 免费渠道 target：free 资源目录覆盖 paid_features_enabled=false，
+          // 付费功能运行时全停（同包名同签名可互覆）；runtimeOverlay 声明在
+          // entry/build-profile.json5 的模块级 targets
+          name: 'free',
           applyToProducts: [
             'default',
           ],

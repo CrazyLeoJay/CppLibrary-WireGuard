@@ -1,0 +1,8 @@
+{
+  "boolean": [
+    {
+      "name": "paid_features_enabled",
+      "value": false
+    }
+  ]
+}

@@ -27,28 +27,33 @@ import BuildProfile from '../../../../BuildProfile';
  * 后续新增定制能力只扩展注册表契约，核心业务代码不再感知具体功能。
  */
 
-// ==================== 付费功能总开关（debug调试设置用） ====================
+// ==================== 付费功能总开关（多渠道target + debug调试设置） ====================
 
-let customFeaturesEnabled: boolean | undefined = undefined;
+/** 渠道付费开关（EntryAbility.onCreate 从 target 资源覆盖读出后注入） */
+let channelPaidEnabled: boolean | undefined = undefined;
+
+/** 注入渠道付费开关（free target 资源覆盖=false；default/未注入 视为启用） */
+export function setChannelPaidEnabled(enabled: boolean): void {
+  channelPaidEnabled = enabled;
+}
 
 /**
- * 付费（定制）功能是否启用：默认启用。
- * 仅 debug 构建可关（调试设置里模拟免费版）；release 恒启用。
- * 关闭时：设置页定制区块隐藏、生命周期分发空操作——等同免费构建行为。
+ * 付费（定制）功能是否启用：
+ * release 恒启用；debug 构建下 = 非 free 渠道 且
+ * debug 调试设置「启用付费功能」未关闭。
  */
 export function isCustomFeaturesEnabled(): boolean {
   if (!BuildProfile.DEBUG) {
     return true;
   }
-  if (customFeaturesEnabled == undefined) {
-    customFeaturesEnabled = WGSettingsPrefs.getCustomFeaturesEnabled();
+  if (channelPaidEnabled === false) {
+    return false;
   }
-  return customFeaturesEnabled!;
+  return WGSettingsPrefs.getCustomFeaturesEnabled();
 }
 
-/** 设置付费功能开关（持久化；调用方负责 dispatchFeaturesEnabledChanged 通知定制侧） */
+/** 设置调试期付费功能开关（持久化；仅 debug 构建可关） */
 export function setCustomFeaturesEnabled(enabled: boolean): void {
-  customFeaturesEnabled = enabled;
   WGSettingsPrefs.setCustomFeaturesEnabled(enabled);
 }
 
