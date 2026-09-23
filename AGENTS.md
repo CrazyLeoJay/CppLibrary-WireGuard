@@ -11,6 +11,16 @@
 | `harmony-app/master-custom` | 定制/付费版壳（entry_custom、wg_custom 等） | ✅ 仅定制/付费功能，且须先合并 open-core |
 | `master` | 开源发布分支 | ❌ 只接受合并，不直接修改 |
 
+## 按当前分支定位工作（检出哪个分支，就改哪个域）
+
+本文件在 `master-cpp` / `harmony-app/open-core` / `harmony-app/master-custom` / `master`
+四个分支保持同一份，无论检出哪个分支都必须遵守：
+
+- 检出 `master-cpp` → 本分支只改 C/C++ 核心，改完依次合并 open-core、custom（见路由3）。
+- 检出 `harmony-app/open-core` → 本分支改 App 默认功能（见路由1）。
+- 检出 `harmony-app/master-custom` → 本分支只改定制/付费功能，动手前先合并 open-core（见路由2）。
+- 检出 `master` → 不直接修改，仅接受合并（见路由4）。
+
 ## 修改路由（先判断改什么，再选分支）
 
 1. **App 默认功能**（鸿蒙 ArkTS / UI / HAR / 资源 / 构建脚本 / 文档）：
@@ -32,9 +42,10 @@
 
 - 跨分支搬运改动前，先 `git diff <分支A> <分支B> -- <目标路径>` 确认目标文件在两分支无差异，
   再用 stash/apply 或补丁方式搬运，避免冲突。
-- `wg_tunnel` 的 LocalUnit 单测由 pre-commit 钩子强制运行（`platform-harmonyos/tests/run-local-unit-test.sh`），
-  提交前自动验证，失败不落库。
-- 本文件属于全仓规则：修改后按「App 默认功能」路由，从 `harmony-app/open-core` 提交再合并至 `master-custom`。
+- `wg_tunnel` 的 LocalUnit 单测由 pre-commit 钩子强制运行（`platform-harmonyos/tests/run-local-unit-test.sh`，
+  仅 harmony-app 分支有此钩子），提交前自动验证，失败不落库。
+- 本文件为全仓规则，四个分支保持同一份内容：修改后从 `harmony-app/open-core` 提交，
+  custom 走合并，`master-cpp` 与 `master` 直接同步同一内容（docs-only，勿夹带代码）。
 
 ## 未来平台扩展
 
