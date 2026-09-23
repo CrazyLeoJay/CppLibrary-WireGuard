@@ -153,6 +153,30 @@ export function dispatchFeaturesEnabledChanged(enabled: boolean): void {
   });
 }
 
+// ==================== 定制窗口内容注册表 ====================
+
+/**
+ * 悬浮窗等定制窗口的内容注册：main_pages 是 HAP 级页面表无法按包合并，
+ * entry 仅保留通用宿主页（pages/WindowHost），定制模块注册内容 builder，
+ * 宿主页渲染之——main_pages 不出现任何定制页面名。
+ */
+
+/** 窗口内容 builder 入参（预留扩展位；内容组件目前自包含） */
+export interface CustomWindowContentArg {
+}
+
+let windowContentBuilder: WrappedBuilder<[CustomWindowContentArg]> | undefined = undefined;
+
+/** 注册定制窗口内容（定制模块加载时调用；后注册覆盖前者） */
+export function registerWindowContent(builder: WrappedBuilder<[CustomWindowContentArg]>): void {
+  windowContentBuilder = builder;
+}
+
+/** 读取窗口内容（免费构建/未注册返回undefined，宿主页渲染为空） */
+export function getWindowContentBuilder(): WrappedBuilder<[CustomWindowContentArg]> | undefined {
+  return windowContentBuilder;
+}
+
 // ==================== 设置页自定义区块 ====================
 
 /** 区块 builder 入参（预留扩展位；区块组件目前自包含，无需外部状态） */

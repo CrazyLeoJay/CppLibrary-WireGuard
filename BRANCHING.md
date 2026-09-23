@@ -14,12 +14,11 @@
 
 ## 定制域清单（只有这些路径 = 定制改动）
 
-- `platform-harmonyos/wg_custom/**`
-- `entry/src/main/ets/pages/FloatBallPage.ets`
-- `entry/src/main/ets/form/**`、`entry/src/main/ets/formability/**`
-- `entry/src/main/module.json5` 的 form 扩展声明段与 `SYSTEM_FLOAT_WINDOW`/`PREPARE_APP_TERMINATE` 权限段
-- `entry/src/main/resources/base/profile/form_config.json`、`main_pages.json` 的 FloatBallPage 条目
-- entry 内指向 `wg_custom` 的 import 语句
+- `platform-harmonyos/wg_custom/**`（含其 module.json5 定制配置——悬浮窗权限、form 扩展声明与
+  form_config/卡片页，构建时自动合并进最终 HAP；摘除 wg_custom 即整组消失，entry 配置零改动）
+- entry 内指向 `wg_custom` 的 import 语句（EntryAbility 的 `import 'wg_custom'` 装配行）
+- 其余一切 = 核心域。entry 的 `pages/WindowHost.ets` 是核心通用宿主页（渲染注册表注入的
+  定制窗口内容），`main_pages.json` 中不出现任何定制页面名。
 
 **核心域** = 其余一切（wg_tunnel、wg_ui 核心页面与逻辑、entry 核心、构建配置等）。
 
