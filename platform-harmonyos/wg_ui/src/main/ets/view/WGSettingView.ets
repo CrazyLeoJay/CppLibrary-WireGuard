@@ -29,6 +29,9 @@ const TAG = "设置界面"
 /** 区块 builder 共享入参（区块组件自包含） */
 const SECTION_ARG: CustomSectionArg = {};
 
+/** 「修复网络」入口开关：功能仍有未处理问题暂时隐藏；保留全部代码与诊断逻辑，置 true 即恢复 */
+const FIX_NETWORK_ENABLED: boolean = false;
+
 /**
  * 设置界面
  *
@@ -265,21 +268,25 @@ struct WGSettingView {
         .layoutWeight(1)
         .itemRowStyle()
       }
-      ListItem() {
-        Column({ space: '4vp' }) {
-          Text("修复网络")
-            .defaultTagTitleStyle()
-          Text(this.networkStatusText)
-            .width('100%')
-            .fontSize('12fp')
-        }
-        .onClick(() => {
-          this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
-            LLog.error(TAG, e)
+      // 「修复网络」入口暂时隐藏（FIX_NETWORK_ENABLED=false）：功能仍有未处理问题，
+      // 代码与诊断逻辑完整保留，置 true 即恢复
+      if (FIX_NETWORK_ENABLED) {
+        ListItem() {
+          Column({ space: '4vp' }) {
+            Text("修复网络")
+              .defaultTagTitleStyle()
+            Text(this.networkStatusText)
+              .width('100%')
+              .fontSize('12fp')
+          }
+          .onClick(() => {
+            this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
+              LLog.error(TAG, e)
+            })
           })
-        })
-        .layoutWeight(1)
-        .itemRowStyle()
+          .layoutWeight(1)
+          .itemRowStyle()
+        }
       }
     }
     .divider({
