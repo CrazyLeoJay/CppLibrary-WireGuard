@@ -16,7 +16,7 @@
 import { commonEventManager } from '@kit.BasicServicesKit';
 import { LLog, StreamLogMessage, WireGuard } from '../../../../Index';
 import { bundleManager } from '@kit.AbilityKit';
-import VPNEventStatusParams, { VpnEventTag } from './entity/VPNEventStatusParams';
+import VPNEventStatusParams, { VpnEventTag, shouldSyncEventStatus } from './entity/VPNEventStatusParams';
 import { VpnConfigRequestParams } from './entity/VpnConfigAction';
 import WGTools from './WGTools';
 import { WGEventThrow, WGEventThrowForString, WGEventThrowParam, WGEventThrowToString } from '../error/WGEventThrow';
@@ -158,6 +158,8 @@ export class WGSystemEventDef {
     // 主应用进程调用时：附带主应用进程的本地状态
     // 通过 toDTO() 转换为纯数据对象，避免 @Trace 代理导致序列化属性名加 __ob_ 前缀
     params.status = WireGuard.config.status.getConfig().toDTO()
+    // 发布时刻：订阅端据此做新鲜度校验与单调同步（休眠积压的陈旧广播不得倒灌）
+    params.ts = Date.now()
     this.publish(VPN_STATUS_CHANGE, JSON.stringify(params))
     LLog.info(TAG, `通知变化：${JSON.stringify(params)}`)
   }
@@ -183,9 +185,13 @@ export class WGSystemEventDef {
       if (data.data) {
         const result = JSON.parse(data.data) as VPNEventStatusParams
         // 【核心同步逻辑】收到VPN状态变化广播后，将状态同步到本地AppStorageV2
-        // 以VPN进程数据为准，确保主应用进程的状态与VPN进程一致
-        if (result.status) {
-          WireGuard.config.status.syncFromVpnProcess(result.status)
+        // 以VPN进程数据为准，确保主应用进程的状态与VPN进程一致。
+        // 同步判定（shouldSyncEventStatus）：QUERY_NO_RUNNING为none事件永不同步；
+        // ts低于已应用水位线的积压广播不得倒灌（休眠唤醒后陈旧快照防覆盖）
+        const status = WireGuard.config.status.getConfig()
+        if (shouldSyncEventStatus(result, status.lastSyncTs)) {
+          WireGuard.config.status.syncFromVpnProcess(result.status!)
+          status.lastSyncTs = result.ts ?? 0
         }
         paramsInvoke(result)
       }
@@ -204,7 +210,12 @@ export class WGSystemEventDef {
         if (running) {
           this.publish(VPN_STATUS_QUERY)
         } else {
-          this.publishVpnChange({ isOpen: false, tag: VpnEventTag.QUERY_NO_RUNNING })
+          // 本地自答回复：VEA未运行，无权威status可言。走原始publish而非publishVpnChange，
+          // 避免把本进程本地状态注入造成"running=true"自答回声（none事件：消费端永不同步）
+          const selfReply: VPNEventStatusParams =
+            { isOpen: false, tag: VpnEventTag.QUERY_NO_RUNNING, ts: Date.now() }
+          this.publish(VPN_STATUS_CHANGE, JSON.stringify(selfReply))
+          LLog.info(TAG, `通知变化：${JSON.stringify(selfReply)}`)
         }
       })
   }

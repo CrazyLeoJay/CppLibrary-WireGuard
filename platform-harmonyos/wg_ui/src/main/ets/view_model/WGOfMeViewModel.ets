@@ -20,7 +20,11 @@ import { LLog, networkResidueState, vpnKeepAliveManager, WireGuard, WGSettingsPr
 import fs from '@ohos.file.fs';
 import { zlib } from '@kit.BasicServicesKit';
 import { fileUri, picker } from '@kit.CoreFileKit';
-import { getFloatBallGate } from '../custom/WGCustomGate';
+import {
+  dispatchFeaturesEnabledChanged,
+  isCustomFeaturesEnabled,
+  setCustomFeaturesEnabled,
+} from '../custom/WGCustomGate';
 
 const TAG = "设置界面"
 const systemPasteboard: pasteboard.SystemPasteboard = pasteboard.getSystemPasteboard();
@@ -49,12 +53,8 @@ export default class WGSettingViewModel {
   @Trace appVersion: string = ""
   @Trace developerMode: boolean = WGSettingsPrefs.getDeveloperMode();
   @Trace defaultFilterMode: number = WGSettingsPrefs.getDefaultFilterMode();
-  @Trace floatBallEnabled: boolean = getFloatBallGate()?.isEnabled() ?? false;
-
-  /** 悬浮球入口是否可用（闭源定制已接入=true；开源构建未注册恒false，入口隐藏） */
-  get floatBallAvailable(): boolean {
-    return getFloatBallGate() != undefined;
-  }
+  /** 付费（定制）功能启用开关（仅debug调试设置可关，模拟免费版） */
+  @Trace customFeaturesEnabled: boolean = isCustomFeaturesEnabled();
   email: string = email
 
   constructor(nav: NavPathStack) {
@@ -102,6 +102,16 @@ export default class WGSettingViewModel {
   }
 
   /**
+   * 切换付费（定制）功能启用开关（仅debug调试设置；注册表即时生效并通知定制侧）
+   */
+  toggleCustomFeatures(): void {
+    setCustomFeaturesEnabled(!isCustomFeaturesEnabled());
+    this.customFeaturesEnabled = isCustomFeaturesEnabled();
+    dispatchFeaturesEnabledChanged(this.customFeaturesEnabled);
+    LLog.info(TAG, `customFeaturesEnabled: ${this.customFeaturesEnabled}`);
+  }
+
+  /**
    * 切换默认过滤模式（黑名单 ↔ 白名单）
    */
   toggleDefaultFilterMode(): void {
@@ -110,41 +120,6 @@ export default class WGSettingViewModel {
       : AppFilterMode.EXCLUDED;
     WGSettingsPrefs.setDefaultFilterMode(this.defaultFilterMode);
     LLog.info(TAG, `默认过滤模式切换为: ${this.defaultFilterMode === AppFilterMode.INCLUDED ? '白名单' : '黑名单'}`);
-  }
-
-  /**
-   * 同步悬浮球开关显示状态（页面可见时调用）：
-   * 授权返回自动补开发生在EntryAbility层，页面不可感知，靠这里对齐
-   */
-  syncFloatBallEnabled(): void {
-    this.floatBallEnabled = getFloatBallGate()?.isEnabled() ?? false;
-  }
-
-  /**
-   * 【debug测试入口】绕过悬浮球开关直接拉起悬浮窗（仅debug构建可见）：
-   * 隔离"悬浮窗能否创建显示"与"开关配置"，Toast回报结果便于真机定位
-   */
-  debugOpenFloatBall(context: UIContext): void {
-    const gate = getFloatBallGate();
-    if (gate == undefined) {
-      context.getPromptAction().showToast({ message: '测试失败：未接入悬浮球' });
-      return;
-    }
-    gate.debugShow(context);
-  }
-
-  /**
-   * 切换悬浮球（设置页开关；权限申请/挂起补开/提示交互全部内聚在
-   * 定制实现侧，这里只经门面委托并同步最终落定状态）
-   */
-  toggleFloatBall(context: UIContext): void {
-    const gate = getFloatBallGate();
-    if (gate == undefined) {
-      return;
-    }
-    gate.toggle(context, (enabled: boolean) => {
-      this.floatBallEnabled = enabled;
-    });
   }
 
   clickToWireGuardWebSite(context: UIContext) {

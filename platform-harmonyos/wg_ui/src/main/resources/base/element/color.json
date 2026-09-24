@@ -17,6 +17,10 @@
       "value": "#FFB3F8FD"
     },
     {
+      "name": "wg_float_button_glass_tint",
+      "value": "#A6B3F8FD"
+    },
+    {
       "name": "wg_float_button_svg_color",
       "value": "#000000"
     },
@@ -95,6 +99,10 @@
     {
       "name": "wg_run_status_error",
       "value": "#D83931"
+    },
+    {
+      "name": "wg_run_status_idle",
+      "value": "#8A8A8E"
     },
     {
       "name": "wg_run_status_banner_bg",

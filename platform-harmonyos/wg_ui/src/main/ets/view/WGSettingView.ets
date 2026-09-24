@@ -18,8 +18,19 @@ import WGSettingViewModel from '../view_model/WGOfMeViewModel';
 import { BusinessError } from '@kit.BasicServicesKit';
 import { ComponentContent, promptAction } from '@kit.ArkUI';
 import BuildProfile from '../../../../BuildProfile';
+import {
+  CustomSectionArg,
+  CustomSettingsSection,
+  getCustomSettingsSections,
+} from '../custom/WGCustomGate';
 
 const TAG = "设置界面"
+
+/** 区块 builder 共享入参（区块组件自包含） */
+const SECTION_ARG: CustomSectionArg = {};
+
+/** 「修复网络」入口开关：功能仍有未处理问题暂时隐藏；保留全部代码与诊断逻辑，置 true 即恢复 */
+const FIX_NETWORK_ENABLED: boolean = false;
 
 /**
  * 设置界面
@@ -48,7 +59,15 @@ struct WGSettingViewNavDest {
         this.vm.nav = info.pathStack
       }
     })
+    // 页面重新可见：转发给定制区块（如授权返回后同步开关实际状态）
+    .onShown(() => {
+      getCustomSettingsSections().forEach((section: CustomSettingsSection) => {
+        section.onShown?.();
+      });
+    })
     .title("设置")
+    // 鸿蒙7内嵌卡片：页面二级灰底衬托卡片（深浅色自适应）
+    .backgroundColor($r('sys.color.background_secondary'))
   }
 }
 
@@ -111,20 +130,18 @@ struct WGSettingView {
       this.buildStatement()
       // ===== 导出隧道配置 =====
       this.buildBaseFuns();
-      // ===== 悬浮球（闭源定制接入后显示；开源构建未注册门面则隐藏） =====
-      if (this.vm.floatBallAvailable) {
-        this.buildFloatBall();
-      }
-      // ===== 悬浮球测试（仅 debug 构建显示，绕过开关直接拉起悬浮窗） =====
-      if (BuildProfile.DEBUG && this.vm.floatBallAvailable) {
-        this.buildFloatBallDebug();
-      }
+      // ===== 定制模块贡献的设置区块（免费/开源构建注册表为空则不渲染） =====
+      ForEach(getCustomSettingsSections(), (section: CustomSettingsSection) => {
+        if (section.visible()) {
+          section.builder.builder(SECTION_ARG)
+        }
+      }, (section: CustomSettingsSection) => section.id)
       // ===== 应用过滤配置 =====
       this.buildBaseSetting();
 
-      // ===== 开发者模式（仅 debug 构建显示） =====
+      // ===== 调试设置（仅 debug 构建显示）：付费功能开关+开发者模式 =====
       if (BuildProfile.DEBUG) {
-        this.buildDevModel();
+        this.buildDebugSettings();
       }
 
       // ===== 关于 =====
@@ -152,6 +169,8 @@ struct WGSettingView {
     .width('100%')
     .height('100%')
     .listStyle()
+    // 鸿蒙7内嵌卡片：列表两侧留边，功能区块以卡片呈现
+    .padding({ left: '12vp', right: '12vp' })
   }
 
   /**
@@ -228,117 +247,57 @@ struct WGSettingView {
   }
 
   /**
-   * 应用基础功能
+   * 应用基础功能（鸿蒙7分组卡片：两行一组，组内分割线）
    */
   @LocalBuilder
   buildBaseFuns() {
-    ListItem() {
-      Column({ space: '4vp' }) {
-        Text("导出隧道配置")
-          .defaultTagTitleStyle()
-        Text("导出配置为zip文件在下载目录中")
-          .width('100%')
-          .fontSize('12fp')
-      }
-      .onClick(() => {
-        this.vm.saveConfigToZip(this.getUIContext()).catch((e: BusinessError) => {
-          LLog.error(TAG, e)
-        })
-      })
-      .layoutWeight(1)
-      .itemRowStyle()
-    }
-    ListItem() {
-      Column({ space: '4vp' }) {
-        Text("修复网络")
-          .defaultTagTitleStyle()
-        Text(this.networkStatusText)
-          .width('100%')
-          .fontSize('12fp')
-      }
-      .onClick(() => {
-        this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
-          LLog.error(TAG, e)
-        })
-      })
-      .layoutWeight(1)
-      .itemRowStyle()
-    }
-  }
-
-  /**
-   * 悬浮球开关（照开发者模式 Toggle 行范式）
-   */
-  @LocalBuilder
-  buildFloatBall() {
-    ListItem() {
-      Column({ space: '8vp' }) {
-        Text('悬浮球')
-          .defaultTagTitleStyle()
-
-        Row() {
-          Column({ space: '2vp' }) {
-            Text('桌面悬浮球')
-              .fontSize('16fp')
-            Text('在其他应用上层悬浮显示连接状态，支持快捷检查网络与回到应用')
-              .fontSize('12fp')
-              .fontColor($r('sys.color.font_tertiary'))
-          }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          Blank()
-          Toggle({ type: ToggleType.Switch, isOn: this.vm.floatBallEnabled })
-            .selectedColor($r('app.color.wg_theme_primary'))
+    ListItemGroup() {
+      ListItem() {
+        Column({ space: '4vp' }) {
+          Text("导出隧道配置")
+            .defaultTagTitleStyle()
+          Text("导出配置为zip文件在下载目录中")
+            .width('100%')
+            .fontSize('12fp')
         }
-        .width('100%')
+        .onClick(() => {
+          this.vm.saveConfigToZip(this.getUIContext()).catch((e: BusinessError) => {
+            LLog.error(TAG, e)
+          })
+        })
+        .layoutWeight(1)
+        .itemRowStyle()
       }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      .itemRowStyle()
-      .onClick(() => {
-        // 点击整行切换悬浮球
-        this.vm.toggleFloatBall(this.getUIContext());
-      })
-    }
-  }
-
-  /**
-   * 悬浮球测试入口（仅 debug 构建显示）：绕过开关配置直接拉起悬浮窗，
-   * 隔离"悬浮窗能否创建显示"与"悬浮球开关"两个问题；结果用Toast回报
-   */
-  @LocalBuilder
-  buildFloatBallDebug() {
-    ListItem() {
-      Column({ space: '8vp' }) {
-        Text('悬浮球测试')
-          .defaultTagTitleStyle()
-
-        Row() {
-          Column({ space: '2vp' }) {
-            Text('直接拉起悬浮球')
-              .fontSize('16fp')
-            Text('无论上方悬浮球开关是否开启，点击立即创建并显示悬浮窗')
+      // 「修复网络」入口暂时隐藏（FIX_NETWORK_ENABLED=false）：功能仍有未处理问题，
+      // 代码与诊断逻辑完整保留，置 true 即恢复
+      if (FIX_NETWORK_ENABLED) {
+        ListItem() {
+          Column({ space: '4vp' }) {
+            Text("修复网络")
+              .defaultTagTitleStyle()
+            Text(this.networkStatusText)
+              .width('100%')
               .fontSize('12fp')
-              .fontColor($r('sys.color.font_tertiary'))
           }
-          .alignItems(HorizontalAlign.Start)
-          .layoutWeight(1)
-
-          Blank()
-          Button('拉起')
-            .buttonStyle(ButtonStyleMode.NORMAL)
-            .onClick(() => {
-              this.vm.debugOpenFloatBall(this.getUIContext());
+          .onClick(() => {
+            this.vm.repairNetwork(this.getUIContext()).catch((e: BusinessError) => {
+              LLog.error(TAG, e)
             })
+          })
+          .layoutWeight(1)
+          .itemRowStyle()
         }
-        .width('100%')
       }
-      .alignItems(HorizontalAlign.Start)
-      .layoutWeight(1)
-      .itemRowStyle()
     }
+    .divider({
+      strokeWidth: '1vp',
+      color: $r('app.color.wg_divider_color'),
+      startMargin: '16vp',
+      endMargin: '16vp',
+    })
+    .settingGroupCardStyle()
   }
+
 
   /**
    * 应用基础设置
@@ -427,17 +386,45 @@ struct WGSettingView {
         this.vm.toggleDefaultFilterMode();
       })
     }
+    .settingCardStyle()
   }
 
   /**
-   * 开发者模式
+   * 调试设置（仅 debug 构建显示）：聚合调试期开关——
+   * 付费功能启用（模拟免费版验证付费隔离）与开发者模式
    */
   @LocalBuilder
-  buildDevModel() {
+  buildDebugSettings() {
     ListItem() {
       Column({ space: '8vp' }) {
-        Text('开发者选项')
+        Text('调试设置')
           .defaultTagTitleStyle()
+
+        Row() {
+          Column({ space: '2vp' }) {
+            Text('启用付费功能')
+              .fontSize('16fp')
+            Text('关闭后模拟免费版：定制区块隐藏、悬浮球等功能即时停用')
+              .fontSize('12fp')
+              .fontColor($r('sys.color.font_tertiary'))
+          }
+          .alignItems(HorizontalAlign.Start)
+          .layoutWeight(1)
+
+          Blank()
+          Toggle({ type: ToggleType.Switch, isOn: this.vm.customFeaturesEnabled })
+            .selectedColor($r('app.color.wg_theme_primary'))
+            // 点击统一由整行onClick处理（防双触发）
+            .hitTestBehavior(HitTestMode.None)
+        }
+        .width('100%')
+        .onClick(() => {
+          this.vm.toggleCustomFeatures();
+        })
+
+        Divider()
+          .color($r('app.color.wg_divider_color'))
+          .strokeWidth(1)
 
         Row() {
           Column({ space: '2vp' }) {
@@ -453,17 +440,20 @@ struct WGSettingView {
           Blank()
           Toggle({ type: ToggleType.Switch, isOn: this.vm.developerMode })
             .selectedColor($r('app.color.wg_theme_primary'))
+            // 点击统一由整行onClick处理（防双触发）
+            .hitTestBehavior(HitTestMode.None)
         }
         .width('100%')
+        .onClick(() => {
+          // 点击整行切换开发者模式
+          this.vm.toggleDeveloperMode();
+        })
       }
       .alignItems(HorizontalAlign.Start)
       .layoutWeight(1)
       .itemRowStyle()
-      .onClick(() => {
-        // 点击整行切换开发者模式
-        this.vm.toggleDeveloperMode();
-      })
     }
+    .settingCardStyle()
   }
 
   @LocalBuilder
@@ -577,6 +567,7 @@ struct WGSettingView {
       }
     }
     .listGroupStyle()
+    .settingGroupCardStyle()
   }
 
   showWechatQRCodeDialog() {
@@ -638,10 +629,20 @@ function tagStyle() {
 function listStyle() {
   .width('100%')
   // .height('100%')
-  .divider({
-    strokeWidth: '1vp',
-    color: $r('app.color.wg_divider_color'),
-  })
+}
+
+/** 鸿蒙7内嵌卡片：独立功能行（系统卡片底色深浅色自适应 + 系统圆角档） */
+@Extend(ListItem)
+function settingCardStyle() {
+  .backgroundColor($r('sys.color.comp_background_primary'))
+  .borderRadius($r('sys.float.corner_radius_level4'))
+}
+
+/** 鸿蒙7内嵌卡片：分组容器 */
+@Extend(ListItemGroup)
+function settingGroupCardStyle() {
+  .backgroundColor($r('sys.color.comp_background_primary'))
+  .borderRadius($r('sys.float.corner_radius_level4'))
 }
 
 @Extend(ListItemGroup)

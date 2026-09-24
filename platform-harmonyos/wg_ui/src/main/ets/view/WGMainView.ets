@@ -20,9 +20,18 @@ import { ComponentContent, promptAction, SymbolGlyphModifier } from '@kit.ArkUI'
 import { LLog } from 'wg_tunnel/src/main/ets/tools/LLog';
 import { WireGuardNav } from '../model/WireGuardNav';
 import { QRCodeNewConfig, QRCodeNewConfig as QRCodeNewParams, QRCodeNewWGConfDialog } from './QRCodeNewWGConfDialog';
-import { WGConf, WireGuard, vpnRunStatusState, StreamLogMessage, VpnEventTag } from 'wg_tunnel';
+import { WGConf, WireGuard, vpnRunStatusState, VpnRunPhase, StreamLogMessage, VpnEventTag } from 'wg_tunnel';
+import { floatingMaterial, supportsImmersiveMaterial } from '../ui/WGImmersiveMaterial';
 
 const TAG = "WG主页";
+
+/** 鸿蒙7内嵌卡片行：系统卡片底色（深浅色自适应）+ 系统圆角档 + 行间距 */
+@Extend(ListItem)
+function mainRowCardStyle() {
+  .backgroundColor($r('sys.color.comp_background_primary'))
+  .borderRadius($r('sys.float.corner_radius_level4'))
+  .margin({ bottom: '8vp' })
+}
 
 /** 删除粒子消散覆盖层的定位（vp，相对主页根Stack） */
 interface WgDeleteFx {
@@ -101,6 +110,8 @@ export struct WGMainViewNavDest {
       main: $r('app.string.app_name'),
       sub: $r('app.string.sub_title'),
     })
+    // 鸿蒙7内嵌卡片：页面二级灰底衬托卡片行（深浅色自适应）
+    .backgroundColor($r('sys.color.background_secondary'))
     // 菜单文案用静态标签：NavDestination.menus 的动态文案在V2下不随状态刷新，
     // 当前值改为点击后toast反馈（排序字段/方向/显示信息）
     .menus([
@@ -325,15 +336,21 @@ export struct WGMainView {
     return vpnRunStatusState.buildStatusText(this.nowTick);
   }
 
-  /** 状态条颜色（深浅色资源自适应）：绿=已连接且心跳新鲜；橙=连接中/心跳久远；红=Socket异常 */
+  /**
+   * 状态条颜色（深浅色资源自适应）：
+   * 绿=已连接且心跳新鲜；橙=启动中/等待握手/心跳久远/关闭中；红=Socket异常；灰=关闭成功
+   */
   get runStatusColor(): ResourceStr {
     const s = vpnRunStatusState;
+    if (s.phase === VpnRunPhase.STOPPED) {
+      return $r('app.color.wg_run_status_idle');
+    }
     const socketErrorFresh = s.socketError !== '' && (this.nowTick - s.socketErrorTime) < 30 * 1000;
     if (socketErrorFresh) {
       return $r('app.color.wg_run_status_error');
     }
     const heartbeatStale = s.lastHeartbeatTime === 0 || (this.nowTick - s.lastHeartbeatTime) > 180 * 1000;
-    if (!s.handshakeOk || heartbeatStale) {
+    if (s.phase === VpnRunPhase.STOPPING || !s.handshakeOk || heartbeatStale) {
       return $r('app.color.wg_run_status_warn');
     }
     return $r('app.color.wg_run_status_ok');
@@ -341,11 +358,12 @@ export struct WGMainView {
 
   /**
    * 运行状态条：标题与配置列表之间的固定单行窗体
-   * 展示当前VPN连接情况——连接是否成功/上次收发数据时间/Socket异常提示
+   * 展示VPN开关全链路的真实状态变化——启动VPN中→服务已启动等待握手→已发起握手→
+   * 握手成功/已连接收发→关闭中→关闭成功（可见性由阶段+保鲜窗口决定）
    */
   @LocalBuilder
   buildRunStatusBanner() {
-    if (vpnRunStatusState.running) {
+    if (vpnRunStatusState.isBannerVisible(this.nowTick)) {
       Row({ space: 8 }) {
         Circle({ width: 8, height: 8 })
           .fill(this.runStatusColor)
@@ -388,8 +406,15 @@ export struct WGMainView {
       }
       .width('45vp')
       .aspectRatio(1)
-      .backgroundColor($r(`app.color.wg_float_button_backgroud_color`))
+      // 鸿蒙7沉浸光感：API26+改ULTRA_THIN浮动件材质+半透明赋色背景。
+      // 注意两点：①纯色页面上无赋色的超薄材质无内容可折射会完全隐形；
+      // ②materialColor传$r资源实测不被材质滤镜解析，改用普通backgroundColor
+      // 叠半透明色（FAQ：只有不透明背景会盖死材质，半透明=色调叠加，
+      // 且$r深浅色自适应必然生效）；旧系统回落原浅青纯色
+      .backgroundColor(supportsImmersiveMaterial()
+        ? $r('app.color.wg_float_button_glass_tint') : $r(`app.color.wg_float_button_backgroud_color`))
       .borderRadius($r('sys.float.corner_radius_level5'))
+      .systemMaterial(floatingMaterial())
       .layoutGravity(LocalizedAlignment.BOTTOM_END)
       .margin({ bottom: '32vp', right: "32vp" })
       // .position({ x: '80%', y: '85%' }) // 右下角位置
@@ -423,6 +448,7 @@ export struct WGMainView {
                 });
               })
           }
+          .mainRowCardStyle()
           .swipeAction({
             end: {
               builder: () => {
@@ -446,11 +472,8 @@ export struct WGMainView {
     }
     .width('100%')
     .layoutWeight(1)
-    .divider({
-      strokeWidth: '1vp',
-      color: $r('app.color.wg_divider_color'),
-    })
-
+    // 鸿蒙7内嵌卡片行：行自带卡片底/圆角，分割线由行间距替代
+    .padding({ left: '12vp', right: '12vp', top: '4vp' })
   }
 
   /**

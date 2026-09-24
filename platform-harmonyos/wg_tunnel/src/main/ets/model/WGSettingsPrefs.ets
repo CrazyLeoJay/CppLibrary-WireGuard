@@ -25,11 +25,13 @@ const PREFS_NAME = 'wg_settings';
 export interface SettingsKeys {
   developerMode: boolean;
   defaultFilterMode: number; // AppFilterMode 值：0=NONE, 1=EXCLUDED(黑名单), 2=INCLUDED(白名单)
+  customFeaturesEnabled: boolean; // 付费（定制）功能启用开关，仅debug构建可关（模拟免费版）
 }
 
 const KEYS: Record<string, preferences.ValueType> = {
   'developer_mode': false as preferences.ValueType,
   'default_filter_mode': 1 as preferences.ValueType, // 默认黑名单
+  'custom_features_enabled': true as preferences.ValueType, // 默认启用
 };
 
 /**
@@ -38,6 +40,7 @@ const KEYS: Record<string, preferences.ValueType> = {
  * 使用 @ohos.data.preferences 持久化轻量级设置项：
  * - developerMode: 开发者模式开关
  * - defaultFilterMode: 默认过滤模式（黑名单/白名单）
+ * - customFeaturesEnabled: 付费（定制）功能启用开关（debug调试设置用）
  */
 class WGSettingsPrefsImpl {
   private prefs: preferences.Preferences | undefined = undefined;
@@ -79,6 +82,28 @@ class WGSettingsPrefsImpl {
     this.prefs.putSync('developer_mode', value);
     this.prefs.flushSync();
     LLog.info(TAG, `developerMode set to ${value}`);
+  }
+
+  /**
+   * 获取付费（定制）功能启用开关（默认启用；仅debug调试设置可关）
+   */
+  getCustomFeaturesEnabled(): boolean {
+    if (!this.prefs) {
+      return true;
+    }
+    return this.prefs.getSync('custom_features_enabled', true) as boolean;
+  }
+
+  /**
+   * 设置付费（定制）功能启用开关
+   */
+  setCustomFeaturesEnabled(value: boolean): void {
+    if (!this.prefs) {
+      return;
+    }
+    this.prefs.putSync('custom_features_enabled', value);
+    this.prefs.flushSync();
+    LLog.info(TAG, `customFeaturesEnabled set to ${value}`);
   }
 
   /**

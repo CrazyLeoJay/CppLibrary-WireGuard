@@ -248,6 +248,31 @@ export const networkResidueState: NetworkResidueState =
 // ==================== 主页VPN运行状态条全局状态（AppStorageV2，主页固定单行窗体） ====================
 
 /**
+ * 运行状态条的会话阶段（按真实事件顺序推进，UI据此显示逐级状态文案）
+ *
+ * 开启链路：点击开启(STARTING) → VEA确认运行(START_VPN广播→SERVICE_UP)
+ *   → 发出握手发起包(流日志SEND→HANDSHAKING) → 收到握手响应/成功入站数据(CONNECTED)。
+ * 关闭链路：点击关闭(STOPPING) → 服务拆除完成(会话结束广播→STOPPED，短暂展示后回IDLE)。
+ * 异常链路：启动失败/进程死亡/运行异常 → 直接回IDLE（状态条隐藏，失败原因走Toast）。
+ */
+export enum VpnRunPhase {
+  /** 空闲：状态条隐藏 */
+  IDLE = 'idle',
+  /** 启动VPN中：用户已点击开启，VEA尚未确认运行 */
+  STARTING = 'starting',
+  /** 服务已启动等待握手：VEA已确认运行，尚未见到握手发起迹象 */
+  SERVICE_UP = 'serviceUp',
+  /** 发起握手：已发出握手发起包（成功出站），等待响应 */
+  HANDSHAKING = 'handshaking',
+  /** 握手成功：已收到握手响应（或成功入站数据隐含确认），连接可用 */
+  CONNECTED = 'connected',
+  /** 关闭中：用户已点击关闭，服务拆除尚未完成 */
+  STOPPING = 'stopping',
+  /** 关闭成功：拆除完成（短暂展示"关闭成功"后回IDLE） */
+  STOPPED = 'stopped',
+}
+
+/**
  * VPN运行状态条数据源（AppStorageV2全局缓存）
  *
  * 由保活管理器既有的两条订阅统一写入，UI只读：
@@ -255,6 +280,8 @@ export const networkResidueState: NetworkResidueState =
  *   SOCKET_ERROR=链路异常（socket连接不成功的提示来源）；
  * - subscribeVpnChange：START_VPN=新会话开启（重置握手/心跳，等待连接确认），
  *   进程关闭/服务停止/异常=会话结束。
+ * - 用户点击开/关的意图时刻由开关事务（VpnToggleService）经 markStarting/markStopping 写入，
+ *   使状态条在广播到达前就能反映"启动VPN中/关闭中"。
  * 时刻字段供UI换算"收/发X前"；文案由 buildStatusText 生成（可单测）。
  */
 @ObservedV2
@@ -273,29 +300,145 @@ export class VpnRunStatusState {
   @Trace socketError: string = '';
   /** 最近SOCKET_ERROR时刻 */
   @Trace socketErrorTime: number = 0;
+  /** 会话阶段（开启/关闭全链路逐级推进，见 VpnRunPhase） */
+  @Trace phase: VpnRunPhase = VpnRunPhase.IDLE;
+  /** 进入当前phase的时刻ms（STOPPED保鲜/STARTING超时兜底/CONNECTED"握手成功"过渡均以此计时；0=无时刻语义） */
+  @Trace phaseAt: number = 0;
+
+  /** 进入STARTING（用户点击开启）：重置上一会话痕迹，等待VEA运行确认 */
+  markStarting(): void {
+    this.running = false;
+    this.runningConfigId = -1;
+    this.handshakeOk = false;
+    this.lastHeartbeatTime = 0;
+    this.lastOutboundTime = 0;
+    this.socketError = '';
+    this.phase = VpnRunPhase.STARTING;
+    this.phaseAt = Date.now();
+  }
+
+  /** 进入STOPPING（用户点击关闭）：保留running使状态条持续展示"关闭中"直到拆除完成 */
+  markStopping(): void {
+    this.phase = VpnRunPhase.STOPPING;
+    this.phaseAt = Date.now();
+  }
+
+  /** 进入STOPPED（拆除完成）：清会话事实，"关闭成功"短暂展示后由 isBannerVisible 归隐 */
+  markStopped(): void {
+    this.running = false;
+    this.runningConfigId = -1;
+    this.handshakeOk = false;
+    this.socketError = '';
+    this.phase = VpnRunPhase.STOPPED;
+    this.phaseAt = Date.now();
+  }
+
+  /** 回到IDLE（异常结束/启动失败/进程死亡）：状态条立即隐藏 */
+  markIdle(): void {
+    this.running = false;
+    this.runningConfigId = -1;
+    this.handshakeOk = false;
+    this.socketError = '';
+    this.phase = VpnRunPhase.IDLE;
+    this.phaseAt = 0;
+  }
+
+  /**
+   * 会话结束广播（进程关闭/服务停止/运行异常/启动失败）到达时的阶段收敛（纯逻辑，可单测）
+   *
+   * - STOPPING：用户主动关闭且拆除完成 → "关闭成功"（markStopped）；
+   * - STOPPED：保持不动——主进程关闭VEA进程后，onDestroy 还会广播一条
+   *   STOP_VPN(vpnThreadRunning=false)，比 VPN_SERVICE_STOPPED 晚到几百毫秒；
+   *   若不守卫会把"关闭成功"秒藏回IDLE（迟到广播不覆盖，让其自然满保鲜期消失）；
+   * - 强重启中间态：保持运行展示（SERVICE_UP），等待随后的 START_VPN 重建，避免状态条闪烁；
+   * - 其余（异常结束/启动失败）：状态条直接隐藏（失败原因走Toast/开关回滚）。
+   *
+   * @param isForceRestarting 保活管理器是否正处于强重启VEA的中间态
+   */
+  onSessionEnd(isForceRestarting: boolean): void {
+    if (this.phase === VpnRunPhase.STOPPING) {
+      this.markStopped();
+    } else if (this.phase === VpnRunPhase.STOPPED) {
+      // 关闭成功已展示：迟到/重复的会话结束广播不覆盖、不刷新计时，自然到期消失
+    } else if (isForceRestarting) {
+      this.phase = VpnRunPhase.SERVICE_UP;
+      this.phaseAt = Date.now();
+    } else {
+      this.markIdle();
+    }
+  }
+
+  /**
+   * 状态条是否可见（纯逻辑，可单测）
+   *
+   * - 意图/运行阶段恒可见；STOPPED"关闭成功"仅短暂展示（默认3s）；
+   * - STOPPING/STARTING 设超时兜底：拆除挂死（如DNS残留）或启动确认丢失时，
+   *   状态条不永久滞留——真实结局由保活状态机收敛（回滚意图/重试），状态条只负责不误导。
+   *
+   * @param now 当前时刻ms（UI定时刷新驱动）
+   * @param stoppedFreshMs STOPPED"关闭成功"展示时长
+   * @param stoppingTimeoutMs STOPPING超时兜底
+   * @param startingTimeoutMs STARTING超时兜底
+   */
+  isBannerVisible(now: number, stoppedFreshMs: number = 3 * 1000,
+    stoppingTimeoutMs: number = 30 * 1000, startingTimeoutMs: number = 60 * 1000): boolean {
+    switch (this.phase) {
+      case VpnRunPhase.IDLE:
+        return false;
+      case VpnRunPhase.STOPPED:
+        return (now - this.phaseAt) < stoppedFreshMs;
+      case VpnRunPhase.STOPPING:
+        return (now - this.phaseAt) < stoppingTimeoutMs;
+      case VpnRunPhase.STARTING:
+        return (now - this.phaseAt) < startingTimeoutMs;
+      default:
+        return true;
+    }
+  }
 
   /**
    * 生成状态条单行文案（纯逻辑，可单测）
    *
+   * 阶段优先：STARTING/STOPPING/STOPPED是用户意图时刻，即使上一会话留有
+   * Socket异常/收发时间也不回显，保证"启动VPN中→…→关闭中→关闭成功"链路连贯；
+   * 运行阶段内Socket异常提示优先（保鲜窗口内且其后无成功流日志）。
+   *
    * @param now 当前时刻ms（UI定时刷新驱动"Xs前"滚动）
    * @param socketErrorFreshMs socket异常提示的保鲜窗口（超过且已有后续成功流日志则不再提示）
+   * @param connectedFreshMs CONNECTED进入后的"握手成功"过渡文案时长，之后回落收发稳态文案
    */
-  buildStatusText(now: number, socketErrorFreshMs: number = 30 * 1000): string {
+  buildStatusText(now: number, socketErrorFreshMs: number = 30 * 1000,
+    connectedFreshMs: number = 3 * 1000): string {
+    switch (this.phase) {
+      case VpnRunPhase.STARTING:
+        return '启动VPN中…';
+      case VpnRunPhase.STOPPING:
+        return '关闭中…';
+      case VpnRunPhase.STOPPED:
+        return '关闭成功';
+      default:
+        break;
+    }
+    if (!this.running) {
+      return '';
+    }
     // Socket异常优先：保鲜窗口内且其后无成功流日志（出站/入站成功即视为已恢复）
     const hasSuccessAfterError =
       this.lastOutboundTime > this.socketErrorTime || this.lastHeartbeatTime > this.socketErrorTime;
     if (this.socketError !== '' && (now - this.socketErrorTime) < socketErrorFreshMs && !hasSuccessAfterError) {
       return `Socket异常：${this.socketError}`;
     }
-    if (!this.handshakeOk) {
-      // 服务已启动但握手未确认：区分"完全静默"与"已出站等待响应"
-      return this.lastOutboundTime > 0
-        ? '连接中（已出站，等待握手响应）…'
-        : '连接中…';
+    if (this.handshakeOk) {
+      // 刚确认连接的短暂过渡（显式握手响应进入时phaseAt=时刻；数据隐含确认phaseAt=0不展示过渡）
+      if (this.phase === VpnRunPhase.CONNECTED && this.phaseAt > 0 && (now - this.phaseAt) < connectedFreshMs) {
+        return '握手成功，已连接';
+      }
+      // 已连接：分列收/发两个方向——keepalive只保证发方向周期活跃，
+      // 收方向增长停滞=对端无回包/无下行业务，二者分开呈现才可判别
+      return `已连接 · 收${this.formatGapBefore(now, this.lastHeartbeatTime)} 发${this.formatGapBefore(now, this.lastOutboundTime)}`;
     }
-    // 已连接：分列收/发两个方向——keepalive只保证发方向周期活跃，
-    // 收方向增长停滞=对端无回包/无下行业务，二者分开呈现才可判别
-    return `已连接 · 收${this.formatGapBefore(now, this.lastHeartbeatTime)} 发${this.formatGapBefore(now, this.lastOutboundTime)}`;
+    // 服务已运行但握手未确认：区分"服务刚起"与"已发出握手发起包等待响应"
+    return this.lastOutboundTime > 0 ? '已发起握手，等待响应…' : '服务已启动，等待握手…';
   }
 
   /**
@@ -305,12 +448,17 @@ export class VpnRunStatusState {
    * @param ts 目标时刻ms
    */
   formatGapBefore(now: number, ts: number): string {
-    if (ts <= 0 || ts > now) {
+    if (ts <= 0) {
       return '无';
+    }
+    if (ts >= now) {
+      // 时刻领先当前基准不算"无"：UI的nowTick每秒才刷新，刚写入的时刻会
+      // 领先它最多1秒，此时应显示刚刚
+      return '刚刚';
     }
     const sec = Math.floor((now - ts) / 1000);
     if (sec < 60) {
-      return `${sec}秒前`;
+      return sec <= 0 ? '刚刚' : `${sec}秒前`;
     }
     if (sec < 3600) {
       return `${Math.floor(sec / 60)}分钟前`;
@@ -322,6 +470,27 @@ export class VpnRunStatusState {
 /** 全局单例（AppStorageV2连接，UI直读响应式） */
 export const vpnRunStatusState: VpnRunStatusState =
   AppStorageV2.connect(VpnRunStatusState, () => UIUtils.makeObserved(new VpnRunStatusState()))!;
+
+/**
+ * 判定一条广播能否作为状态查询的消歧回复（纯逻辑，可单测）
+ *
+ * 仅接受查询类tag（QUERY_STATUS=VEA真实回复 / QUERY_NO_RUNNING=本地自答），
+ * 且发布时刻距now不超过新鲜窗口——休眠期间CommonEvent积压的陈旧广播
+ * （如startVpn携带vpnThreadRunning=true）在唤醒后集中投递，
+ * 曾抢先充当回复伪造"VEA存活"证据，导致漏修复，一律拒绝。
+ *
+ * @param params 待判定广播
+ * @param now 当前时刻ms
+ * @param freshMs 新鲜窗口（与探测超时同源：replyTimeoutMs）
+ */
+export function isFreshQueryReply(params: VPNEventStatusParams, now: number, freshMs: number): boolean {
+  const tag = params.tag as VpnEventTag;
+  if (tag !== VpnEventTag.QUERY_STATUS && tag !== VpnEventTag.QUERY_NO_RUNNING) {
+    return false;
+  }
+  const ts = params.ts ?? 0;
+  return ts > 0 && (now - ts) <= freshMs;
+}
 
 /**
  * VPN保活管理器 - 可复用的后台保活门面（wg_tunnel模块）
@@ -654,6 +823,11 @@ export class VpnKeepAliveManager {
     if (resolver == undefined) {
       return;
     }
+    if (!isFreshQueryReply(params, Date.now(), this.freshness.replyTimeoutMs)) {
+      // 非查询类/陈旧广播不得充当消歧回复：休眠积压的startVpn等曾伪造"存活"证据
+      // 导致误判"VEA存活且空闲静默"而漏修复（2026-09-23事故），一律丢弃
+      return;
+    }
     this.freshness.replyResolver = undefined;
     resolver(params);
   }
@@ -922,7 +1096,7 @@ export class VpnKeepAliveManager {
         `收到VPN状态变化广播: isOpen=${params.isOpen}, tag=${tag}, vpnThreadRunning=${params.vpnThreadRunning}, ` +
           `switchIntent=${status.isSwitchOpen}/${status.switchConfigId}`);
 
-      // ===== 运行状态条同步（主页固定单行窗体，按广播事实驱动） =====
+      // ===== 运行状态条同步（主页固定单行窗体，按广播事实驱动阶段推进） =====
       if (tag === VpnEventTag.START_VPN) {
         // 新会话开启（含热切换到新配置）：重置连接确认与心跳，等待流日志证明链路可用
         vpnRunStatusState.running = true;
@@ -932,18 +1106,26 @@ export class VpnKeepAliveManager {
         vpnRunStatusState.lastHeartbeatTime = 0;
         vpnRunStatusState.lastOutboundTime = 0;
         vpnRunStatusState.socketError = '';
+        vpnRunStatusState.phase = VpnRunPhase.SERVICE_UP;
+        vpnRunStatusState.phaseAt = Date.now();
       } else if (tag === VpnEventTag.QUERY_STATUS && params.vpnThreadRunning === true && status.running === true) {
-        // 冷启动恢复（App重启而VPN运行中）：对齐运行事实，不重置心跳（由后续流日志自然刷新）
+        // 冷启动恢复（App重启而VPN运行中）：对齐运行事实，不重置心跳（由后续流日志自然刷新）。
+        // DTO不带握手时刻：已有确认→稳态已连接（phaseAt=0不展示"握手成功"过渡），
+        // 否则先按"服务已启动等待握手"呈现，随后成功入站数据会隐含确认连接
         vpnRunStatusState.running = true;
         vpnRunStatusState.runningConfigId =
           status.runningConfigId != undefined ? status.runningConfigId : -1;
+        if (vpnRunStatusState.phase !== VpnRunPhase.STOPPING
+          && vpnRunStatusState.phase !== VpnRunPhase.STOPPED) {
+          // 关闭中/关闭成功展示期内不被查询回复改写（拆除中VEA的status.running仍为true）
+          vpnRunStatusState.phase = vpnRunStatusState.handshakeOk
+            ? VpnRunPhase.CONNECTED : VpnRunPhase.SERVICE_UP;
+          vpnRunStatusState.phaseAt = vpnRunStatusState.handshakeOk ? 0 : Date.now();
+        }
       } else if (params.vpnThreadRunning === false || tag === VpnEventTag.VPN_SERVICE_STOPPED
-        || tag === VpnEventTag.THROW) {
-        // 会话结束：进程关闭 / 服务停止（V2 STOP）/ 运行异常
-        vpnRunStatusState.running = false;
-        vpnRunStatusState.runningConfigId = -1;
-        vpnRunStatusState.handshakeOk = false;
-        vpnRunStatusState.socketError = '';
+        || tag === VpnEventTag.THROW || tag === VpnEventTag.NO_START_VPN) {
+        // 会话结束：进程关闭 / 服务停止（V2 STOP）/ 运行异常 / 启动失败（含VEA onDestroy迟到的STOP_VPN）
+        vpnRunStatusState.onSessionEnd(this.isForceRestarting);
       }
 
       if (tag === VpnEventTag.QUERY_NO_RUNNING) {
@@ -1060,9 +1242,31 @@ export class VpnKeepAliveManager {
           vpnRunStatusState.lastHeartbeatTime = now;
           if (log.messageType === MessageType.HANDSHAKE_RESPONSE) {
             vpnRunStatusState.handshakeOk = true;
+            // 阶段推进仅在会话进行中（STOPPING/STOPPED后迟到的握手包不回切阶段）
+            if (vpnRunStatusState.phase === VpnRunPhase.SERVICE_UP
+              || vpnRunStatusState.phase === VpnRunPhase.HANDSHAKING
+              || vpnRunStatusState.phase === VpnRunPhase.CONNECTED) {
+              vpnRunStatusState.phase = VpnRunPhase.CONNECTED;
+              vpnRunStatusState.phaseAt = now; // "握手成功，已连接"过渡文案起点
+            }
+          } else if (!vpnRunStatusState.handshakeOk) {
+            // 成功入站数据包隐含会话密钥有效=连接已确认（冷启动恢复场景链路早已握手，
+            // 或显式响应日志缺失时的兜底）；phaseAt=0不展示"握手成功"过渡
+            vpnRunStatusState.handshakeOk = true;
+            if (vpnRunStatusState.phase === VpnRunPhase.SERVICE_UP
+              || vpnRunStatusState.phase === VpnRunPhase.HANDSHAKING) {
+              vpnRunStatusState.phase = VpnRunPhase.CONNECTED;
+              vpnRunStatusState.phaseAt = 0;
+            }
           }
         } else {
           vpnRunStatusState.lastOutboundTime = now;
+          if (!vpnRunStatusState.handshakeOk
+            && (vpnRunStatusState.phase === VpnRunPhase.SERVICE_UP
+              || vpnRunStatusState.phase === VpnRunPhase.STARTING)) {
+            // 会话未确认前的成功出站=握手发起包已发出（数据包仅在握手后才可能成功）
+            vpnRunStatusState.phase = VpnRunPhase.HANDSHAKING;
+          }
         }
         // 成功流日志证明链路可用，清除socket异常提示
         if (vpnRunStatusState.socketError !== '') {
