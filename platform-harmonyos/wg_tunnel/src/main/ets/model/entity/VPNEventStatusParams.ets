@@ -92,4 +92,27 @@ export default interface VPNEventStatusParams {
   status?: StatusConfigDTO,              // VPN运行状态（纯数据DTO，用于跨进程序列化）
   connectedIps?: Record<number, string>, // peerIndex -> 实际连接的IP地址（域名端点DNS解析后的IP）
   vpnThreadRunning?: boolean,            // VPN线程是否正在运行（onCreate时为true，onDestroy/关闭时为false）
+  ts?: number,                           // 广播发布时刻ms（publishVpnChange单点注入；供新鲜度校验与单调同步门使用）
+}
+
+/**
+ * 判定一条广播是否应执行syncFromVpnProcess状态同步（纯逻辑，可单测）
+ *
+ * - none语义：QUERY_NO_RUNNING是"VEA未运行"的信息事件，携带的status只是发布方
+ *   本地回声而非权威事实，永不同步、不影响开关意图；
+ * - 单调门：ts落后于已应用水位线（lastSyncTs）的积压广播不得倒灌本地状态——
+ *   休眠唤醒后CommonEvent积压集中投递，陈旧快照不得覆盖较新事实。
+ *
+ * @param params 待判定广播
+ * @param lastSyncTs 本地已应用的最大广播时间戳（0=尚无）
+ */
+export function shouldSyncEventStatus(params: VPNEventStatusParams, lastSyncTs: number): boolean {
+  if (!params.status) {
+    return false;
+  }
+  const tag = params.tag as VpnEventTag;
+  if (tag === VpnEventTag.QUERY_NO_RUNNING) {
+    return false;
+  }
+  return (params.ts ?? 0) >= lastSyncTs;
 }

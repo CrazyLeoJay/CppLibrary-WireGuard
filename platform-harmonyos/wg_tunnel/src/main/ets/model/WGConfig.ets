@@ -47,6 +47,11 @@ export class StatusConfig {
   @Trace hasLocalOff: boolean = false;
   /** 最近一次用户意图开启的时间戳：供保活状态机在切换/启动宽限期内豁免中间态广播 */
   lastSwitchOnTime: number = 0;
+  /**
+   * 已应用广播的最大发布时刻（单调同步水位线）：订阅层仅应用 ts≥此值的广播状态。
+   * 休眠唤醒后CommonEvent积压集中投递，陈旧快照不得倒灌覆盖较新事实。
+   */
+  lastSyncTs: number = 0;
 
   isOpen(): boolean {
     return this.runningConfigId != undefined && this.running == true

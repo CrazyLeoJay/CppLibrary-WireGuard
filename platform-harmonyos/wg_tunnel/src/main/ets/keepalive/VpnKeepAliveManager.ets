@@ -472,6 +472,27 @@ export const vpnRunStatusState: VpnRunStatusState =
   AppStorageV2.connect(VpnRunStatusState, () => UIUtils.makeObserved(new VpnRunStatusState()))!;
 
 /**
+ * 判定一条广播能否作为状态查询的消歧回复（纯逻辑，可单测）
+ *
+ * 仅接受查询类tag（QUERY_STATUS=VEA真实回复 / QUERY_NO_RUNNING=本地自答），
+ * 且发布时刻距now不超过新鲜窗口——休眠期间CommonEvent积压的陈旧广播
+ * （如startVpn携带vpnThreadRunning=true）在唤醒后集中投递，
+ * 曾抢先充当回复伪造"VEA存活"证据，导致漏修复，一律拒绝。
+ *
+ * @param params 待判定广播
+ * @param now 当前时刻ms
+ * @param freshMs 新鲜窗口（与探测超时同源：replyTimeoutMs）
+ */
+export function isFreshQueryReply(params: VPNEventStatusParams, now: number, freshMs: number): boolean {
+  const tag = params.tag as VpnEventTag;
+  if (tag !== VpnEventTag.QUERY_STATUS && tag !== VpnEventTag.QUERY_NO_RUNNING) {
+    return false;
+  }
+  const ts = params.ts ?? 0;
+  return ts > 0 && (now - ts) <= freshMs;
+}
+
+/**
  * VPN保活管理器 - 可复用的后台保活门面（wg_tunnel模块）
  *
  * 【职责】
@@ -800,6 +821,11 @@ export class VpnKeepAliveManager {
   private consumeStatusReply(params: VPNEventStatusParams): void {
     const resolver = this.freshness.replyResolver;
     if (resolver == undefined) {
+      return;
+    }
+    if (!isFreshQueryReply(params, Date.now(), this.freshness.replyTimeoutMs)) {
+      // 非查询类/陈旧广播不得充当消歧回复：休眠积压的startVpn等曾伪造"存活"证据
+      // 导致误判"VEA存活且空闲静默"而漏修复（2026-09-23事故），一律丢弃
       return;
     }
     this.freshness.replyResolver = undefined;
